@@ -1,0 +1,152 @@
+package com.aif31.pocket.data
+
+import java.time.LocalDate
+
+data class Period(
+    val id: String,
+    val start: LocalDate,
+    val endExclusive: LocalDate,
+    val newFundsMinor: Long,
+    val configuredStartDay: Int,
+)
+
+data class Pocket(
+    val id: String,
+    val name: String,
+    val sortOrder: Int,
+    val archived: Boolean,
+    val rolloverEnabled: Boolean,
+)
+
+enum class MovementType { EXPENSE, REFUND }
+enum class ConversionStatus { ESTIMATED, CONFIRMED }
+
+data class Movement(
+    val id: String,
+    val pocketId: String,
+    val pocketName: String,
+    val periodId: String,
+    val type: MovementType,
+    val sarAmountMinor: Long,
+    val occurredAtUtcMillis: Long,
+    val localDate: LocalDate,
+    val zoneId: String,
+    val merchant: String?,
+    val note: String?,
+    val paymentMethodId: String?,
+    val paymentMethodName: String?,
+    val originalAmountMinor: Long?,
+    val originalCurrencyCode: String,
+    val conversionStatus: ConversionStatus,
+    val rate: String?,
+)
+
+data class PaymentMethod(val id: String, val name: String, val archived: Boolean)
+
+data class RecurringTemplate(
+    val id: String,
+    val name: String,
+    val amountMinor: Long,
+    val pocketId: String,
+    val paymentMethodId: String?,
+    val archived: Boolean,
+)
+
+data class PocketPeriodSummary(
+    val pocket: Pocket,
+    val budgetMinor: Long,
+    val rolloverMinor: Long,
+    val netSpendMinor: Long,
+    val availabilityMinor: Long,
+    val consumedPercent: Int,
+    val atRisk: Boolean,
+    val exhausted: Boolean,
+)
+
+data class LedgerState(
+    val periods: List<Period> = emptyList(),
+    val currentPeriod: Period? = null,
+    val pockets: List<PocketPeriodSummary> = emptyList(),
+    val pocketSummariesByPeriod: Map<String, List<PocketPeriodSummary>> = emptyMap(),
+    val movements: List<Movement> = emptyList(),
+    val paymentMethods: List<PaymentMethod> = emptyList(),
+    val templates: List<RecurringTemplate> = emptyList(),
+    val unallocatedMinor: Long = 0,
+    val newFundsMinor: Long = 0,
+    val rolloverTotalMinor: Long = 0,
+    val netSpendMinor: Long = 0,
+    val trackedAvailabilityMinor: Long = 0,
+    val previousPeriodNetSpendMinor: Long? = null,
+    val elapsedDays: Int = 0,
+    val totalDays: Int = 0,
+    val projectionMinor: Long = 0,
+    val currentLocalDate: LocalDate = LocalDate.of(1970, 1, 1),
+    val currentInstantMillis: Long = 0,
+) {
+    val needsOnboarding: Boolean get() = periods.isEmpty()
+}
+
+sealed interface LedgerCommand {
+    data class Initialize(val newFundsMinor: Long, val startDay: Int = 25) : LedgerCommand
+    data class UpdatePeriodFunds(val periodId: String, val newFundsMinor: Long) : LedgerCommand
+    data class SetAllocation(val periodId: String, val pocketId: String, val amountMinor: Long) : LedgerCommand
+    data class UpsertPocket(
+        val id: String? = null,
+        val name: String,
+        val rolloverEnabled: Boolean = false,
+    ) : LedgerCommand
+    data class ArchivePocket(val pocketId: String, val archived: Boolean = true) : LedgerCommand
+    data class MovePocket(val pocketId: String, val direction: Int) : LedgerCommand
+    data class AddMovement(
+        val id: String? = null,
+        val pocketId: String,
+        val type: MovementType,
+        val sarAmountMinor: Long,
+        val occurredAtUtcMillis: Long,
+        val localDate: LocalDate,
+        val merchant: String? = null,
+        val note: String? = null,
+        val paymentMethodId: String? = null,
+        val originalAmountMinor: Long? = null,
+        val originalCurrencyCode: String = "SAR",
+        val conversionStatus: ConversionStatus = ConversionStatus.CONFIRMED,
+        val rate: String? = null,
+    ) : LedgerCommand
+    data class DeleteMovement(val movementId: String) : LedgerCommand
+    data class RestoreMovement(val movement: Movement) : LedgerCommand
+    data class CreateNextPeriod(val startDay: Int? = null) : LedgerCommand
+    data class UpsertPaymentMethod(val id: String? = null, val name: String) : LedgerCommand
+    data class ArchivePaymentMethod(val id: String, val archived: Boolean = true) : LedgerCommand
+    data class UpsertTemplate(
+        val id: String? = null,
+        val name: String,
+        val amountMinor: Long,
+        val pocketId: String,
+        val paymentMethodId: String? = null,
+    ) : LedgerCommand
+    data class ArchiveTemplate(val id: String, val archived: Boolean = true) : LedgerCommand
+}
+
+sealed interface LedgerResult {
+    data object Success : LedgerResult
+    data class Rejected(val message: String) : LedgerResult
+    data class Deleted(val movement: Movement) : LedgerResult
+}
+
+interface PocketLedger {
+    val state: kotlinx.coroutines.flow.Flow<LedgerState>
+    suspend fun execute(command: LedgerCommand): LedgerResult
+    suspend fun exportBackup(): ByteArray
+    suspend fun previewBackup(bytes: ByteArray): BackupPreview
+    suspend fun restoreBackup(bytes: ByteArray): LedgerResult
+    suspend fun exportCsv(): ByteArray
+}
+
+data class BackupPreview(
+    val version: Int,
+    val periods: Int,
+    val pockets: Int,
+    val movements: Int,
+    val valid: Boolean,
+    val message: String? = null,
+)

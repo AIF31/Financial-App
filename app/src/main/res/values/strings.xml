@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Pocket</string>
+    <string name="shortcut_new_expense">Nuevo gasto</string>
+    <string name="shortcut_new_expense_short">Gasto</string>
+</resources>

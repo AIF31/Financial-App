@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="new_expense"
+        android:enabled="true"
+        android:icon="@drawable/ic_launcher"
+        android:shortcutLongLabel="@string/shortcut_new_expense"
+        android:shortcutShortLabel="@string/shortcut_new_expense_short">
+        <intent
+            android:action="com.aif31.pocket.NEW_EXPENSE"
+            android:targetClass="com.aif31.pocket.MainActivity"
+            android:targetPackage="com.aif31.pocket" />
+    </shortcut>
+</shortcuts>
