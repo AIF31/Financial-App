@@ -80,7 +80,7 @@ private fun QuickExpensePreview() {
             onMerchantChange = { state = state.copy(merchant = it) },
             onPaymentMethodSelected = { state = state.copy(selectedPaymentMethodId = it) },
             onToggleDetails = { state = state.copy(detailsExpanded = !state.detailsExpanded) },
-            onSave = {},
+            onSave = { state = state.copy(saveFeedback = "Gasto guardado") },
             onBack = {},
             onMovementTypeSelected = { state = state.copy(movementType = it) },
             onCurrencySelected = { state = state.copy(currency = it) },
@@ -88,6 +88,28 @@ private fun QuickExpensePreview() {
             onConversionStatusSelected = { state = state.copy(conversionStatus = it) },
             onDateTimeChange = { state = state.copy(dateTime = it) },
             onNoteChange = { state = state.copy(note = it) },
+        )
+    }
+}
+
+@Preview(
+    name = "Quick expense · Saved",
+    widthDp = 360,
+    heightDp = 780,
+    showBackground = true,
+)
+@Composable
+private fun QuickExpenseSavedPreview() {
+    PocketTheme {
+        QuickExpensePrototype(
+            state = quickExpensePrototypeState.copy(saveFeedback = "Gasto guardado"),
+            onAmountChange = {},
+            onPocketSelected = {},
+            onMerchantChange = {},
+            onPaymentMethodSelected = {},
+            onToggleDetails = {},
+            onSave = {},
+            onBack = {},
         )
     }
 }
@@ -128,41 +150,38 @@ private fun PocketsOverviewPreview() {
     PocketTheme {
         PocketsOverviewPrototype(
             state = state,
-            onCreatePocket = {
-                if (state.pockets.none { it.id == "new-pocket" }) {
-                    state = state.copy(
-                        pockets = state.pockets + prototypePockets.first().copy(
-                            id = "new-pocket",
-                            name = "Nuevo Pocket",
-                            budget = "SAR 0.00",
-                            rollover = "Sin rollover",
-                            spending = "SAR 0.00",
-                            availability = "SAR 0.00",
-                            consumedFraction = 0f,
-                            consumedPercent = 0,
-                            rolloverEnabled = false,
-                        ),
+            onAction = { action ->
+                val pocketName = state.pockets
+                    .firstOrNull { it.id == action.pocketIdOrNull() }
+                    ?.name
+                    .orEmpty()
+                state = when (action) {
+                    PocketManagementAction.Create -> state.copy(
+                        managementFeedback = "Abrir creación de Pocket",
+                    )
+                    is PocketManagementAction.Open -> state.copy(
+                        managingPocketId = action.pocketId,
+                        managementFeedback = null,
+                    )
+                    is PocketManagementAction.Move -> state.copy(
+                        managementFeedback = "Mover $pocketName ${action.direction.spanishLabel()}",
+                    )
+                    is PocketManagementAction.View -> state.copy(
+                        managementFeedback = "Abrir detalle de $pocketName",
+                    )
+                    is PocketManagementAction.Edit -> state.copy(
+                        managementFeedback = "Abrir edición de $pocketName",
+                    )
+                    is PocketManagementAction.Archive -> state.copy(
+                        managementFeedback = "Confirmar archivo de $pocketName; aún no se modificó",
+                    )
+                    is PocketManagementAction.SetAllocation -> state.copy(
+                        managementFeedback = "Abrir asignación de $pocketName",
+                    )
+                    is PocketManagementAction.SetRollover -> state.copy(
+                        managementFeedback = "Confirmar cambio de rollover de $pocketName",
                     )
                 }
-            },
-            onPocketSelected = {},
-            onMovePocket = { _, _ -> },
-            onEditPocket = { id ->
-                state = state.copy(pockets = state.pockets.map { if (it.id == id) it.copy(name = "${it.name} · editado") else it })
-            },
-            onArchivePocket = { id -> state = state.copy(pockets = state.pockets.filterNot { it.id == id }) },
-            onSetAllocation = { id ->
-                state = state.copy(pockets = state.pockets.map { if (it.id == id) it.copy(budget = "SAR 900.00") else it })
-            },
-            onToggleRollover = { id, enabled ->
-                state = state.copy(
-                    pockets = state.pockets.map {
-                        if (it.id == id) it.copy(
-                            rolloverEnabled = enabled,
-                            rollover = if (enabled) "SAR 0.00" else "Sin rollover",
-                        ) else it
-                    },
-                )
             },
         )
     }
@@ -181,9 +200,7 @@ private fun PocketsLargeTextPreview() {
     PocketTheme {
         PocketsOverviewPrototype(
             state = pocketsPrototypeState.copy(pockets = listOf(prototypePockets.last())),
-            onCreatePocket = {},
-            onPocketSelected = {},
-            onMovePocket = { _, _ -> },
+            onAction = {},
         )
     }
 }
@@ -204,9 +221,23 @@ private fun EmptyPocketsOverviewPreview() {
                 available = "SAR 0.00 disponibles",
                 pockets = emptyList(),
             ),
-            onCreatePocket = {},
-            onPocketSelected = {},
-            onMovePocket = { _, _ -> },
+            onAction = {},
         )
     }
+}
+
+private fun PocketManagementAction.pocketIdOrNull(): String? = when (this) {
+    PocketManagementAction.Create -> null
+    is PocketManagementAction.Open -> pocketId
+    is PocketManagementAction.View -> pocketId
+    is PocketManagementAction.Move -> pocketId
+    is PocketManagementAction.Edit -> pocketId
+    is PocketManagementAction.Archive -> pocketId
+    is PocketManagementAction.SetAllocation -> pocketId
+    is PocketManagementAction.SetRollover -> pocketId
+}
+
+private fun PocketMoveDirection.spanishLabel(): String = when (this) {
+    PocketMoveDirection.UP -> "arriba"
+    PocketMoveDirection.DOWN -> "abajo"
 }

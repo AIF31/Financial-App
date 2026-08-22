@@ -43,6 +43,30 @@ enum class PocketMoveDirection {
     DOWN,
 }
 
+sealed interface PocketManagementAction {
+    data object Create : PocketManagementAction
+
+    data class Open(val pocketId: String) : PocketManagementAction
+
+    data class View(val pocketId: String) : PocketManagementAction
+
+    data class Move(
+        val pocketId: String,
+        val direction: PocketMoveDirection,
+    ) : PocketManagementAction
+
+    data class Edit(val pocketId: String) : PocketManagementAction
+
+    data class Archive(val pocketId: String) : PocketManagementAction
+
+    data class SetAllocation(val pocketId: String) : PocketManagementAction
+
+    data class SetRollover(
+        val pocketId: String,
+        val enabled: Boolean,
+    ) : PocketManagementAction
+}
+
 @Immutable
 data class DashboardPrototypeState(
     val periodLabel: String,
@@ -80,6 +104,7 @@ data class QuickExpensePrototypeState(
     val dateTime: String,
     val note: String,
     val canSave: Boolean,
+    val saveFeedback: String? = null,
 )
 
 @Immutable
@@ -88,6 +113,8 @@ data class PocketsOverviewPrototypeState(
     val allocated: String,
     val available: String,
     val pockets: List<PocketProgressPrototype>,
+    val managingPocketId: String? = null,
+    val managementFeedback: String? = null,
 )
 
 internal val prototypePockets = listOf(
@@ -133,7 +160,7 @@ internal val dashboardPrototypeState = DashboardPrototypeState(
     periodLabel = "25 ago – 24 sep",
     availability = "SAR 842.00",
     unallocated = "SAR 540.00 sin asignar",
-    spendingStatus = "Tu ritmo está dentro del presupuesto",
+    spendingStatus = "Tu ritmo supera los fondos del periodo",
     netSpending = "SAR 2,218.00 gastados",
     previousPeriodComparison = "SAR 184.00 menos que el periodo anterior",
     averageDailySpending = "SAR 158.43",

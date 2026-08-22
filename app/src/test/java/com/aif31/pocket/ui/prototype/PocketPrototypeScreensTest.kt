@@ -53,6 +53,26 @@ class PocketPrototypeScreensTest {
     }
 
     @Test
+    fun dashboard_prioritizes_alerts_and_explains_status_without_color() {
+        val onTrack = prototypePockets.first()
+        val state = dashboardPrototypeState.copy(
+            pockets = listOf(
+                onTrack.copy(id = "one", name = "Uno"),
+                onTrack.copy(id = "two", name = "Dos"),
+                onTrack.copy(id = "three", name = "Tres"),
+                prototypePockets[1],
+            ),
+        )
+        compose.setContent {
+            PocketTheme {
+                ActionableDashboardPrototype(state, onRecordExpense = {}, onManagePocket = {})
+            }
+        }
+
+        compose.onNodeWithText("En riesgo · 86% consumido").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
     fun quick_expense_reveals_advanced_fields_only_on_request() {
         var detailsExpanded by mutableStateOf(false)
         compose.setContent {
@@ -165,15 +185,33 @@ class PocketPrototypeScreensTest {
     }
 
     @Test
+    fun quick_expense_announces_a_clear_save_success() {
+        compose.setContent {
+            PocketTheme {
+                QuickExpensePrototype(
+                    state = quickExpensePrototypeState.copy(saveFeedback = "Gasto guardado"),
+                    onAmountChange = {},
+                    onPocketSelected = {},
+                    onMerchantChange = {},
+                    onPaymentMethodSelected = {},
+                    onToggleDetails = {},
+                    onSave = {},
+                    onBack = {},
+                )
+            }
+        }
+
+        compose.onNodeWithText("Gasto guardado").assertIsDisplayed()
+    }
+
+    @Test
     fun pockets_expose_non_color_status_and_accessible_reorder_action() {
-        var movement: Pair<String, PocketMoveDirection>? = null
+        var movement: PocketManagementAction.Move? = null
         compose.setContent {
             PocketTheme {
                 PocketsOverviewPrototype(
                     state = pocketsPrototypeState,
-                    onCreatePocket = {},
-                    onPocketSelected = {},
-                    onMovePocket = { id, direction -> movement = id to direction },
+                    onAction = { if (it is PocketManagementAction.Move) movement = it },
                 )
             }
         }
@@ -185,22 +223,19 @@ class PocketPrototypeScreensTest {
             .performScrollTo()
             .assertIsNotEnabled()
 
-        compose.runOnIdle { assertEquals("travel" to PocketMoveDirection.UP, movement) }
+        compose.runOnIdle {
+            assertEquals(PocketManagementAction.Move("travel", PocketMoveDirection.UP), movement)
+        }
     }
 
     @Test
     fun pockets_expose_allocation_and_rollover_management_actions() {
-        var allocationPocketId: String? = null
-        var rolloverChange: Pair<String, Boolean>? = null
+        val actions = mutableListOf<PocketManagementAction>()
         compose.setContent {
             PocketTheme {
                 PocketsOverviewPrototype(
-                    state = pocketsPrototypeState,
-                    onCreatePocket = {},
-                    onPocketSelected = {},
-                    onMovePocket = { _, _ -> },
-                    onSetAllocation = { allocationPocketId = it },
-                    onToggleRollover = { id, enabled -> rolloverChange = id to enabled },
+                    state = pocketsPrototypeState.copy(managingPocketId = "travel"),
+                    onAction = actions::add,
                 )
             }
         }
@@ -209,8 +244,24 @@ class PocketPrototypeScreensTest {
         compose.onNodeWithContentDescription("Desactivar rollover de Viajes").performScrollTo().performClick()
 
         compose.runOnIdle {
-            assertEquals("travel", allocationPocketId)
-            assertEquals("travel" to false, rolloverChange)
+            assertTrue(PocketManagementAction.SetAllocation("travel") in actions)
+            assertTrue(PocketManagementAction.SetRollover("travel", false) in actions)
         }
+    }
+
+    @Test
+    fun pockets_show_non_destructive_preview_feedback() {
+        compose.setContent {
+            PocketTheme {
+                PocketsOverviewPrototype(
+                    state = pocketsPrototypeState.copy(
+                        managementFeedback = "Abrir edición de Viajes",
+                    ),
+                    onAction = {},
+                )
+            }
+        }
+
+        compose.onNodeWithText("Abrir edición de Viajes").assertIsDisplayed()
     }
 }
