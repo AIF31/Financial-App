@@ -1,0 +1,4 @@
+interface:
+  display_name: "Android Design"
+  short_description: "Apply current I/O 2026 Compose-first Android design."
+  default_prompt: "Use $android-design to modernize this Android interface with the Google I/O 2026 baseline, Compose-first architecture, Material 3 Expressive, and adaptive behavior."
