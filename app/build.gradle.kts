@@ -6,6 +6,17 @@ plugins {
     alias(libs.plugins.room)
 }
 
+val releaseStoreFile = providers.environmentVariable("POCKET_RELEASE_STORE_FILE")
+val releaseStorePassword = providers.environmentVariable("POCKET_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = providers.environmentVariable("POCKET_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = providers.environmentVariable("POCKET_RELEASE_KEY_PASSWORD")
+val releaseSigningValues = listOf(releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword)
+val releaseSigningConfigured = releaseSigningValues.all { it.isPresent }
+
+check(releaseSigningValues.none { it.isPresent } || releaseSigningConfigured) {
+    "Release signing is partially configured. Set all POCKET_RELEASE_* environment variables."
+}
+
 android {
     namespace = "com.aif31.pocket"
     compileSdk = 36
@@ -19,10 +30,24 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = rootProject.file(releaseStoreFile.get())
+                storePassword = releaseStorePassword.get()
+                keyAlias = releaseKeyAlias.get()
+                keyPassword = releaseKeyPassword.get()
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

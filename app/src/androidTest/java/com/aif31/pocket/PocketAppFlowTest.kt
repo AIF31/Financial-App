@@ -1,6 +1,7 @@
 package com.aif31.pocket
 
 import android.content.Context
+import android.content.Intent
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -20,6 +21,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.waitUntilExactlyOneExists
 import androidx.compose.ui.test.waitUntilAtLeastOneExists
 import androidx.compose.ui.test.waitUntilDoesNotExist
+import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.MediumTest
@@ -38,6 +40,7 @@ import java.time.ZoneId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -128,7 +131,7 @@ class PocketAppFlowTest {
     }
 
     @Test
-    fun history_search_and_combined_filters_are_observable() {
+    fun history_search_and_each_filter_are_observable() {
         val zone = ZoneId.of("Asia/Riyadh")
         val clock = Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone)
         val ledger = RoomPocketLedger(database, clock, zone)
@@ -145,19 +148,44 @@ class PocketAppFlowTest {
             ledger.execute(LedgerCommand.AddMovement(id = "hotel", pocketId = travel.pocket.id, type = MovementType.EXPENSE,
                 sarAmountMinor = 2_000, occurredAtUtcMillis = clock.millis() + 1, localDate = java.time.LocalDate.of(2026, 2, 26),
                 merchant = "Hotel", paymentMethodId = card.id, originalAmountMinor = 500, originalCurrencyCode = "USD"))
+            ledger.execute(LedgerCommand.CreateNextPeriod())
+            val nextPeriod = ledger.state.first { it.periods.size == 2 }.periods.last()
+            ledger.execute(LedgerCommand.AddMovement(id = "taxi", pocketId = travel.pocket.id, type = MovementType.EXPENSE,
+                sarAmountMinor = 3_000, occurredAtUtcMillis = clock.millis() + 2, localDate = nextPeriod.start,
+                merchant = "Taxi", paymentMethodId = card.id))
         }
+        val seededState = runBlocking { ledger.state.first { it.movements.size == 3 } }
         compose.setContent { PocketApp(ledger) }
         compose.waitUntilExactlyOneExists(hasText("Inicio"), 5_000)
         compose.onNodeWithText("Movimientos").performClick()
         compose.onNodeWithTag("history_search").performTextInput("fruta")
-        compose.onNodeWithText("Mercado").assertIsDisplayed()
+        compose.onNodeWithText("Mercado").assertExists()
         compose.onAllNodesWithText("Hotel").assertCountEquals(0)
+        compose.onAllNodesWithText("Taxi").assertCountEquals(0)
         compose.onNodeWithTag("history_search").performTextClearance()
+
         compose.onNodeWithTag("filter_period").performClick()
+        compose.onNodeWithText("Hotel").assertExists()
+        compose.onAllNodesWithText("Taxi").assertCountEquals(0)
+        repeat(seededState.periods.size) { compose.onNodeWithTag("filter_period").performClick() }
+
         compose.onNodeWithTag("filter_pocket").performClick()
+        compose.onNodeWithText("Mercado").assertExists()
+        compose.onAllNodesWithText("Hotel").assertCountEquals(0)
+        compose.onAllNodesWithText("Taxi").assertCountEquals(0)
+        repeat(seededState.pockets.size) { compose.onNodeWithTag("filter_pocket").performClick() }
+
         compose.onNodeWithTag("filter_currency").performClick()
+        compose.onNodeWithText("Taxi").assertExists()
+        compose.onAllNodesWithText("Hotel").assertCountEquals(0)
+        repeat(seededState.movements.map { it.originalCurrencyCode }.distinct().size) {
+            compose.onNodeWithTag("filter_currency").performClick()
+        }
+
         compose.onNodeWithTag("filter_method").performClick()
-        compose.onNodeWithText("No hay movimientos para estos filtros").assertIsDisplayed()
+        compose.onNodeWithText("Mercado").assertExists()
+        compose.onAllNodesWithText("Hotel").assertCountEquals(0)
+        compose.onAllNodesWithText("Taxi").assertCountEquals(0)
     }
 
     @Test
@@ -188,13 +216,31 @@ class PocketAppFlowTest {
     }
 
     @Test
-    fun launcher_shortcut_action_opens_the_same_expense_form() {
-        val zone = ZoneId.of("Asia/Riyadh")
-        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
-        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000)) }
-        compose.setContent { PocketApp(ledger, openNewExpense = true) }
-        compose.waitUntilExactlyOneExists(hasText("Nuevo gasto"), 5_000)
-        compose.onNodeWithTag("movement_amount").assertIsDisplayed()
+    fun launcher_shortcut_intent_opens_the_expense_form_and_saves_a_movement() {
+        val application = ApplicationProvider.getApplicationContext<PocketApplication>()
+        runBlocking {
+            application.database.clearAllTables()
+            application.ledger.execute(LedgerCommand.Initialize(100_000))
+            application.ledger.state.first { !it.needsOnboarding }
+        }
+        val intent = Intent(application, MainActivity::class.java).setAction(MainActivity.ACTION_NEW_EXPENSE)
+
+        try {
+            ActivityScenario.launch<MainActivity>(intent).use {
+                compose.waitUntilExactlyOneExists(hasText("Nuevo gasto"), 5_000)
+                compose.onNodeWithTag("movement_amount").performTextInput("12.34")
+                compose.onNodeWithTag("movement_pocket_Supermercado").performClick()
+                compose.onNodeWithText("Guardar gasto").performClick()
+                compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+                val saved = runBlocking {
+                    application.ledger.state.first { it.movements.size == 1 }.movements.single()
+                }
+                assertEquals(1_234L, saved.sarAmountMinor)
+                assertEquals("Supermercado", saved.pocketName)
+            }
+        } finally {
+            application.database.clearAllTables()
+        }
     }
 
     private class FakePreferences : PreferencesStore {
