@@ -1,0 +1,20 @@
+# Pocket project information
+
+This directory is the human-oriented operational knowledge base for Pocket. It sits at the repository root so release, device, and recovery information is not mixed into the Android `app` module.
+
+## Start here
+
+- [Implementation reference](implementation-reference.md): product boundaries, architecture, durable decisions, and repository history.
+- [Windows, Android Studio, and S23 testing](windows-android-studio-s23-testing.md): working environment, build commands, ADB workflow, and device-test precautions.
+- [Release signing and recovery](release-signing-and-recovery.md): permanent key handling, signed builds, verification, backup, uninstall, and restore.
+- [Galaxy S23 Ultra verification — 2026-08-22](verification/galaxy-s23-ultra-2026-08-22.md): retained test evidence and known coverage gaps.
+
+## Authority and maintenance
+
+GitHub Issue [AIF31/Financial-App#1](https://github.com/AIF31/Financial-App/issues/1) is the canonical MVP product contract. `CONTEXT.md` defines canonical domain vocabulary. This directory records operational findings and evidence; it does not override either source.
+
+Update these documents when the package name, SDK, signing certificate, backup format, release process, or supported test-device workflow changes. Never commit keystores, passwords, DPAPI credential files, raw financial backups, device serials, or other personal identifiers.
+
+## Current handoff status
+
+As of 2026-08-22, the MVP is implemented and pushed to `main` at commit `2b01539`. A permanent release-signed build is installed on the tested S23 Ultra and its backup/restore flow has been exercised. Maximum-font and TalkBack checks remain intentionally unverified; see the dated verification record for the exact evidence and remaining device rerun gap.
