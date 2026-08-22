@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.MediumTest
 import com.aif31.pocket.data.FinanceDatabase
+import com.aif31.pocket.data.ConversionStatus
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.MovementType
@@ -109,6 +110,9 @@ class PocketLedgerBehaviorTest {
         )
         val backup = source.exportBackup()
         assertTrue(source.previewBackup(backup).valid)
+        assertFalse(source.previewBackup(backup.copyOf(backup.size / 2)).valid)
+        assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"version\": 1", "\"version\": 99").encodeToByteArray()).valid)
+        assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"budgetMinor\": 25000", "\"budgetMinor\": 60000").encodeToByteArray()).valid)
         assertTrue(source.restoreBackup(backup) is LedgerResult.Rejected)
 
         val targetDb = FinanceDatabase.inMemory(ApplicationProvider.getApplicationContext<Context>())
@@ -137,5 +141,61 @@ class PocketLedgerBehaviorTest {
         assertTrue(csv.startsWith("id,tipo,fecha,zona,pocket,importe_sar"))
         assertTrue(csv.contains("\"KAUST Market\""))
         assertTrue(csv.contains("\"12.50\""))
+    }
+
+    @Test
+    fun alert_reversals_fx_confirmation_and_delete_restore_are_observable() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(20_000))
+        var state = ledger.state.first { !it.needsOnboarding }
+        val pocket = state.pockets.first()
+        val periodId = state.currentPeriod!!.id
+        ledger.execute(LedgerCommand.SetAllocation(periodId, pocket.pocket.id, 10_000))
+
+        suspend fun saveAlert(amount: Long) = ledger.execute(
+            LedgerCommand.AddMovement(id = "alert", pocketId = pocket.pocket.id, type = MovementType.EXPENSE, sarAmountMinor = amount,
+                occurredAtUtcMillis = clock.millis(), localDate = java.time.LocalDate.of(2026, 2, 26))
+        )
+        saveAlert(8_000)
+        state = ledger.state.first { it.movements.singleOrNull()?.sarAmountMinor == 8_000L }
+        assertTrue(state.pockets.first().atRisk)
+        assertFalse(state.pockets.first().exhausted)
+        saveAlert(10_000)
+        state = ledger.state.first { it.movements.singleOrNull()?.sarAmountMinor == 10_000L }
+        assertTrue(state.pockets.first().exhausted)
+        saveAlert(7_900)
+        state = ledger.state.first { it.movements.singleOrNull()?.sarAmountMinor == 7_900L }
+        assertFalse(state.pockets.first().atRisk)
+
+        ledger.execute(LedgerCommand.AddMovement(id = "fx", pocketId = pocket.pocket.id, type = MovementType.EXPENSE,
+            sarAmountMinor = 375, occurredAtUtcMillis = clock.millis() + 1, localDate = java.time.LocalDate.of(2026, 2, 26),
+            originalAmountMinor = 100, originalCurrencyCode = "USD", conversionStatus = ConversionStatus.ESTIMATED))
+        state = ledger.state.first { it.movements.any { movement -> movement.id == "fx" } }
+        assertEquals(375, state.movements.first { it.id == "fx" }.sarAmountMinor)
+        ledger.execute(LedgerCommand.AddMovement(id = "fx", pocketId = pocket.pocket.id, type = MovementType.EXPENSE,
+            sarAmountMinor = 400, occurredAtUtcMillis = clock.millis() + 1, localDate = java.time.LocalDate.of(2026, 2, 26),
+            originalAmountMinor = 100, originalCurrencyCode = "USD", conversionStatus = ConversionStatus.CONFIRMED))
+        state = ledger.state.first { it.movements.firstOrNull { movement -> movement.id == "fx" }?.sarAmountMinor == 400L }
+        assertEquals(ConversionStatus.CONFIRMED, state.movements.first { it.id == "fx" }.conversionStatus)
+        val deleted = ledger.execute(LedgerCommand.DeleteMovement("fx")) as LedgerResult.Deleted
+        assertTrue(ledger.state.first { it.movements.none { movement -> movement.id == "fx" } }.movements.none { it.id == "fx" })
+        ledger.execute(LedgerCommand.RestoreMovement(deleted.movement))
+        assertTrue(ledger.state.first { it.movements.any { movement -> movement.id == "fx" } }.movements.any { it.id == "fx" })
+    }
+
+    @Test
+    fun editing_historical_spend_recalculates_the_current_period_comparison() = runTest {
+        val firstPeriodLedger = RoomPocketLedger(database, clock, zone)
+        firstPeriodLedger.execute(LedgerCommand.Initialize(20_000))
+        val firstState = firstPeriodLedger.state.first { !it.needsOnboarding }
+        val pocketId = firstState.pockets.first().pocket.id
+        firstPeriodLedger.execute(LedgerCommand.AddMovement(id = "historical", pocketId = pocketId, type = MovementType.EXPENSE,
+            sarAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(), localDate = java.time.LocalDate.of(2026, 2, 26)))
+        firstPeriodLedger.execute(LedgerCommand.CreateNextPeriod())
+        val currentLedger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone), zone)
+        assertEquals(1_000L, currentLedger.state.first { it.currentPeriod?.start == java.time.LocalDate.of(2026, 3, 25) }.previousPeriodNetSpendMinor)
+        currentLedger.execute(LedgerCommand.AddMovement(id = "historical", pocketId = pocketId, type = MovementType.EXPENSE,
+            sarAmountMinor = 500, occurredAtUtcMillis = clock.millis(), localDate = java.time.LocalDate.of(2026, 2, 26)))
+        assertEquals(500L, currentLedger.state.first { it.previousPeriodNetSpendMinor == 500L }.previousPeriodNetSpendMinor)
     }
 }

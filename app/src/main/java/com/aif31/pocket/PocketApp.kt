@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -23,6 +24,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -34,7 +36,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,8 +43,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.LedgerState
@@ -58,10 +62,14 @@ import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
+import java.time.Instant
 import java.time.LocalTime
+import java.time.ZoneId
 import java.util.Locale
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 
 private enum class RootScreen(val label: String) {
     DASHBOARD("Inicio"), MOVEMENTS("Movimientos"), POCKETS("Pockets"), SETTINGS("Ajustes")
@@ -75,44 +83,60 @@ fun PocketApp(
     openNewExpense: Boolean = false,
     restoreCandidate: ByteArray? = null,
     onRestoreCandidateHandled: () -> Unit = {},
-    onCreateBackup: (ByteArray) -> Unit = {},
-    onCreateCsv: (ByteArray) -> Unit = {},
+    onCreateBackup: () -> Unit = {},
+    onCreateCsv: () -> Unit = {},
     onPickBackup: () -> Unit = {},
     onRequestNotificationPermission: () -> Unit = {},
+    undoWindowMillis: Long = 5_000,
 ) {
-    val state by ledger.state.collectAsState(initial = LedgerState())
+    val observedState by ledger.state.collectAsStateWithLifecycle(initialValue = null)
     val preferencesFlow = remember(preferences) { preferences?.state ?: flowOf(AppPreferences()) }
-    val preferenceState by preferencesFlow.collectAsState(initial = AppPreferences())
+    val preferenceState by preferencesFlow.collectAsStateWithLifecycle(initialValue = AppPreferences())
     var backupPreview by remember { mutableStateOf<com.aif31.pocket.data.BackupPreview?>(null) }
+    var restoreError by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(restoreCandidate) {
+        restoreError = null
         backupPreview = restoreCandidate?.let { ledger.previewBackup(it) }
     }
     if (restoreCandidate != null && backupPreview != null) {
         val preview = backupPreview!!
         val scope = rememberCoroutineScope()
         AlertDialog(
-            onDismissRequest = { onRestoreCandidateHandled(); backupPreview = null },
-            title = { Text(if (preview.valid) "Confirmar restauración" else "Backup inválido") },
+            onDismissRequest = { onRestoreCandidateHandled(); backupPreview = null; restoreError = null },
+            title = { Text(if (restoreError != null) "No se pudo restaurar" else if (preview.valid) "Confirmar restauración" else "Backup inválido") },
             text = {
                 Text(
-                    if (preview.valid) "Versión ${preview.version}: ${preview.periods} periodos, ${preview.pockets} Pockets y ${preview.movements} movimientos."
+                    restoreError ?: if (preview.valid) "Versión ${preview.version}: ${preview.periods} periodos, ${preview.pockets} Pockets y ${preview.movements} movimientos."
                     else preview.message ?: "No se puede leer el archivo.",
                 )
             },
             confirmButton = {
                 if (preview.valid) Button(onClick = {
                     scope.launch {
-                        ledger.restoreBackup(restoreCandidate)
-                        onRestoreCandidateHandled()
-                        backupPreview = null
+                        when (val result = ledger.restoreBackup(restoreCandidate)) {
+                            LedgerResult.Success -> {
+                                val restored = ledger.state.first { !it.needsOnboarding }
+                                restored.periods.maxByOrNull { it.start }?.let { preferences?.setFuturePeriodStartDay(it.configuredStartDay) }
+                                onRestoreCandidateHandled()
+                                backupPreview = null
+                                restoreError = null
+                            }
+                            is LedgerResult.Rejected -> restoreError = result.message
+                            is LedgerResult.Deleted -> Unit
+                        }
                     }
                 }) { Text("Restaurar") }
             },
-            dismissButton = { TextButton(onClick = { onRestoreCandidateHandled(); backupPreview = null }) { Text("Cancelar") } },
+            dismissButton = { TextButton(onClick = { onRestoreCandidateHandled(); backupPreview = null; restoreError = null }) { Text("Cancelar") } },
         )
     }
+    val state = observedState
+    if (state == null) {
+        Text("Cargando…", modifier = Modifier.padding(24.dp))
+        return
+    }
     if (state.needsOnboarding) {
-        OnboardingScreen(ledger, onPickBackup)
+        OnboardingScreen(ledger, preferences, onPickBackup)
         return
     }
 
@@ -146,7 +170,7 @@ fun PocketApp(
     ) { padding ->
         when (screen) {
             RootScreen.DASHBOARD -> DashboardScreen(state, padding)
-            RootScreen.MOVEMENTS -> MovementsScreen(state, ledger, snackbar, padding)
+            RootScreen.MOVEMENTS -> MovementsScreen(state, ledger, snackbar, padding, undoWindowMillis)
             RootScreen.POCKETS -> PocketsScreen(state, ledger, padding)
             RootScreen.SETTINGS -> SettingsScreen(
                 state = state,
@@ -177,7 +201,7 @@ fun PocketApp(
 }
 
 @Composable
-private fun OnboardingScreen(ledger: PocketLedger, onPickBackup: () -> Unit) {
+private fun OnboardingScreen(ledger: PocketLedger, preferences: PreferencesStore?, onPickBackup: () -> Unit) {
     var funds by remember { mutableStateOf("") }
     var startDay by remember { mutableStateOf("25") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -201,7 +225,7 @@ private fun OnboardingScreen(ledger: PocketLedger, onPickBackup: () -> Unit) {
             onValueChange = { startDay = it.filter(Char::isDigit).take(2) },
             label = { Text("Día de inicio") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag("start_day"),
         )
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Button(
@@ -215,7 +239,7 @@ private fun OnboardingScreen(ledger: PocketLedger, onPickBackup: () -> Unit) {
                         )
                     }.onSuccess {
                         when (val result = ledger.execute(it)) {
-                            LedgerResult.Success -> Unit
+                            LedgerResult.Success -> preferences?.setFuturePeriodStartDay(it.startDay)
                             is LedgerResult.Rejected -> error = result.message
                             is LedgerResult.Deleted -> Unit
                         }
@@ -240,11 +264,15 @@ private fun DashboardScreen(state: LedgerState, padding: PaddingValues) {
         item { MetricCard("Rollover", money(state.rolloverTotalMinor)) }
         item { MetricCard("Sin asignar", money(state.unallocatedMinor)) }
         item { MetricCard("Gasto neto confirmado", money(state.netSpendMinor)) }
+        item { MetricCard("Gasto diario promedio", money(state.netSpendMinor / state.elapsedDays.coerceAtLeast(1))) }
         item { MetricCard("Disponibilidad rastreada", money(state.trackedAvailabilityMinor)) }
         item { Text("Proyección estimada: ${money(state.projectionMinor)}") }
         item {
             Text(
-                state.previousPeriodNetSpendMinor?.let { "Periodo anterior: ${money(it)}" }
+                state.previousPeriodNetSpendMinor?.let {
+                    val difference = state.netSpendMinor - it
+                    "Periodo anterior: ${money(it)} · Diferencia: ${if (difference >= 0) "+" else ""}${money(difference)}"
+                }
                     ?: "Aún no existe un periodo anterior",
             )
         }
@@ -274,6 +302,7 @@ private fun PocketSummaryCard(summary: PocketPeriodSummary) {
         Column(Modifier.padding(16.dp)) {
             Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium)
             Text("Presupuesto: ${money(summary.budgetMinor)}")
+            Text("Rollover: ${money(summary.rolloverMinor)}", modifier = Modifier.testTag("rollover_${summary.pocket.name}"))
             Text("Gastado: ${money(summary.netSpendMinor)}")
             Text("Disponible: ${money(summary.availabilityMinor)}")
             Text("${summary.consumedPercent}% consumido")
@@ -288,6 +317,7 @@ private fun MovementsScreen(
     ledger: PocketLedger,
     snackbar: SnackbarHostState,
     padding: PaddingValues,
+    undoWindowMillis: Long,
 ) {
     var query by remember { mutableStateOf("") }
     var periodIndex by remember { mutableStateOf(0) }
@@ -325,18 +355,18 @@ private fun MovementsScreen(
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(onClick = { periodIndex = (periodIndex + 1) % periodOptions.size }) {
+                OutlinedButton(onClick = { periodIndex = (periodIndex + 1) % periodOptions.size }, modifier = Modifier.testTag("filter_period")) {
                     Text(if (periodIndex == 0) "Todos los periodos" else state.periods.first { it.id == periodOptions[periodIndex] }.start.toString())
                 }
-                OutlinedButton(onClick = { pocketIndex = (pocketIndex + 1) % pocketOptions.size }) {
+                OutlinedButton(onClick = { pocketIndex = (pocketIndex + 1) % pocketOptions.size }, modifier = Modifier.testTag("filter_pocket")) {
                     Text(if (pocketIndex == 0) "Todos los Pockets" else state.pockets.first { it.pocket.id == pocketOptions[pocketIndex] }.pocket.name)
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(onClick = { currencyIndex = (currencyIndex + 1) % currencyOptions.size }) {
+                OutlinedButton(onClick = { currencyIndex = (currencyIndex + 1) % currencyOptions.size }, modifier = Modifier.testTag("filter_currency")) {
                     Text(currencyOptions.getOrNull(currencyIndex) ?: "Todas las monedas")
                 }
-                OutlinedButton(onClick = { methodIndex = (methodIndex + 1) % methodOptions.size }) {
+                OutlinedButton(onClick = { methodIndex = (methodIndex + 1) % methodOptions.size }, modifier = Modifier.testTag("filter_method")) {
                     Text(if (methodIndex == 0) "Todos los métodos" else state.paymentMethods.first { it.id == methodOptions[methodIndex] }.name)
                 }
             }
@@ -370,8 +400,12 @@ private fun MovementsScreen(
                         selected = null
                         scope.launch {
                             val result = ledger.execute(LedgerCommand.DeleteMovement(movement.id))
-                            if (result is LedgerResult.Deleted && snackbar.showSnackbar("Movimiento eliminado", "Deshacer") == SnackbarResult.ActionPerformed) {
-                                ledger.execute(LedgerCommand.RestoreMovement(result.movement))
+                            if (result is LedgerResult.Deleted) {
+                                val action = withTimeoutOrNull(undoWindowMillis) {
+                                    snackbar.showSnackbar("Movimiento eliminado", "Deshacer", duration = SnackbarDuration.Indefinite)
+                                }
+                                if (action == SnackbarResult.ActionPerformed) ledger.execute(LedgerCommand.RestoreMovement(result.movement))
+                                else snackbar.currentSnackbarData?.dismiss()
                             }
                         }
                     }) { Text("Eliminar") }
@@ -401,8 +435,8 @@ private fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pad
         item { Text("Pockets", style = MaterialTheme.typography.headlineMedium) }
         item {
             Text("Periodo")
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                state.periods.forEach { period ->
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(state.periods, key = { it.id }) { period ->
                     TextButton(onClick = { selectedPeriodId = period.id }) {
                         Text(if (selectedPeriodId == period.id) "✓ ${period.start}" else period.start.toString())
                     }
@@ -417,8 +451,14 @@ private fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pad
                     Text("Presupuesto ${money(summary.budgetMinor)} · Disponible ${money(summary.availabilityMinor)}")
                     Text(if (summary.pocket.rolloverEnabled) "Rollover activado" else "Sin rollover")
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        TextButton(onClick = { scope.launch { ledger.execute(LedgerCommand.MovePocket(summary.pocket.id, -1)) } }) { Text("↑") }
-                        TextButton(onClick = { scope.launch { ledger.execute(LedgerCommand.MovePocket(summary.pocket.id, 1)) } }) { Text("↓") }
+                        TextButton(
+                            onClick = { scope.launch { ledger.execute(LedgerCommand.MovePocket(summary.pocket.id, -1)) } },
+                            modifier = Modifier.semantics { contentDescription = "Mover ${summary.pocket.name} arriba" },
+                        ) { Text("↑") }
+                        TextButton(
+                            onClick = { scope.launch { ledger.execute(LedgerCommand.MovePocket(summary.pocket.id, 1)) } },
+                            modifier = Modifier.semantics { contentDescription = "Mover ${summary.pocket.name} abajo" },
+                        ) { Text("↓") }
                         TextButton(onClick = { editing = summary }) { Text("Editar") }
                         TextButton(onClick = { scope.launch { ledger.execute(LedgerCommand.ArchivePocket(summary.pocket.id)) } }) { Text("Archivar") }
                     }
@@ -544,6 +584,11 @@ private fun MovementDialog(
     var originalAmount by remember(initialMovement?.id) { mutableStateOf(initialMovement?.originalAmountMinor?.let(::minorNumber).orEmpty()) }
     var confirmed by remember(initialMovement?.id) { mutableStateOf(initialMovement?.conversionStatus != ConversionStatus.ESTIMATED) }
     var localDate by remember(initialMovement?.id) { mutableStateOf((initialMovement?.localDate ?: state.currentLocalDate).toString()) }
+    var localTime by remember(initialMovement?.id) {
+        val instant = initialMovement?.occurredAtUtcMillis ?: state.currentInstantMillis
+        val zone = ZoneId.of(initialMovement?.zoneId ?: "Asia/Riyadh")
+        mutableStateOf(Instant.ofEpochMilli(instant).atZone(zone).toLocalTime().withSecond(0).withNano(0).toString())
+    }
     var error by remember(initialMovement?.id) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     AlertDialog(
@@ -614,6 +659,7 @@ private fun MovementDialog(
                         }
                     }
                     OutlinedTextField(localDate, { localDate = it }, label = { Text("Fecha (AAAA-MM-DD)") })
+                    OutlinedTextField(localTime, { localTime = it }, label = { Text("Hora (HH:mm)") })
                 }
                 item {
                     OutlinedTextField(merchant, { merchant = it }, label = { Text("Comercio (opcional)") })
@@ -633,18 +679,35 @@ private fun MovementDialog(
                         error = "Selecciona un Pocket"
                         return@launch
                     }
+                    val parsedDate = runCatching { java.time.LocalDate.parse(localDate) }.getOrNull() ?: run {
+                        error = "Escribe una fecha válida"
+                        return@launch
+                    }
+                    val parsedTime = runCatching { LocalTime.parse(localTime) }.getOrNull() ?: run {
+                        error = "Escribe una hora válida"
+                        return@launch
+                    }
+                    val parsedOriginal = if (currency == "SAR") {
+                        null
+                    } else {
+                        runCatching { Money.parse(originalAmount, currency).minor }.getOrNull() ?: run {
+                            error = "Escribe un importe original válido"
+                            return@launch
+                        }
+                    }
+                    val movementZone = ZoneId.of(initialMovement?.zoneId ?: "Asia/Riyadh")
                     val result = ledger.execute(
                         LedgerCommand.AddMovement(
                             pocketId = pocketId,
                             id = initialMovement?.id,
                             type = if (refund) MovementType.REFUND else MovementType.EXPENSE,
                             sarAmountMinor = parsed,
-                            occurredAtUtcMillis = initialMovement?.occurredAtUtcMillis ?: state.currentInstantMillis,
-                            localDate = runCatching { java.time.LocalDate.parse(localDate) }.getOrNull() ?: return@launch,
+                            occurredAtUtcMillis = parsedDate.atTime(parsedTime).atZone(movementZone).toInstant().toEpochMilli(),
+                            localDate = parsedDate,
                             merchant = merchant,
                             note = note,
                             paymentMethodId = paymentMethod,
-                            originalAmountMinor = if (currency == "SAR") null else runCatching { Money.parse(originalAmount, currency).minor }.getOrNull() ?: return@launch,
+                            originalAmountMinor = parsedOriginal,
                             originalCurrencyCode = currency,
                             conversionStatus = if (currency == "SAR" || confirmed) ConversionStatus.CONFIRMED else ConversionStatus.ESTIMATED,
                         )
@@ -668,8 +731,8 @@ private fun SettingsScreen(
     preferences: AppPreferences,
     preferencesStore: PreferencesStore?,
     reminderScheduler: ReminderScheduler?,
-    onCreateBackup: (ByteArray) -> Unit,
-    onCreateCsv: (ByteArray) -> Unit,
+    onCreateBackup: () -> Unit,
+    onCreateCsv: () -> Unit,
     onPickBackup: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
     padding: PaddingValues,
@@ -683,11 +746,13 @@ private fun SettingsScreen(
     var editingMethod by remember { mutableStateOf<String?>(null) }
     var templateName by remember { mutableStateOf("") }
     var templateAmount by remember { mutableStateOf("") }
+    var templatePocketId by remember { mutableStateOf<String?>(null) }
+    var templateMethodId by remember { mutableStateOf<String?>(null) }
     var editingTemplate by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(padding),
+        modifier = Modifier.fillMaxSize().padding(padding).testTag("settings_list"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -695,8 +760,8 @@ private fun SettingsScreen(
         item {
             Text("Periodo y fondos", style = MaterialTheme.typography.titleLarge)
             Text("${state.currentPeriod?.start} – ${state.currentPeriod?.endExclusive?.minusDays(1)} · Asia/Riyadh")
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                state.periods.forEach { period ->
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(state.periods, key = { it.id }) { period ->
                     TextButton(onClick = {
                         selectedFundsPeriodId = period.id
                         funds = minorNumber(period.newFundsMinor)
@@ -706,10 +771,18 @@ private fun SettingsScreen(
             OutlinedTextField(funds, { funds = it }, label = { Text("Fondos nuevos SAR") })
             Button(onClick = {
                 scope.launch {
-                    val value = runCatching { Money.parse(funds, "SAR").minor }.getOrNull() ?: return@launch
-                    ledger.execute(LedgerCommand.UpdatePeriodFunds(selectedFundsPeriodId ?: return@launch, value))
+                    val value = runCatching { Money.parse(funds, "SAR").minor }.getOrNull() ?: run {
+                        message = "Escribe fondos válidos"
+                        return@launch
+                    }
+                    when (val result = ledger.execute(LedgerCommand.UpdatePeriodFunds(selectedFundsPeriodId ?: return@launch, value))) {
+                        LedgerResult.Success -> message = "Fondos guardados"
+                        is LedgerResult.Rejected -> message = result.message
+                        is LedgerResult.Deleted -> Unit
+                    }
                 }
             }) { Text("Guardar fondos") }
+            message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
             OutlinedTextField(
                 futureDay,
                 { futureDay = it.filter(Char::isDigit).take(2) },
@@ -741,9 +814,10 @@ private fun SettingsScreen(
                             if (enabled) onRequestNotificationPermission()
                         }
                     },
+                    modifier = Modifier.testTag("reminder_switch"),
                 )
             }
-            OutlinedTextField(reminderTime, { reminderTime = it }, label = { Text("Hora (HH:mm)") })
+            OutlinedTextField(reminderTime, { reminderTime = it }, label = { Text("Hora (HH:mm)") }, modifier = Modifier.testTag("reminder_time"))
             Button(onClick = {
                 scope.launch {
                     val time = runCatching { LocalTime.parse(reminderTime) }.getOrNull() ?: return@launch
@@ -758,10 +832,14 @@ private fun SettingsScreen(
             OutlinedTextField(methodName, { methodName = it }, label = { Text("Nombre") })
             Button(onClick = {
                 scope.launch {
-                    ledger.execute(LedgerCommand.UpsertPaymentMethod(editingMethod, methodName))
-                    methodName = ""; editingMethod = null
+                    when (val result = ledger.execute(LedgerCommand.UpsertPaymentMethod(editingMethod, methodName))) {
+                        LedgerResult.Success -> { methodName = ""; editingMethod = null; message = "Método guardado" }
+                        is LedgerResult.Rejected -> message = result.message
+                        is LedgerResult.Deleted -> Unit
+                    }
                 }
             }) { Text(if (editingMethod == null) "Añadir método" else "Guardar método") }
+            message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         }
         items(state.paymentMethods, key = { it.id }) { method ->
             Card(Modifier.fillMaxWidth().clickable { editingMethod = method.id; methodName = method.name }) {
@@ -778,20 +856,47 @@ private fun SettingsScreen(
             Text("Solo precargan el formulario; nunca crean gastos automáticamente.")
             OutlinedTextField(templateName, { templateName = it }, label = { Text("Nombre de plantilla") })
             OutlinedTextField(templateAmount, { templateAmount = it }, label = { Text("Importe SAR") })
+            Text("Pocket")
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(state.pockets.filterNot { it.pocket.archived }, key = { it.pocket.id }) { pocket ->
+                    OutlinedButton(onClick = { templatePocketId = pocket.pocket.id }) {
+                        Text(if (templatePocketId == pocket.pocket.id) "✓ ${pocket.pocket.name}" else pocket.pocket.name)
+                    }
+                }
+            }
+            Text("Método de pago (opcional)")
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                item { OutlinedButton(onClick = { templateMethodId = null }) { Text(if (templateMethodId == null) "✓ Ninguno" else "Ninguno") } }
+                items(state.paymentMethods.filterNot { it.archived }, key = { it.id }) { method ->
+                    OutlinedButton(onClick = { templateMethodId = method.id }) {
+                        Text(if (templateMethodId == method.id) "✓ ${method.name}" else method.name)
+                    }
+                }
+            }
             Button(onClick = {
                 scope.launch {
-                    val pocket = state.pockets.firstOrNull { !it.pocket.archived } ?: return@launch
-                    val amount = runCatching { Money.parse(templateAmount, "SAR").minor }.getOrNull() ?: return@launch
-                    ledger.execute(LedgerCommand.UpsertTemplate(editingTemplate, templateName, amount, pocket.pocket.id))
-                    templateName = ""; templateAmount = ""; editingTemplate = null
+                    val pocketId = templatePocketId ?: run { message = "Selecciona un Pocket"; return@launch }
+                    val amount = runCatching { Money.parse(templateAmount, "SAR").minor }.getOrNull()
+                        ?: run { message = "Escribe un importe válido"; return@launch }
+                    when (val result = ledger.execute(LedgerCommand.UpsertTemplate(editingTemplate, templateName, amount, pocketId, templateMethodId))) {
+                        LedgerResult.Success -> {
+                            templateName = ""; templateAmount = ""; templatePocketId = null; templateMethodId = null
+                            editingTemplate = null; message = "Plantilla guardada"
+                        }
+                        is LedgerResult.Rejected -> message = result.message
+                        is LedgerResult.Deleted -> Unit
+                    }
                 }
             }) { Text(if (editingTemplate == null) "Añadir plantilla" else "Guardar plantilla") }
+            message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         }
         items(state.templates, key = { it.id }) { template ->
             Card(Modifier.fillMaxWidth().clickable {
                 editingTemplate = template.id
                 templateName = template.name
                 templateAmount = minorNumber(template.amountMinor)
+                templatePocketId = template.pocketId
+                templateMethodId = template.paymentMethodId
             }) {
                 Row(Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("${template.name}: ${money(template.amountMinor)}${if (template.archived) " (archivada)" else ""}")
@@ -803,12 +908,11 @@ private fun SettingsScreen(
         }
         item {
             Text("Portabilidad", style = MaterialTheme.typography.titleLarge)
-            Button(onClick = { scope.launch { onCreateBackup(ledger.exportBackup()) } }) { Text("Crear backup completo") }
+            Button(onClick = onCreateBackup) { Text("Crear backup completo") }
             OutlinedButton(onClick = onPickBackup) { Text("Restaurar backup") }
-            OutlinedButton(onClick = { scope.launch { onCreateCsv(ledger.exportCsv()) } }) { Text("Exportar CSV") }
+            OutlinedButton(onClick = onCreateCsv) { Text("Exportar CSV") }
             Text("El CSV no está cifrado y no sirve para restaurar.")
         }
-        message?.let { item { Text(it) } }
     }
 }
 

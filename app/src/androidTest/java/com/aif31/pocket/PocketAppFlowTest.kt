@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.waitUntilExactlyOneExists
 import androidx.compose.ui.test.waitUntilAtLeastOneExists
@@ -22,9 +23,13 @@ import androidx.test.filters.MediumTest
 import androidx.test.filters.SdkSuppress
 import com.aif31.pocket.data.FinanceDatabase
 import com.aif31.pocket.data.RoomPocketLedger
+import com.aif31.pocket.settings.AppPreferences
+import com.aif31.pocket.settings.PreferencesStore
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalTime
 import java.time.ZoneId
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -61,12 +66,15 @@ class PocketAppFlowTest {
             zoneId = zone,
         )
 
-        compose.setContent { PocketApp(ledger = ledger) }
+        val preferences = FakePreferences()
+        compose.setContent { PocketApp(ledger = ledger, preferences = preferences) }
 
         compose.waitUntilExactlyOneExists(hasText("Configura tu primer periodo"), 5_000)
         compose.onNodeWithTag("new_funds").performTextInput("1000.00")
+        compose.onNodeWithTag("start_day").performTextReplacement("10")
         compose.onNodeWithText("Comenzar").performClick()
 
+        compose.waitUntil(5_000) { preferences.current.futurePeriodStartDay == 10 }
         compose.waitUntilAtLeastOneExists(hasText("SAR 1,000.00"), 5_000)
         compose.onNodeWithText("Pockets").performClick()
         compose.onNodeWithTag("pocket_Supermercado").performClick()
@@ -79,10 +87,22 @@ class PocketAppFlowTest {
         compose.onNodeWithText("Guardar gasto").performClick()
 
         compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Gasto diario promedio"))
+        compose.onNodeWithText("Gasto diario promedio").assertIsDisplayed()
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Disponible: SAR 200.00"))
         compose.onNodeWithText("Disponible: SAR 200.00").assertIsDisplayed()
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasTestTag("rollover_Supermercado"))
+        compose.onNodeWithTag("rollover_Supermercado").assertIsDisplayed()
         compose.onNodeWithText("Movimientos").performClick()
         compose.onNodeWithText("-SAR 100.00").assertIsDisplayed()
         compose.onNodeWithText("Supermercado").assertIsDisplayed()
+    }
+
+    private class FakePreferences : PreferencesStore {
+        private val values = MutableStateFlow(AppPreferences())
+        override val state = values
+        val current: AppPreferences get() = values.value
+        override suspend fun setFuturePeriodStartDay(day: Int) { values.value = values.value.copy(futurePeriodStartDay = day) }
+        override suspend fun setReminder(enabled: Boolean, time: LocalTime) { values.value = values.value.copy(reminderEnabled = enabled, reminderTime = time) }
     }
 }

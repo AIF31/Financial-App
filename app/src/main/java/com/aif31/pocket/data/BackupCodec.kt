@@ -2,6 +2,7 @@ package com.aif31.pocket.data
 
 import androidx.room.withTransaction
 import java.nio.charset.StandardCharsets
+import java.util.Locale
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -95,20 +96,48 @@ internal object BackupCodec {
         require(bytes.isNotEmpty() && bytes.size <= 10 * 1024 * 1024) { "Tamaño de backup inválido" }
         val payload = json.decodeFromString(BackupPayload.serializer(), bytes.toString(StandardCharsets.UTF_8))
         require(payload.version == VERSION) { "Versión de backup incompatible" }
+        require(payload.periods.isNotEmpty()) { "El backup no contiene ningún periodo" }
         require(payload.periods.map { it.id }.distinct().size == payload.periods.size) { "Periodos duplicados" }
         require(payload.pockets.map { it.id }.distinct().size == payload.pockets.size) { "Pockets duplicados" }
+        require(payload.paymentMethods.map { it.id }.distinct().size == payload.paymentMethods.size) { "Métodos duplicados" }
         require(payload.movements.map { it.id }.distinct().size == payload.movements.size) { "Movimientos duplicados" }
+        require(payload.templates.map { it.id }.distinct().size == payload.templates.size) { "Plantillas duplicadas" }
         val periodIds = payload.periods.mapTo(mutableSetOf()) { it.id }
         val pocketIds = payload.pockets.mapTo(mutableSetOf()) { it.id }
         val methodIds = payload.paymentMethods.mapTo(mutableSetOf()) { it.id }
         require(payload.periods.all { it.start < it.endExclusive && it.newFundsMinor >= 0 && it.startDay in 1..31 }) { "Periodo inválido" }
+        val orderedPeriods = payload.periods.sortedBy { it.start }
+        require(orderedPeriods.map { it.start }.distinct().size == orderedPeriods.size) { "Inicios de periodo duplicados" }
+        require(orderedPeriods.zipWithNext().all { (current, next) -> current.endExclusive == next.start }) {
+            "Los periodos deben ser contiguos y no solaparse"
+        }
+        require(payload.pockets.all { it.name.isNotBlank() }) { "Pocket inválido" }
+        require(payload.pockets.map { it.name.trim().lowercase(Locale.ROOT) }.distinct().size == payload.pockets.size) {
+            "Nombres de Pocket duplicados"
+        }
+        require(payload.paymentMethods.all { it.name.isNotBlank() }) { "Método de pago inválido" }
+        require(payload.paymentMethods.map { it.name.trim().lowercase(Locale.ROOT) }.distinct().size == payload.paymentMethods.size) {
+            "Nombres de método duplicados"
+        }
+        require(payload.allocations.map { it.periodId to it.pocketId }.distinct().size == payload.allocations.size) {
+            "Presupuestos duplicados"
+        }
         require(payload.allocations.all { it.periodId in periodIds && it.pocketId in pocketIds && it.budgetMinor >= 0 && it.rolloverMinor >= 0 }) { "Relación de presupuesto inválida" }
+        val periodsById = payload.periods.associateBy { it.id }
+        require(payload.allocations.groupBy { it.periodId }.all { (periodId, values) ->
+            values.fold(0L) { total, allocation -> Math.addExact(total, allocation.budgetMinor) } <= periodsById.getValue(periodId).newFundsMinor
+        }) { "Los presupuestos superan los fondos del periodo" }
         require(payload.movements.all {
             it.periodId in periodIds && it.pocketId in pocketIds && (it.paymentMethodId == null || it.paymentMethodId in methodIds) &&
                 it.sarAmountMinor > 0 && it.type in MovementType.entries.map { type -> type.name } &&
-                it.currency.matches(Regex("[A-Z]{3}")) && it.conversion in ConversionStatus.entries.map { status -> status.name }
+                it.currency.matches(Regex("[A-Z]{3}")) && it.conversion in ConversionStatus.entries.map { status -> status.name } &&
+                it.localDate >= periodsById.getValue(it.periodId).start && it.localDate < periodsById.getValue(it.periodId).endExclusive &&
+                (it.currency == "SAR" || (it.originalAmountMinor ?: 0) > 0) && it.zoneId == "Asia/Riyadh"
         }) { "Relación de movimiento inválida" }
-        require(payload.templates.all { it.pocketId in pocketIds && (it.paymentMethodId == null || it.paymentMethodId in methodIds) }) {
+        require(payload.templates.all {
+            it.name.isNotBlank() && it.amountMinor > 0 && it.pocketId in pocketIds &&
+                (it.paymentMethodId == null || it.paymentMethodId in methodIds)
+        }) {
             "Relación de plantilla inválida"
         }
         return payload
