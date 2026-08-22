@@ -35,7 +35,6 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,13 +45,19 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
@@ -273,7 +278,6 @@ private fun SupportingMetric(label: String, value: String, modifier: Modifier = 
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuickExpensePrototype(
     state: QuickExpensePrototypeState,
@@ -285,18 +289,36 @@ fun QuickExpensePrototype(
     onSave: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onMovementTypeSelected: (MovementTypePrototype) -> Unit = {},
+    onCurrencySelected: (MovementCurrencyPrototype) -> Unit = {},
+    onOriginalAmountChange: (String) -> Unit = {},
+    onConversionStatusSelected: (ConversionStatusPrototype) -> Unit = {},
+    onDateTimeChange: (String) -> Unit = {},
+    onNoteChange: (String) -> Unit = {},
 ) {
+    val amountFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(amountFocusRequester) {
+        withFrameNanos { }
+        amountFocusRequester.requestFocus()
+    }
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = { Text("Nuevo gasto") },
-                navigationIcon = {
+            Surface(color = MaterialTheme.colorScheme.surface) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
                     }
-                },
-            )
+                    Text(
+                        if (state.movementType == MovementTypePrototype.REFUND) "Nueva devolución" else "Nuevo gasto",
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                    )
+                }
+            }
         },
         bottomBar = {
             Surface(shadowElevation = 3.dp) {
@@ -309,7 +331,7 @@ fun QuickExpensePrototype(
                         .imePadding()
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                 ) {
-                    Text(if (state.isRefund) "Guardar devolución" else "Guardar gasto")
+                    Text(if (state.movementType == MovementTypePrototype.REFUND) "Guardar devolución" else "Guardar gasto")
                 }
             }
         },
@@ -336,6 +358,8 @@ fun QuickExpensePrototype(
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .focusRequester(amountFocusRequester)
+                            .testTag("expense_amount")
                             .semantics { state.amountError?.let { error(it) } },
                     )
                 }
@@ -375,7 +399,15 @@ fun QuickExpensePrototype(
                 }
                 item {
                     AnimatedVisibility(visible = state.detailsExpanded) {
-                        AdvancedExpenseDetails(state)
+                        AdvancedExpenseDetails(
+                            state = state,
+                            onMovementTypeSelected = onMovementTypeSelected,
+                            onCurrencySelected = onCurrencySelected,
+                            onOriginalAmountChange = onOriginalAmountChange,
+                            onConversionStatusSelected = onConversionStatusSelected,
+                            onDateTimeChange = onDateTimeChange,
+                            onNoteChange = onNoteChange,
+                        )
                     }
                 }
             }
@@ -389,8 +421,9 @@ private fun SelectionSection(
     options: List<SelectionOptionPrototype>,
     selectedId: String?,
     onSelected: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.titleMedium)
         options.forEach { option ->
             Row(
@@ -413,8 +446,18 @@ private fun SelectionSection(
 }
 
 @Composable
-private fun AdvancedExpenseDetails(state: QuickExpensePrototypeState) {
+private fun AdvancedExpenseDetails(
+    state: QuickExpensePrototypeState,
+    onMovementTypeSelected: (MovementTypePrototype) -> Unit,
+    onCurrencySelected: (MovementCurrencyPrototype) -> Unit,
+    onOriginalAmountChange: (String) -> Unit,
+    onConversionStatusSelected: (ConversionStatusPrototype) -> Unit,
+    onDateTimeChange: (String) -> Unit,
+    onNoteChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Surface(
+        modifier = modifier,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.large,
     ) {
@@ -423,23 +466,54 @@ private fun AdvancedExpenseDetails(state: QuickExpensePrototypeState) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text("Detalles del movimiento", style = MaterialTheme.typography.titleMedium)
-            ReadOnlyDetail("Tipo", if (state.isRefund) "Devolución" else "Gasto")
-            ReadOnlyDetail("Moneda original", state.currencyCode)
-            if (state.currencyCode != "SAR") {
-                ReadOnlyDetail("Importe original", state.originalAmount)
-                ReadOnlyDetail("Estado de conversión", state.conversionStatus)
+            SelectionSection(
+                title = "Tipo",
+                options = listOf(
+                    SelectionOptionPrototype(MovementTypePrototype.EXPENSE.name, "Gasto"),
+                    SelectionOptionPrototype(MovementTypePrototype.REFUND.name, "Devolución"),
+                ),
+                selectedId = state.movementType.name,
+                onSelected = { onMovementTypeSelected(MovementTypePrototype.valueOf(it)) },
+            )
+            SelectionSection(
+                title = "Moneda original",
+                options = MovementCurrencyPrototype.entries.map { SelectionOptionPrototype(it.name, it.code) },
+                selectedId = state.currency.name,
+                onSelected = { onCurrencySelected(MovementCurrencyPrototype.valueOf(it)) },
+            )
+            if (state.currency != MovementCurrencyPrototype.SAR) {
+                OutlinedTextField(
+                    value = state.originalAmount,
+                    onValueChange = onOriginalAmountChange,
+                    label = { Text("Importe original ${state.currency.code}") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                SelectionSection(
+                    title = "Estado de conversión",
+                    options = listOf(
+                        SelectionOptionPrototype(ConversionStatusPrototype.ESTIMATED.name, "Estimado"),
+                        SelectionOptionPrototype(ConversionStatusPrototype.CONFIRMED.name, "Confirmado"),
+                    ),
+                    selectedId = state.conversionStatus.name,
+                    onSelected = { onConversionStatusSelected(ConversionStatusPrototype.valueOf(it)) },
+                )
             }
-            ReadOnlyDetail("Fecha y hora", state.dateTime)
-            ReadOnlyDetail("Nota", state.note.ifBlank { "Sin nota" })
+            OutlinedTextField(
+                value = state.dateTime,
+                onValueChange = onDateTimeChange,
+                label = { Text("Fecha y hora") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = state.note,
+                onValueChange = onNoteChange,
+                label = { Text("Nota (opcional)") },
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
-    }
-}
-
-@Composable
-private fun ReadOnlyDetail(label: String, value: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
@@ -448,8 +522,12 @@ fun PocketsOverviewPrototype(
     state: PocketsOverviewPrototypeState,
     onCreatePocket: () -> Unit,
     onPocketSelected: (String) -> Unit,
-    onMovePocket: (String, Int) -> Unit,
+    onMovePocket: (String, PocketMoveDirection) -> Unit,
     modifier: Modifier = Modifier,
+    onEditPocket: (String) -> Unit = {},
+    onArchivePocket: (String) -> Unit = {},
+    onSetAllocation: (String) -> Unit = {},
+    onToggleRollover: (String, Boolean) -> Unit = { _, _ -> },
 ) {
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
@@ -500,6 +578,10 @@ fun PocketsOverviewPrototype(
                     wide = wide,
                     onPocketSelected = onPocketSelected,
                     onMovePocket = onMovePocket,
+                    onEditPocket = onEditPocket,
+                    onArchivePocket = onArchivePocket,
+                    onSetAllocation = onSetAllocation,
+                    onToggleRollover = onToggleRollover,
                 )
             }
         }
@@ -524,16 +606,27 @@ private fun AdaptivePocketCards(
     pockets: List<PocketProgressPrototype>,
     wide: Boolean,
     onPocketSelected: (String) -> Unit,
-    onMovePocket: (String, Int) -> Unit,
+    onMovePocket: (String, PocketMoveDirection) -> Unit,
+    onEditPocket: (String) -> Unit,
+    onArchivePocket: (String) -> Unit,
+    onSetAllocation: (String) -> Unit,
+    onToggleRollover: (String, Boolean) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        pockets.chunked(if (wide) 2 else 1).forEach { rowPockets ->
+        pockets.withIndex().toList().chunked(if (wide) 2 else 1).forEach { rowPockets ->
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                rowPockets.forEach { pocket ->
+                rowPockets.forEach { indexedPocket ->
+                    val pocket = indexedPocket.value
                     PocketManagementCard(
                         pocket = pocket,
                         onPocketSelected = onPocketSelected,
                         onMovePocket = onMovePocket,
+                        onEditPocket = onEditPocket,
+                        onArchivePocket = onArchivePocket,
+                        onSetAllocation = onSetAllocation,
+                        onToggleRollover = onToggleRollover,
+                        canMoveUp = indexedPocket.index > 0,
+                        canMoveDown = indexedPocket.index < pockets.lastIndex,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -547,7 +640,13 @@ private fun AdaptivePocketCards(
 private fun PocketManagementCard(
     pocket: PocketProgressPrototype,
     onPocketSelected: (String) -> Unit,
-    onMovePocket: (String, Int) -> Unit,
+    onMovePocket: (String, PocketMoveDirection) -> Unit,
+    onEditPocket: (String) -> Unit,
+    onArchivePocket: (String) -> Unit,
+    onSetAllocation: (String) -> Unit,
+    onToggleRollover: (String, Boolean) -> Unit,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -566,13 +665,15 @@ private fun PocketManagementCard(
                 Text(pocket.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 Row {
                     IconButton(
-                        onClick = { onMovePocket(pocket.id, -1) },
+                        onClick = { onMovePocket(pocket.id, PocketMoveDirection.UP) },
+                        enabled = canMoveUp,
                         modifier = Modifier.semantics { contentDescription = "Mover ${pocket.name} arriba" },
                     ) {
                         Icon(Icons.Default.ArrowUpward, contentDescription = null)
                     }
                     IconButton(
-                        onClick = { onMovePocket(pocket.id, 1) },
+                        onClick = { onMovePocket(pocket.id, PocketMoveDirection.DOWN) },
+                        enabled = canMoveDown,
                         modifier = Modifier.semantics { contentDescription = "Mover ${pocket.name} abajo" },
                     ) {
                         Icon(Icons.Default.ArrowDownward, contentDescription = null)
@@ -589,42 +690,90 @@ private fun PocketManagementCard(
                 PocketValue("Gastado", pocket.spending, Modifier.weight(1f))
                 PocketValue("Disponible", pocket.availability, Modifier.weight(1f))
             }
-            TextButton(onClick = { onPocketSelected(pocket.id) }, modifier = Modifier.align(Alignment.End)) {
-                Text("Gestionar Pocket")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Aplicar rollover")
+                Switch(
+                    checked = pocket.rolloverEnabled,
+                    onCheckedChange = { onToggleRollover(pocket.id, it) },
+                    modifier = Modifier.semantics {
+                        contentDescription = if (pocket.rolloverEnabled) {
+                            "Desactivar rollover de ${pocket.name}"
+                        } else {
+                            "Activar rollover de ${pocket.name}"
+                        }
+                    },
+                )
+            }
+            OutlinedButton(
+                onClick = { onSetAllocation(pocket.id) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = "Asignar presupuesto a ${pocket.name}" },
+            ) {
+                Text("Asignar presupuesto")
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { onPocketSelected(pocket.id) }) { Text("Ver") }
+                TextButton(onClick = { onEditPocket(pocket.id) }) { Text("Editar") }
+                TextButton(onClick = { onArchivePocket(pocket.id) }) { Text("Archivar") }
             }
         }
     }
 }
 
 @Composable
-private fun PocketStatus(pocket: PocketProgressPrototype) {
-    val (icon, label) = when (pocket.status) {
-        PocketStatusPrototype.ON_TRACK -> Icons.Default.CheckCircle to "En curso · ${pocket.consumedPercent}% consumido"
-        PocketStatusPrototype.AT_RISK -> Icons.Default.Warning to "En riesgo · ${pocket.consumedPercent}% consumido"
-        PocketStatusPrototype.EXHAUSTED -> Icons.Default.Error to "Agotado · ${pocket.consumedPercent}% consumido"
-    }
-    val color = pocketStatusColor(pocket.status)
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(20.dp))
-        Text(label, color = color, style = MaterialTheme.typography.labelLarge)
+private fun PocketStatus(pocket: PocketProgressPrototype, modifier: Modifier = Modifier) {
+    val presentation = pocketStatusPresentation(pocket)
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(presentation.icon, contentDescription = null, tint = presentation.color, modifier = Modifier.size(20.dp))
+        Text(presentation.label, color = presentation.color, style = MaterialTheme.typography.labelLarge)
     }
 }
 
 @Composable
-private fun PocketProgressIndicator(pocket: PocketProgressPrototype) {
+private fun PocketProgressIndicator(
+    pocket: PocketProgressPrototype,
+    modifier: Modifier = Modifier,
+) {
     LinearProgressIndicator(
         progress = { pocket.consumedFraction.coerceIn(0f, 1f) },
-        modifier = Modifier.fillMaxWidth().height(8.dp),
-        color = pocketStatusColor(pocket.status),
+        modifier = modifier.fillMaxWidth().height(8.dp),
+        color = pocketStatusPresentation(pocket).color,
         trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
     )
 }
 
+private data class PocketStatusPresentation(
+    val icon: ImageVector,
+    val label: String,
+    val color: Color,
+)
+
 @Composable
-private fun pocketStatusColor(status: PocketStatusPrototype): Color = when (status) {
-    PocketStatusPrototype.ON_TRACK -> MaterialTheme.colorScheme.primary
-    PocketStatusPrototype.AT_RISK -> MaterialTheme.colorScheme.tertiary
-    PocketStatusPrototype.EXHAUSTED -> MaterialTheme.colorScheme.error
+private fun pocketStatusPresentation(pocket: PocketProgressPrototype): PocketStatusPresentation = when (pocket.status) {
+    PocketStatusPrototype.ON_TRACK -> PocketStatusPresentation(
+        icon = Icons.Default.CheckCircle,
+        label = "En curso · ${pocket.consumedPercent}% consumido",
+        color = MaterialTheme.colorScheme.primary,
+    )
+    PocketStatusPrototype.AT_RISK -> PocketStatusPresentation(
+        icon = Icons.Default.Warning,
+        label = "En riesgo · ${pocket.consumedPercent}% consumido",
+        color = MaterialTheme.colorScheme.tertiary,
+    )
+    PocketStatusPrototype.EXHAUSTED -> PocketStatusPresentation(
+        icon = Icons.Default.Error,
+        label = "Agotado · ${pocket.consumedPercent}% consumido",
+        color = MaterialTheme.colorScheme.error,
+    )
 }
 
 @Composable

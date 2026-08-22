@@ -13,12 +13,34 @@ data class PocketProgressPrototype(
     val consumedFraction: Float,
     val consumedPercent: Int,
     val status: PocketStatusPrototype,
+    val rolloverEnabled: Boolean,
 )
 
 enum class PocketStatusPrototype {
     ON_TRACK,
     AT_RISK,
     EXHAUSTED,
+}
+
+enum class MovementTypePrototype {
+    EXPENSE,
+    REFUND,
+}
+
+enum class MovementCurrencyPrototype(val code: String) {
+    SAR("SAR"),
+    USD("USD"),
+    MXN("MXN"),
+}
+
+enum class ConversionStatusPrototype {
+    ESTIMATED,
+    CONFIRMED,
+}
+
+enum class PocketMoveDirection {
+    UP,
+    DOWN,
 }
 
 @Immutable
@@ -51,10 +73,10 @@ data class QuickExpensePrototypeState(
     val paymentMethods: List<SelectionOptionPrototype>,
     val selectedPaymentMethodId: String?,
     val detailsExpanded: Boolean,
-    val isRefund: Boolean,
-    val currencyCode: String,
+    val movementType: MovementTypePrototype,
+    val currency: MovementCurrencyPrototype,
     val originalAmount: String,
-    val conversionStatus: String,
+    val conversionStatus: ConversionStatusPrototype,
     val dateTime: String,
     val note: String,
     val canSave: Boolean,
@@ -79,6 +101,7 @@ internal val prototypePockets = listOf(
         consumedFraction = 0.49f,
         consumedPercent = 49,
         status = PocketStatusPrototype.ON_TRACK,
+        rolloverEnabled = true,
     ),
     PocketProgressPrototype(
         id = "travel",
@@ -90,6 +113,7 @@ internal val prototypePockets = listOf(
         consumedFraction = 0.86f,
         consumedPercent = 86,
         status = PocketStatusPrototype.AT_RISK,
+        rolloverEnabled = true,
     ),
     PocketProgressPrototype(
         id = "university",
@@ -101,18 +125,19 @@ internal val prototypePockets = listOf(
         consumedFraction = 1f,
         consumedPercent = 100,
         status = PocketStatusPrototype.EXHAUSTED,
+        rolloverEnabled = false,
     ),
 )
 
 internal val dashboardPrototypeState = DashboardPrototypeState(
     periodLabel = "25 ago – 24 sep",
-    availability = "SAR 2,460.00",
+    availability = "SAR 842.00",
     unallocated = "SAR 540.00 sin asignar",
     spendingStatus = "Tu ritmo está dentro del presupuesto",
-    netSpending = "SAR 1,218.00 gastados",
+    netSpending = "SAR 2,218.00 gastados",
     previousPeriodComparison = "SAR 184.00 menos que el periodo anterior",
-    averageDailySpending = "SAR 87.00",
-    projection = "SAR 2,610.00 estimados al cierre",
+    averageDailySpending = "SAR 158.43",
+    projection = "SAR 4,911.29 estimados al cierre",
     supportingMetricsExpanded = false,
     pockets = prototypePockets,
 )
@@ -133,10 +158,10 @@ internal val quickExpensePrototypeState = QuickExpensePrototypeState(
     ),
     selectedPaymentMethodId = "card",
     detailsExpanded = false,
-    isRefund = false,
-    currencyCode = "SAR",
+    movementType = MovementTypePrototype.EXPENSE,
+    currency = MovementCurrencyPrototype.SAR,
     originalAmount = "",
-    conversionStatus = "Confirmado",
+    conversionStatus = ConversionStatusPrototype.CONFIRMED,
     dateTime = "23 ago 2026 · 18:42",
     note = "",
     canSave = true,
@@ -144,7 +169,7 @@ internal val quickExpensePrototypeState = QuickExpensePrototypeState(
 
 internal val pocketsPrototypeState = PocketsOverviewPrototypeState(
     periodLabel = "25 ago – 24 sep",
-    allocated = "SAR 3,000.00 presupuestados",
-    available = "SAR 2,460.00 disponibles",
+    allocated = "SAR 2,600.00 presupuestados",
+    available = "SAR 842.00 disponibles",
     pockets = prototypePockets,
 )

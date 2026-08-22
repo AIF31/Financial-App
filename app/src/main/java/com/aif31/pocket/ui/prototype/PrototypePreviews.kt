@@ -2,6 +2,10 @@ package com.aif31.pocket.ui.prototype
 
 import android.content.res.Configuration
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.tooling.preview.Preview
 import com.aif31.pocket.ui.PocketTheme
 
@@ -28,11 +32,15 @@ private annotation class PrototypeConfigurations
 @PrototypeConfigurations
 @Composable
 private fun ActionableDashboardPreview() {
+    var state by remember { mutableStateOf(dashboardPrototypeState) }
     PocketTheme {
         ActionableDashboardPrototype(
-            state = dashboardPrototypeState,
+            state = state,
             onRecordExpense = {},
             onManagePocket = {},
+            onToggleSupportingMetrics = {
+                state = state.copy(supportingMetricsExpanded = !state.supportingMetricsExpanded)
+            },
         )
     }
 }
@@ -63,16 +71,23 @@ private fun ActionableDashboardLowAvailabilityPreview() {
 @PrototypeConfigurations
 @Composable
 private fun QuickExpensePreview() {
+    var state by remember { mutableStateOf(quickExpensePrototypeState) }
     PocketTheme {
         QuickExpensePrototype(
-            state = quickExpensePrototypeState,
-            onAmountChange = {},
-            onPocketSelected = {},
-            onMerchantChange = {},
-            onPaymentMethodSelected = {},
-            onToggleDetails = {},
+            state = state,
+            onAmountChange = { state = state.copy(amount = it) },
+            onPocketSelected = { state = state.copy(selectedPocketId = it) },
+            onMerchantChange = { state = state.copy(merchant = it) },
+            onPaymentMethodSelected = { state = state.copy(selectedPaymentMethodId = it) },
+            onToggleDetails = { state = state.copy(detailsExpanded = !state.detailsExpanded) },
             onSave = {},
             onBack = {},
+            onMovementTypeSelected = { state = state.copy(movementType = it) },
+            onCurrencySelected = { state = state.copy(currency = it) },
+            onOriginalAmountChange = { state = state.copy(originalAmount = it) },
+            onConversionStatusSelected = { state = state.copy(conversionStatus = it) },
+            onDateTimeChange = { state = state.copy(dateTime = it) },
+            onNoteChange = { state = state.copy(note = it) },
         )
     }
 }
@@ -109,9 +124,63 @@ private fun QuickExpenseValidationPreview() {
 @PrototypeConfigurations
 @Composable
 private fun PocketsOverviewPreview() {
+    var state by remember { mutableStateOf(pocketsPrototypeState) }
     PocketTheme {
         PocketsOverviewPrototype(
-            state = pocketsPrototypeState,
+            state = state,
+            onCreatePocket = {
+                if (state.pockets.none { it.id == "new-pocket" }) {
+                    state = state.copy(
+                        pockets = state.pockets + prototypePockets.first().copy(
+                            id = "new-pocket",
+                            name = "Nuevo Pocket",
+                            budget = "SAR 0.00",
+                            rollover = "Sin rollover",
+                            spending = "SAR 0.00",
+                            availability = "SAR 0.00",
+                            consumedFraction = 0f,
+                            consumedPercent = 0,
+                            rolloverEnabled = false,
+                        ),
+                    )
+                }
+            },
+            onPocketSelected = {},
+            onMovePocket = { _, _ -> },
+            onEditPocket = { id ->
+                state = state.copy(pockets = state.pockets.map { if (it.id == id) it.copy(name = "${it.name} · editado") else it })
+            },
+            onArchivePocket = { id -> state = state.copy(pockets = state.pockets.filterNot { it.id == id }) },
+            onSetAllocation = { id ->
+                state = state.copy(pockets = state.pockets.map { if (it.id == id) it.copy(budget = "SAR 900.00") else it })
+            },
+            onToggleRollover = { id, enabled ->
+                state = state.copy(
+                    pockets = state.pockets.map {
+                        if (it.id == id) it.copy(
+                            rolloverEnabled = enabled,
+                            rollover = if (enabled) "SAR 0.00" else "Sin rollover",
+                        ) else it
+                    },
+                )
+            },
+        )
+    }
+}
+
+@Preview(
+    name = "Pockets · Long labels · Large text",
+    widthDp = 360,
+    heightDp = 780,
+    fontScale = 1.5f,
+    showBackground = true,
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+private fun PocketsLargeTextPreview() {
+    PocketTheme {
+        PocketsOverviewPrototype(
+            state = pocketsPrototypeState.copy(pockets = listOf(prototypePockets.last())),
             onCreatePocket = {},
             onPocketSelected = {},
             onMovePocket = { _, _ -> },
