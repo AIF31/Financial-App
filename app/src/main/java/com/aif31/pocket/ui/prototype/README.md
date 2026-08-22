@@ -10,6 +10,14 @@ sizes in light and dark themes. Additional previews cover low availability,
 long Pocket names, validation, expanded details, empty content, and large
 font scaling.
 
+The production shell and its four bottom destinations — Inicio, Movimientos,
+Pockets, and Ajustes — remain unchanged. `QuickExpensePrototype` isolates one
+`ExperimentalMaterial3Api` opt-in because the pinned Material version still
+marks `TopAppBar` experimental; its explicit prototype benefit is validating
+the title and Back context required for the focused expense route. Recheck the
+annotation before production wiring. No experimental adaptive, navigation,
+Grid, FlexBox, or Styles API is used.
+
 Review these questions before approving production wiring:
 
 1. Is the primary number or action obvious on every surface?
