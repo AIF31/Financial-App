@@ -581,7 +581,11 @@ fun PocketsOverviewPrototype(
                     .widthIn(max = PrototypeContentMaxWidth)
                     .padding(horizontal = if (wide) 32.dp else 16.dp, vertical = 24.dp),
             ) {
-                PocketManagementSurface(managingPocket, onAction)
+                PocketManagementSurface(
+                    pocket = managingPocket,
+                    feedbackMessage = state.managementFeedback,
+                    onAction = onAction,
+                )
             }
             return@BoxWithConstraints
         }
@@ -752,6 +756,7 @@ private fun PocketManagementCard(
 @Composable
 private fun PocketManagementSurface(
     pocket: PocketProgressPrototype,
+    feedbackMessage: String?,
     onAction: (PocketManagementAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -784,6 +789,18 @@ private fun PocketManagementSurface(
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f),
                 )
+            }
+            feedbackMessage?.let { message ->
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics { liveRegion = LiveRegionMode.Polite },
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    shape = MaterialTheme.shapes.large,
+                ) {
+                    Text(message, modifier = Modifier.padding(16.dp))
+                }
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 PocketValue("Presupuesto", pocket.budget, Modifier.weight(1f))

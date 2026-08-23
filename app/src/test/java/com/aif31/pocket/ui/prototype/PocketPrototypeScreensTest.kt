@@ -234,11 +234,17 @@ class PocketPrototypeScreensTest {
     @Test
     fun pockets_expose_allocation_and_rollover_management_actions() {
         val actions = mutableListOf<PocketManagementAction>()
+        var state by mutableStateOf(pocketsPrototypeState.copy(managingPocketId = "travel"))
         compose.setContent {
             PocketTheme {
                 PocketsOverviewPrototype(
-                    state = pocketsPrototypeState.copy(managingPocketId = "travel"),
-                    onAction = actions::add,
+                    state = state,
+                    onAction = { action ->
+                        actions += action
+                        if (action is PocketManagementAction.SetAllocation) {
+                            state = state.copy(managementFeedback = "Abrir asignación de Viajes")
+                        }
+                    },
                 )
             }
         }
@@ -250,6 +256,7 @@ class PocketPrototypeScreensTest {
             assertTrue(PocketManagementAction.SetAllocation("travel") in actions)
             assertTrue(PocketManagementAction.SetRollover("travel", false) in actions)
         }
+        compose.onNodeWithText("Abrir asignación de Viajes").performScrollTo().assertIsDisplayed()
     }
 
     @Test
