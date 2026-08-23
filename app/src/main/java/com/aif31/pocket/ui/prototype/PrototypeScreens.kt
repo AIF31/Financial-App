@@ -629,16 +629,7 @@ fun PocketsOverviewPrototype(
             }
 
             state.managementFeedback?.let { message ->
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .semantics { liveRegion = LiveRegionMode.Polite },
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                    shape = MaterialTheme.shapes.large,
-                ) {
-                    Text(message, modifier = Modifier.padding(16.dp))
-                }
+                ManagementFeedback(message)
             }
 
             if (state.pockets.isEmpty()) {
@@ -791,16 +782,7 @@ private fun PocketManagementSurface(
                 )
             }
             feedbackMessage?.let { message ->
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .semantics { liveRegion = LiveRegionMode.Polite },
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                    shape = MaterialTheme.shapes.large,
-                ) {
-                    Text(message, modifier = Modifier.padding(16.dp))
-                }
+                ManagementFeedback(message)
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 PocketValue("Presupuesto", pocket.budget, Modifier.weight(1f))
@@ -840,6 +822,20 @@ private fun PocketManagementSurface(
                 TextButton(onClick = { onAction(PocketManagementAction.Archive(pocket.id)) }) { Text("Archivar") }
             }
         }
+    }
+}
+
+@Composable
+private fun ManagementFeedback(message: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics { liveRegion = LiveRegionMode.Polite },
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Text(message, modifier = Modifier.padding(16.dp))
     }
 }
 
