@@ -186,6 +186,7 @@ class PocketPrototypeScreensTest {
 
     @Test
     fun quick_expense_announces_a_clear_save_success() {
+        var returnedToContext = false
         compose.setContent {
             PocketTheme {
                 QuickExpensePrototype(
@@ -196,12 +197,14 @@ class PocketPrototypeScreensTest {
                     onPaymentMethodSelected = {},
                     onToggleDetails = {},
                     onSave = {},
-                    onBack = {},
+                    onBack = { returnedToContext = true },
                 )
             }
         }
 
         compose.onNodeWithText("Gasto guardado").assertIsDisplayed()
+        compose.onNodeWithText("Volver a Inicio").performClick()
+        compose.runOnIdle { assertTrue(returnedToContext) }
     }
 
     @Test
@@ -247,6 +250,37 @@ class PocketPrototypeScreensTest {
             assertTrue(PocketManagementAction.SetAllocation("travel") in actions)
             assertTrue(PocketManagementAction.SetRollover("travel", false) in actions)
         }
+    }
+
+    @Test
+    fun pockets_open_and_close_a_focused_management_surface() {
+        var state by mutableStateOf(pocketsPrototypeState)
+        compose.setContent {
+            PocketTheme {
+                PocketsOverviewPrototype(
+                    state = state,
+                    onAction = { action ->
+                        state = when (action) {
+                            is PocketManagementAction.OpenManagement -> state.copy(
+                                managingPocketId = action.pocketId,
+                            )
+                            PocketManagementAction.CloseManagement -> state.copy(
+                                managingPocketId = null,
+                            )
+                            else -> state
+                        }
+                    },
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription("Gestionar Supermercado").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Volver a Pockets").assertIsDisplayed()
+        compose.onNodeWithText("Gestionar Supermercado").assertExists()
+        compose.onNodeWithText("Viajes").assertDoesNotExist()
+
+        compose.onNodeWithContentDescription("Volver a Pockets").performClick()
+        compose.onNodeWithText("Viajes").performScrollTo().assertIsDisplayed()
     }
 
     @Test

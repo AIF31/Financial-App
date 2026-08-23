@@ -58,8 +58,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.liveRegion
@@ -306,6 +306,10 @@ fun QuickExpensePrototype(
     onDateTimeChange: (String) -> Unit = {},
     onNoteChange: (String) -> Unit = {},
 ) {
+    state.saveFeedback?.let { message ->
+        QuickExpenseSuccess(message = message, onReturnToContext = onBack, modifier = modifier)
+        return
+    }
     val amountFocusRequester = remember { FocusRequester() }
     LaunchedEffect(amountFocusRequester) {
         withFrameNanos { }
@@ -356,27 +360,6 @@ fun QuickExpensePrototype(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
-                state.saveFeedback?.let { message ->
-                    item {
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .semantics { liveRegion = LiveRegionMode.Polite },
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            shape = MaterialTheme.shapes.large,
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(Icons.Default.CheckCircle, contentDescription = null)
-                                Text(message, style = MaterialTheme.typography.titleMedium)
-                            }
-                        }
-                    }
-                }
                 item {
                     OutlinedTextField(
                         value = state.amount,
@@ -442,6 +425,37 @@ fun QuickExpensePrototype(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun QuickExpenseSuccess(
+    message: String,
+    onReturnToContext: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = 420.dp)
+                .padding(24.dp)
+                .semantics { liveRegion = LiveRegionMode.Polite },
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Icon(
+                Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(40.dp),
+            )
+            Text(message, style = MaterialTheme.typography.headlineSmall)
+            Text(
+                "El movimiento ya está reflejado en tu periodo.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = onReturnToContext) { Text("Volver a Inicio") }
         }
     }
 }
@@ -556,12 +570,27 @@ fun PocketsOverviewPrototype(
 ) {
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
+        val scrollState = rememberScrollState()
+        val managingPocket = state.managingPocketId
+            ?.let { id -> state.pockets.firstOrNull { it.id == id } }
+        if (managingPocket != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxSize()
+                    .widthIn(max = PrototypeContentMaxWidth)
+                    .padding(horizontal = if (wide) 32.dp else 16.dp, vertical = 24.dp),
+            ) {
+                PocketManagementSurface(managingPocket, onAction)
+            }
+            return@BoxWithConstraints
+        }
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .widthIn(max = PrototypeContentMaxWidth)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .padding(horizontal = if (wide) 32.dp else 16.dp, vertical = 24.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
@@ -616,9 +645,6 @@ fun PocketsOverviewPrototype(
                     wide = wide,
                     onAction = onAction,
                 )
-                state.managingPocketId
-                    ?.let { id -> state.pockets.firstOrNull { it.id == id } }
-                    ?.let { pocket -> PocketManagementSurface(pocket, onAction) }
             }
         }
     }
@@ -704,12 +730,18 @@ private fun PocketManagementCard(
             PocketStatus(pocket)
             PocketProgressIndicator(pocket)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                PocketValue("Presupuesto", pocket.budget, Modifier.weight(1f))
+                PocketValue("Rollover", pocket.rollover, Modifier.weight(1f))
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 PocketValue("Gastado", pocket.spending, Modifier.weight(1f))
                 PocketValue("Disponible", pocket.availability, Modifier.weight(1f))
             }
             OutlinedButton(
-                onClick = { onAction(PocketManagementAction.Open(pocket.id)) },
-                modifier = Modifier.fillMaxWidth(),
+                onClick = { onAction(PocketManagementAction.OpenManagement(pocket.id)) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = "Gestionar ${pocket.name}" },
             ) {
                 Text("Gestionar Pocket")
             }
@@ -724,15 +756,35 @@ private fun PocketManagementSurface(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         shape = MaterialTheme.shapes.extraLarge,
     ) {
         Column(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text("Gestionar ${pocket.name}", style = MaterialTheme.typography.titleLarge)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
+                    onClick = { onAction(PocketManagementAction.CloseManagement) },
+                    modifier = Modifier.semantics { contentDescription = "Volver a Pockets" },
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("Volver")
+                }
+                Text(
+                    "Gestionar ${pocket.name}",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f),
+                )
+            }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 PocketValue("Presupuesto", pocket.budget, Modifier.weight(1f))
                 PocketValue("Rollover", pocket.rollover, Modifier.weight(1f))
@@ -766,7 +818,7 @@ private fun PocketManagementSurface(
                 Text("Asignar presupuesto")
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { onAction(PocketManagementAction.View(pocket.id)) }) { Text("Ver") }
+                TextButton(onClick = { onAction(PocketManagementAction.ViewDetails(pocket.id)) }) { Text("Ver") }
                 TextButton(onClick = { onAction(PocketManagementAction.Edit(pocket.id)) }) { Text("Editar") }
                 TextButton(onClick = { onAction(PocketManagementAction.Archive(pocket.id)) }) { Text("Archivar") }
             }

@@ -44,25 +44,33 @@ enum class PocketMoveDirection {
 }
 
 sealed interface PocketManagementAction {
-    data object Create : PocketManagementAction
+    val pocketId: String?
 
-    data class Open(val pocketId: String) : PocketManagementAction
+    data object Create : PocketManagementAction {
+        override val pocketId: String? = null
+    }
 
-    data class View(val pocketId: String) : PocketManagementAction
+    data object CloseManagement : PocketManagementAction {
+        override val pocketId: String? = null
+    }
+
+    data class OpenManagement(override val pocketId: String) : PocketManagementAction
+
+    data class ViewDetails(override val pocketId: String) : PocketManagementAction
 
     data class Move(
-        val pocketId: String,
+        override val pocketId: String,
         val direction: PocketMoveDirection,
     ) : PocketManagementAction
 
-    data class Edit(val pocketId: String) : PocketManagementAction
+    data class Edit(override val pocketId: String) : PocketManagementAction
 
-    data class Archive(val pocketId: String) : PocketManagementAction
+    data class Archive(override val pocketId: String) : PocketManagementAction
 
-    data class SetAllocation(val pocketId: String) : PocketManagementAction
+    data class SetAllocation(override val pocketId: String) : PocketManagementAction
 
     data class SetRollover(
-        val pocketId: String,
+        override val pocketId: String,
         val enabled: Boolean,
     ) : PocketManagementAction
 }

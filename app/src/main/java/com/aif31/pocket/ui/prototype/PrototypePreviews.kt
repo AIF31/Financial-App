@@ -72,23 +72,35 @@ private fun ActionableDashboardLowAvailabilityPreview() {
 @Composable
 private fun QuickExpensePreview() {
     var state by remember { mutableStateOf(quickExpensePrototypeState) }
+    var returnedToDashboard by remember { mutableStateOf(false) }
     PocketTheme {
-        QuickExpensePrototype(
-            state = state,
-            onAmountChange = { state = state.copy(amount = it) },
-            onPocketSelected = { state = state.copy(selectedPocketId = it) },
-            onMerchantChange = { state = state.copy(merchant = it) },
-            onPaymentMethodSelected = { state = state.copy(selectedPaymentMethodId = it) },
-            onToggleDetails = { state = state.copy(detailsExpanded = !state.detailsExpanded) },
-            onSave = { state = state.copy(saveFeedback = "Gasto guardado") },
-            onBack = {},
-            onMovementTypeSelected = { state = state.copy(movementType = it) },
-            onCurrencySelected = { state = state.copy(currency = it) },
-            onOriginalAmountChange = { state = state.copy(originalAmount = it) },
-            onConversionStatusSelected = { state = state.copy(conversionStatus = it) },
-            onDateTimeChange = { state = state.copy(dateTime = it) },
-            onNoteChange = { state = state.copy(note = it) },
-        )
+        if (returnedToDashboard) {
+            ActionableDashboardPrototype(
+                state = dashboardPrototypeState,
+                onRecordExpense = { returnedToDashboard = false },
+                onManagePocket = {},
+            )
+        } else {
+            QuickExpensePrototype(
+                state = state,
+                onAmountChange = { state = state.copy(amount = it) },
+                onPocketSelected = { state = state.copy(selectedPocketId = it) },
+                onMerchantChange = { state = state.copy(merchant = it) },
+                onPaymentMethodSelected = { state = state.copy(selectedPaymentMethodId = it) },
+                onToggleDetails = { state = state.copy(detailsExpanded = !state.detailsExpanded) },
+                onSave = { state = state.copy(saveFeedback = "Gasto guardado") },
+                onBack = {
+                    state = state.copy(saveFeedback = null)
+                    returnedToDashboard = true
+                },
+                onMovementTypeSelected = { state = state.copy(movementType = it) },
+                onCurrencySelected = { state = state.copy(currency = it) },
+                onOriginalAmountChange = { state = state.copy(originalAmount = it) },
+                onConversionStatusSelected = { state = state.copy(conversionStatus = it) },
+                onDateTimeChange = { state = state.copy(dateTime = it) },
+                onNoteChange = { state = state.copy(note = it) },
+            )
+        }
     }
 }
 
@@ -152,21 +164,25 @@ private fun PocketsOverviewPreview() {
             state = state,
             onAction = { action ->
                 val pocketName = state.pockets
-                    .firstOrNull { it.id == action.pocketIdOrNull() }
+                    .firstOrNull { it.id == action.pocketId }
                     ?.name
                     .orEmpty()
                 state = when (action) {
                     PocketManagementAction.Create -> state.copy(
                         managementFeedback = "Abrir creación de Pocket",
                     )
-                    is PocketManagementAction.Open -> state.copy(
+                    PocketManagementAction.CloseManagement -> state.copy(
+                        managingPocketId = null,
+                        managementFeedback = null,
+                    )
+                    is PocketManagementAction.OpenManagement -> state.copy(
                         managingPocketId = action.pocketId,
                         managementFeedback = null,
                     )
                     is PocketManagementAction.Move -> state.copy(
                         managementFeedback = "Mover $pocketName ${action.direction.spanishLabel()}",
                     )
-                    is PocketManagementAction.View -> state.copy(
+                    is PocketManagementAction.ViewDetails -> state.copy(
                         managementFeedback = "Abrir detalle de $pocketName",
                     )
                     is PocketManagementAction.Edit -> state.copy(
@@ -199,7 +215,11 @@ private fun PocketsOverviewPreview() {
 private fun PocketsLargeTextPreview() {
     PocketTheme {
         PocketsOverviewPrototype(
-            state = pocketsPrototypeState.copy(pockets = listOf(prototypePockets.last())),
+            state = pocketsPrototypeState.copy(
+                allocated = "SAR 600.00 presupuestados",
+                available = "SAR 0.00 disponibles",
+                pockets = listOf(prototypePockets.last()),
+            ),
             onAction = {},
         )
     }
@@ -224,17 +244,6 @@ private fun EmptyPocketsOverviewPreview() {
             onAction = {},
         )
     }
-}
-
-private fun PocketManagementAction.pocketIdOrNull(): String? = when (this) {
-    PocketManagementAction.Create -> null
-    is PocketManagementAction.Open -> pocketId
-    is PocketManagementAction.View -> pocketId
-    is PocketManagementAction.Move -> pocketId
-    is PocketManagementAction.Edit -> pocketId
-    is PocketManagementAction.Archive -> pocketId
-    is PocketManagementAction.SetAllocation -> pocketId
-    is PocketManagementAction.SetRollover -> pocketId
 }
 
 private fun PocketMoveDirection.spanishLabel(): String = when (this) {
