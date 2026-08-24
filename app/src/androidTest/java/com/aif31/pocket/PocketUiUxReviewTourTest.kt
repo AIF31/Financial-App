@@ -104,20 +104,22 @@ class PocketUiUxReviewTourTest {
 
         // Dashboard: scan every metric and representative Pocket states.
         reviewScrollTarget("dashboard_list", "Tu periodo")
-        reviewScrollTarget("dashboard_list", "Disponibilidad de Pockets")
+        reviewScrollTarget("dashboard_list", "Disponible")
         reviewScrollTarget("dashboard_list", "Supermercado")
         reviewScrollTarget("dashboard_list", "Transporte")
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Más información"))
         compose.onNodeWithText("Más información").performClick()
         reviewScrollTarget("dashboard_list", "Gasto diario promedio")
         reviewScrollTarget("dashboard_list", "Proyección estimada")
 
         // New movement: cover Pocket choice, currencies, conversion status, type, payment,
         // date/time, merchant, note, and both dialog actions without mutating review data.
-        compose.onNodeWithText("Registrar gasto").performClick()
+        compose.onNodeWithTag("contextual_add").performClick()
         compose.waitUntilExactlyOneExists(hasText("Nuevo gasto"), TIMEOUT)
         pauseForReview()
         compose.onNodeWithTag("movement_amount").performTextInput("48.75")
         compose.onNodeWithTag("movement_pocket_Supermercado").performScrollTo().performClick()
+        scrollMovementTo("Más detalles")
         compose.onNodeWithText("Más detalles").performClick()
         scrollMovementTo("USD")
         compose.onNodeWithText("USD").performClick()
@@ -194,7 +196,7 @@ class PocketUiUxReviewTourTest {
         compose.onNodeWithText("Guardar fondos").performClick()
         pauseForReview(SHORT_PAUSE)
         compose.onNodeWithText("Atrás").performClick()
-        compose.onNodeWithText("Recordatorios").performClick()
+        compose.onNodeWithText("Recordatorio diario").performClick()
         compose.onNodeWithTag("reminder_time").performTextReplacement("20:30")
         closeSoftKeyboard()
         compose.onNodeWithTag("reminder_switch").performClick()
@@ -210,7 +212,7 @@ class PocketUiUxReviewTourTest {
         compose.onNodeWithTag("template_method_Tarjeta").performScrollTo().performClick()
         pauseForReview()
         compose.onNodeWithText("Atrás").performClick()
-        compose.onNodeWithText("Datos y privacidad").performClick()
+        compose.onNodeWithText("Datos y portabilidad").performClick()
         compose.onNodeWithText("Crear backup completo").assertIsDisplayed()
         compose.onNodeWithText("Restaurar backup").assertIsDisplayed()
         compose.onNodeWithText("Exportar CSV").assertIsDisplayed()

@@ -1,5 +1,6 @@
 package com.aif31.pocket.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -11,16 +12,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -35,14 +36,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.aif31.pocket.R
 import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.PocketPeriodSummary
 import java.math.BigDecimal
@@ -55,7 +59,6 @@ import java.util.Locale
 internal fun ActionableDashboardContent(
     state: LedgerState,
     contentPadding: PaddingValues,
-    onRecordExpense: () -> Unit,
     onManagePockets: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -85,20 +88,41 @@ internal fun ActionableDashboardContent(
             start = 16.dp,
             top = contentPadding.calculateTopPadding() + 16.dp,
             end = 16.dp,
-            bottom = contentPadding.calculateBottomPadding() + 24.dp,
+            bottom = contentPadding.calculateBottomPadding() + 96.dp,
         ),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         item {
-            Column(
+            Row(
                 modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Tu periodo", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    period?.let { formatPeriod(it.start, it.endExclusive.minusDays(1)) } ?: "Sin periodo activo",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Tu periodo", style = MaterialTheme.typography.headlineMedium)
+                    Surface(
+                        shape = MaterialTheme.shapes.extraLarge,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Text(
+                                period?.let { formatPeriod(it.start, it.endExclusive.minusDays(1)) } ?: "Sin periodo activo",
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                        }
+                    }
+                }
+                Image(
+                    painter = painterResource(R.drawable.pocket_kaust_logo),
+                    contentDescription = null,
+                    modifier = Modifier.size(56.dp).clip(CircleShape),
                 )
             }
         }
@@ -107,7 +131,6 @@ internal fun ActionableDashboardContent(
                 availabilityMinor = state.trackedAvailabilityMinor,
                 daysRemaining = daysRemaining,
                 status = spendingStatus,
-                onRecordExpense = onRecordExpense,
                 modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
             )
         }
@@ -213,7 +236,6 @@ private fun AvailabilityHero(
     availabilityMinor: Long,
     daysRemaining: Int,
     status: String,
-    onRecordExpense: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -222,21 +244,16 @@ private fun AvailabilityHero(
         contentColor = MaterialTheme.colorScheme.onPrimary,
         shape = MaterialTheme.shapes.extraLarge,
     ) {
-        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Disponibilidad de Pockets", style = MaterialTheme.typography.labelLarge)
+        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Disponible", style = MaterialTheme.typography.titleMedium)
             Text(formatSar(availabilityMinor), style = MaterialTheme.typography.displaySmall)
-            Text("Quedan $daysRemaining días")
-            Text(status, style = MaterialTheme.typography.bodyLarge)
-            Spacer(Modifier.height(4.dp))
-            Button(
-                onClick = onRecordExpense,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.tertiary,
-                    contentColor = MaterialTheme.colorScheme.onTertiary,
-                ),
+            Text("Quedan $daysRemaining días", style = MaterialTheme.typography.titleMedium)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Registrar gasto")
+                Icon(Icons.Default.CheckCircle, contentDescription = null)
+                Text(status, style = MaterialTheme.typography.bodyLarge)
             }
         }
     }

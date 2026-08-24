@@ -2,6 +2,7 @@ package com.aif31.pocket
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -20,14 +22,26 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FabPosition
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.IconButton
 
 
 import androidx.compose.material3.SnackbarHost
@@ -44,6 +58,8 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -61,6 +77,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -83,6 +100,8 @@ import com.aif31.pocket.ui.ProductionSettingsHub
 import com.aif31.pocket.ui.SettingsSection
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
+import java.time.Instant
+import java.time.format.DateTimeFormatter
 
 import java.time.LocalTime
 
@@ -239,6 +258,30 @@ fun PocketApp(
             Scaffold(
                 modifier = Modifier.fillMaxSize().weight(1f),
                 snackbarHost = { SnackbarHost(snackbar) },
+                floatingActionButton = {
+                    if (rootNavigationVisible) {
+                        when (screen) {
+                            RootScreen.DASHBOARD -> ExtendedFloatingActionButton(
+                                onClick = { backStack.add(MovementRoute()) },
+                                icon = { Icon(Icons.Default.Add, contentDescription = "Registrar gasto") },
+                                text = { Text("Registrar gasto") },
+                                modifier = Modifier.testTag("contextual_add"),
+                                containerColor = MaterialTheme.colorScheme.tertiary,
+                                contentColor = MaterialTheme.colorScheme.onTertiary,
+                            )
+                            RootScreen.MOVEMENTS -> FloatingActionButton(
+                                onClick = { backStack.add(MovementRoute()) },
+                                modifier = Modifier.testTag("contextual_add"),
+                                containerColor = MaterialTheme.colorScheme.tertiary,
+                                contentColor = MaterialTheme.colorScheme.onTertiary,
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "Registrar gasto")
+                            }
+                            else -> Unit
+                        }
+                    }
+                },
+                floatingActionButtonPosition = FabPosition.End,
                 bottomBar = {
                     if (!useNavigationRail && rootNavigationVisible) {
                         NavigationBar {
@@ -258,7 +301,6 @@ fun PocketApp(
                     RootScreen.DASHBOARD -> DashboardScreen(
                         state = state,
                         padding = padding,
-                        onRecordExpense = { backStack.add(MovementRoute()) },
                         onManagePockets = { navigateRoot(RootScreen.POCKETS) },
                     )
                     RootScreen.MOVEMENTS -> MovementsScreen(
@@ -390,13 +432,11 @@ private fun OnboardingScreen(ledger: PocketLedger, preferences: PreferencesStore
 private fun DashboardScreen(
     state: LedgerState,
     padding: PaddingValues,
-    onRecordExpense: () -> Unit,
     onManagePockets: () -> Unit,
 ) {
     ActionableDashboardContent(
         state = state,
         contentPadding = padding,
-        onRecordExpense = onRecordExpense,
         onManagePockets = onManagePockets,
     )
 }
@@ -444,19 +484,16 @@ private fun MovementsScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text("Movimientos", style = MaterialTheme.typography.headlineMedium)
-                Button(onClick = onRecordExpense) { Text("Registrar gasto") }
-            }
+            Text("Movimientos", style = MaterialTheme.typography.headlineMedium)
         }
         item {
             OutlinedTextField(
-                query,
-                { query = it },
-                label = { Text("Buscar comercio o nota") },
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Buscar comercio o nota") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                singleLine = true,
+                shape = MaterialTheme.shapes.extraLarge,
                 modifier = Modifier.fillMaxWidth().testTag("history_search"),
             )
         }
@@ -473,7 +510,7 @@ private fun MovementsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("${filtered.size} ${if (filtered.size == 1) "resultado" else "resultados"}")
+                Text("${filtered.size} ${if (filtered.size == 1) "movimiento" else "movimientos"}", color = MaterialTheme.colorScheme.primary)
                 TextButton(
                     onClick = {
                         query = ""
@@ -493,38 +530,16 @@ private fun MovementsScreen(
         groupedMovements.forEach { (date, movements) ->
             item(key = "date-$date") {
                 Text(
-                    date.toString(),
+                    formatMovementDate(date, state.currentLocalDate),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
             items(movements, key = { it.id }) { movement ->
-                Card(Modifier.fillMaxWidth().clickable { selected = movement }) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(
-                            movement.merchant?.takeIf { it.isNotBlank() } ?: movement.pocketName,
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Text(
-                            (if (movement.type == MovementType.EXPENSE) "-" else "+") +
-                                money(movement.sarAmountMinor),
-                            style = MaterialTheme.typography.titleLarge,
-                        )
-                        Text("${movement.pocketName} · ${movement.localDate}")
-                        if (movement.originalCurrencyCode != "SAR" && movement.originalAmountMinor != null) {
-                            Text(
-                                "${movement.originalCurrencyCode} ${minorNumber(movement.originalAmountMinor)} · " +
-                                    if (movement.conversionStatus == ConversionStatus.CONFIRMED) "Confirmado" else "Estimado",
-                            )
-                        } else {
-                            Text("Confirmado", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        movement.note?.takeIf { it.isNotBlank() }?.let { Text(it) }
-                    }
-                }
+                MovementCard(
+                    movement = movement,
+                    onClick = { selected = movement },
+                )
             }
         }
     }
@@ -557,6 +572,85 @@ private fun MovementsScreen(
         )
     }
 
+}
+
+@Composable
+private fun MovementCard(movement: Movement, onClick: () -> Unit) {
+    val isRefund = movement.type == MovementType.REFUND
+    val leadingIcon = when {
+        isRefund -> Icons.AutoMirrored.Filled.Undo
+        movement.pocketName.contains("transporte", ignoreCase = true) -> Icons.Default.DirectionsCar
+        else -> Icons.Default.ShoppingCart
+    }
+    val amountColor = if (isRefund) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+    val time = Instant.ofEpochMilli(movement.occurredAtUtcMillis)
+        .atZone(java.time.ZoneId.of(movement.zoneId))
+        .format(DateTimeFormatter.ofPattern("HH:mm"))
+
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = if (isRefund) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+                modifier = Modifier.size(52.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(leadingIcon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    movement.merchant?.takeIf { it.isNotBlank() }
+                        ?: if (isRefund) "Devolución ${movement.pocketName}" else movement.pocketName,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    listOfNotNull(movement.pocketName, movement.paymentMethodName).joinToString(" · "),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                movement.note?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    (if (isRefund) "+ " else "- ") + money(movement.sarAmountMinor),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color = amountColor,
+                )
+                if (movement.originalCurrencyCode != "SAR" && movement.originalAmountMinor != null) {
+                    Text(
+                        "${movement.originalCurrencyCode} ${minorNumber(movement.originalAmountMinor)} · " +
+                            if (movement.conversionStatus == ConversionStatus.CONFIRMED) "Confirmado" else "Estimado",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                } else {
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Text(if (isRefund) "Devolución" else "Confirmado", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+                Text(time, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
 }
 
 @Composable
@@ -596,59 +690,98 @@ private fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pad
     var editing by remember { mutableStateOf<PocketPeriodSummary?>(null) }
     var creating by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val selectedPeriod = state.periods.firstOrNull { it.id == selectedPeriodId } ?: state.currentPeriod
     val shownPockets = state.pocketSummariesByPeriod[selectedPeriodId].orEmpty()
     val activePockets = shownPockets.filterNot { it.pocket.archived }
     val allocatedMinor = shownPockets.sumOf { it.budgetMinor }
     val availableMinor = shownPockets.sumOf { it.availabilityMinor }
-    val periodFundsMinor = state.periods
-        .firstOrNull { it.id == selectedPeriodId }
-        ?.newFundsMinor
-        ?: state.newFundsMinor
+    val periodFundsMinor = selectedPeriod?.newFundsMinor ?: state.newFundsMinor
     val unallocatedForPeriodMinor = periodFundsMinor - allocatedMinor
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding).testTag("pockets_list"),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Pockets", style = MaterialTheme.typography.headlineMedium)
-                Card(Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+            Text("Pockets", style = MaterialTheme.typography.headlineMedium)
+        }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(state.periods, key = { it.id }) { period ->
+                    Surface(
+                        shape = MaterialTheme.shapes.extraLarge,
+                        color = if (selectedPeriodId == period.id) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainer
+                        },
+                        modifier = Modifier.clickable { selectedPeriodId = period.id },
                     ) {
-                        Text("Resumen del periodo", style = MaterialTheme.typography.titleLarge)
-                        Text("Asignado: ${money(allocatedMinor)}")
-                        Text("Disponible: ${money(availableMinor)}")
-                        Text("Sin asignar: ${money(unallocatedForPeriodMinor)}")
+                        Text(
+                            formatPeriodRange(period.start, period.endExclusive.minusDays(1)),
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.titleMedium,
+                        )
                     }
                 }
             }
         }
         item {
-            Text("Periodo")
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(state.periods, key = { it.id }) { period ->
-                    TextButton(onClick = { selectedPeriodId = period.id }) {
-                        Text(if (selectedPeriodId == period.id) "✓ ${period.start}" else period.start.toString())
+            Card(Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        PocketSummaryMetric("Asignado", money(allocatedMinor), Modifier.weight(1f))
+                        VerticalDivider(Modifier.height(64.dp))
+                        PocketSummaryMetric("Disponible", money(availableMinor), Modifier.weight(1f))
                     }
+                    Text(
+                        "${money(unallocatedForPeriodMinor)} sin asignar",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
         item {
             Button(
                 onClick = { creating = true },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.tertiary,
+                    contentColor = MaterialTheme.colorScheme.onTertiary,
+                ),
             ) {
-                Text("Crear Pocket")
+                Icon(Icons.Default.Add, contentDescription = null)
+                Spacer(Modifier.size(8.dp))
+                Text("Crear Pocket", style = MaterialTheme.typography.titleMedium)
+            }
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Pockets activos", style = MaterialTheme.typography.titleLarge)
+                Text("Toca uno para ver y administrar", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         items(activePockets, key = { it.pocket.id }) { summary ->
             val statusText = when {
                 summary.exhausted -> "Agotado"
                 summary.atRisk -> "En riesgo"
+                summary.budgetMinor <= 0L -> "Sin presupuesto"
                 else -> "En buen ritmo"
+            }
+            val statusColor = when {
+                summary.exhausted -> MaterialTheme.colorScheme.error
+                summary.atRisk || summary.budgetMinor <= 0L -> MaterialTheme.colorScheme.tertiary
+                else -> MaterialTheme.colorScheme.primary
             }
             Card(
                 Modifier
@@ -656,26 +789,70 @@ private fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pad
                     .testTag("pocket_${summary.pocket.name}")
                     .clickable { selected = summary },
             ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.Top,
                 ) {
-                    Text(summary.pocket.name, style = MaterialTheme.typography.titleLarge)
-                    Text("Disponible: ${money(summary.availabilityMinor)}")
-                    Text("Presupuesto: ${money(summary.budgetMinor)}")
-                    Text("$statusText · ${summary.consumedPercent}% consumido")
-                    LinearProgressIndicator(
-                        progress = { (summary.consumedPercent / 100f).coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth().height(6.dp),
-                    )
-                    Text(if (summary.pocket.rolloverEnabled) "Rollover activado" else "Sin rollover")
-                    TextButton(
-                        onClick = { selected = summary },
-                        modifier = Modifier.semantics {
-                            contentDescription = "Gestionar ${summary.pocket.name}"
-                        },
-                    ) {
-                        Text("Gestionar Pocket")
+                    PocketGlyph(summary.pocket.name)
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                            IconButton(
+                                onClick = { selected = summary },
+                                modifier = Modifier.semantics { contentDescription = "Gestionar ${summary.pocket.name}" },
+                            ) {
+                                Icon(Icons.Default.MoreVert, contentDescription = null)
+                            }
+                        }
+                        Text(
+                            "${money(summary.availabilityMinor)} disponibles",
+                            color = statusColor,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            LinearProgressIndicator(
+                                progress = { (summary.consumedPercent / 100f).coerceIn(0f, 1f) },
+                                modifier = Modifier.weight(1f).height(6.dp),
+                                color = statusColor,
+                            )
+                            Text("${summary.consumedPercent}%", color = statusColor)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "Presupuesto ${money(summary.budgetMinor)}",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Surface(
+                                shape = MaterialTheme.shapes.extraLarge,
+                                color = if (summary.budgetMinor <= 0L) {
+                                    MaterialTheme.colorScheme.tertiaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                },
+                            ) {
+                                Text(
+                                    statusText,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    color = statusColor,
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -695,7 +872,9 @@ private fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pad
             items(shownPockets.filter { it.pocket.archived }, key = { "archived-${it.pocket.id}" }) { summary ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(summary.pocket.name)
-                    TextButton(onClick = { scope.launch { ledger.execute(LedgerCommand.ArchivePocket(summary.pocket.id, false)) } }) { Text("Restaurar") }
+                    TextButton(onClick = { scope.launch { ledger.execute(LedgerCommand.ArchivePocket(summary.pocket.id, false)) } }) {
+                        Text("Restaurar")
+                    }
                 }
             }
         }
@@ -713,6 +892,33 @@ private fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pad
     if (creating || editing != null) {
         PocketEditorDialog(editing, ledger) { creating = false; editing = null }
     }
+}
+
+@Composable
+private fun PocketSummaryMetric(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontFamily = FontFamily.Monospace)
+    }
+}
+
+@Composable
+private fun PocketGlyph(name: String) {
+    val icon = if (name.contains("transporte", ignoreCase = true)) Icons.Default.DirectionsCar else Icons.Default.ShoppingCart
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier.size(56.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+private fun formatPeriodRange(start: java.time.LocalDate, end: java.time.LocalDate): String {
+    val formatter = DateTimeFormatter.ofPattern("d MMM", Locale.forLanguageTag("es"))
+    return "${start.format(formatter)} – ${end.format(formatter)}"
 }
 
 @Composable
@@ -1143,6 +1349,12 @@ private fun SettingsDetailScreen(
 }
 
 private val moneyFormat = DecimalFormat("#,##0.00", DecimalFormatSymbols(Locale.US))
+private fun formatMovementDate(date: java.time.LocalDate, today: java.time.LocalDate): String {
+    val formatter = DateTimeFormatter.ofPattern("d MMM", Locale.forLanguageTag("es"))
+    val formatted = date.format(formatter)
+    return if (date == today) "Hoy, $formatted" else formatted
+}
+
 private fun money(minor: Long): String = "SAR ${minorNumber(minor)}"
 private fun minorNumber(minor: Long): String =
     moneyFormat.format(java.math.BigDecimal.valueOf(minor).movePointLeft(2))

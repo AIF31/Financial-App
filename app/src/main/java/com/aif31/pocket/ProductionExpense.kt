@@ -1,6 +1,8 @@
 package com.aif31.pocket
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -9,13 +11,18 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,6 +49,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.ConversionStatus
@@ -200,7 +208,7 @@ internal fun ProductionMovementScreen(
                         when {
                             initialMovement != null -> "Guardar cambios"
                             refund -> "Guardar devolución"
-                            else -> "Guardar gasto"
+                            else -> "Guardar gasto · SAR ${amount.ifBlank { "0.00" }}"
                         },
                     )
                 }
@@ -235,20 +243,24 @@ internal fun ProductionMovementScreen(
                 }
             }
             item {
+                Text("Importe", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                 OutlinedTextField(
                     value = amount,
                     onValueChange = {
-                        amount = it
+                        amount = it.filter { character -> character.isDigit() || character == '.' }
                         if (error == "Escribe un importe válido") error = null
                     },
-                    label = { Text("Importe SAR") },
+                    prefix = { Text("SAR", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary) },
                     supportingText = if (error == "Escribe un importe válido") {
                         { Text(error.orEmpty()) }
                     } else {
                         null
                     },
                     isError = error == "Escribe un importe válido",
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.displaySmall.copy(fontFamily = FontFamily.Monospace),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    shape = MaterialTheme.shapes.extraLarge,
                     modifier = Modifier
                         .fillMaxWidth()
                         .focusRequester(focusRequester)
@@ -256,17 +268,35 @@ internal fun ProductionMovementScreen(
                 )
             }
             item {
-                Text("Pocket", style = MaterialTheme.typography.titleMedium)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(state.pockets.filterNot { it.pocket.archived }, key = { it.pocket.id }) { pocket ->
-                        OutlinedButton(
-                            onClick = {
-                                selectedPocket = pocket.pocket.id
-                                if (error == "Selecciona un Pocket") error = null
-                            },
-                            modifier = Modifier.testTag("movement_pocket_${pocket.pocket.name}"),
+                Text("¿De qué Pocket?", style = MaterialTheme.typography.titleLarge)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.pockets.filterNot { it.pocket.archived }.chunked(2).forEach { rowPockets ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Text(if (selectedPocket == pocket.pocket.id) "✓ ${pocket.pocket.name}" else pocket.pocket.name)
+                            rowPockets.forEach { pocket ->
+                                val isSelected = selectedPocket == pocket.pocket.id
+                                OutlinedButton(
+                                    onClick = {
+                                        selectedPocket = pocket.pocket.id
+                                        if (error == "Selecciona un Pocket") error = null
+                                    },
+                                    modifier = Modifier.weight(1f).heightIn(min = 64.dp)
+                                        .testTag("movement_pocket_${pocket.pocket.name}"),
+                                    colors = if (isSelected) {
+                                        androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                                        )
+                                    } else {
+                                        androidx.compose.material3.ButtonDefaults.outlinedButtonColors()
+                                    },
+                                ) {
+                                    Text(if (isSelected) "✓ ${pocket.pocket.name}" else pocket.pocket.name)
+                                }
+                            }
+                            if (rowPockets.size == 1) Box(Modifier.weight(1f))
                         }
                     }
                 }
@@ -309,8 +339,30 @@ internal fun ProductionMovementScreen(
                 }
             }
             item {
-                TextButton(onClick = { detailsExpanded = !detailsExpanded }) {
-                    Text(if (detailsExpanded) "Ocultar detalles" else "Más detalles")
+                Card(
+                    modifier = Modifier.fillMaxWidth().clickable { detailsExpanded = !detailsExpanded },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        Surface(
+                            shape = MaterialTheme.shapes.extraLarge,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(48.dp),
+                        ) {
+                            Box(contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                Icon(Icons.Default.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(if (detailsExpanded) "Ocultar detalles" else "Más detalles", style = MaterialTheme.typography.titleMedium)
+                            Text("Fecha, moneda, nota y devolución", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
+                    }
                 }
             }
             if (detailsExpanded) {

@@ -93,12 +93,13 @@ class PocketAppFlowTest {
         compose.onNodeWithText("Guardar presupuesto").performClick()
 
         compose.onNodeWithText("Inicio").performClick()
-        compose.onNodeWithText("Registrar gasto").performClick()
+        compose.onNodeWithTag("contextual_add").performClick()
         compose.onNodeWithTag("movement_amount").performTextInput("100.00")
         compose.onNodeWithTag("movement_pocket_Supermercado").performClick()
-        compose.onNodeWithText("Guardar gasto").performClick()
+        compose.onNodeWithText("Guardar gasto", substring = true).performClick()
 
         compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Más información"))
         compose.onNodeWithText("Más información").performClick()
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Gasto diario promedio"))
         compose.onNodeWithText("Gasto diario promedio").assertIsDisplayed()
@@ -107,7 +108,7 @@ class PocketAppFlowTest {
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasTestTag("rollover_Supermercado"))
         compose.onNodeWithTag("rollover_Supermercado").assertIsDisplayed()
         compose.onNodeWithText("Movimientos").performClick()
-        compose.onNodeWithText("-SAR 100.00").assertIsDisplayed()
+        compose.onNodeWithText("- SAR 100.00").assertIsDisplayed()
         compose.onNodeWithText("Supermercado").assertIsDisplayed()
     }
 
@@ -122,7 +123,7 @@ class PocketAppFlowTest {
 
         compose.waitUntilExactlyOneExists(hasText("Inicio"), 5_000)
         compose.onNodeWithText("Ajustes").performClick()
-        compose.onNodeWithText("Recordatorios").performClick()
+        compose.onNodeWithText("Recordatorio diario").performClick()
         compose.onAllNodesWithText("Inicio").assertCountEquals(0)
         compose.onNodeWithTag("settings_list").performScrollToNode(hasTestTag("reminder_switch"))
         compose.onNodeWithTag("reminder_time").performTextReplacement("08:30")
@@ -163,7 +164,7 @@ class PocketAppFlowTest {
         compose.waitUntilExactlyOneExists(hasText("Inicio"), 5_000)
         compose.onNodeWithText("Movimientos").performClick()
         compose.onNodeWithTag("history_search").performTextInput("fruta")
-        compose.onNodeWithText("Mercado").assertExists()
+        compose.waitUntilExactlyOneExists(hasText("Mercado"), 5_000)
         compose.onAllNodesWithText("Hotel").assertCountEquals(0)
         compose.onAllNodesWithText("Taxi").assertCountEquals(0)
         compose.onNodeWithTag("history_search").performTextClearance()
@@ -176,7 +177,7 @@ class PocketAppFlowTest {
 
         compose.onNodeWithTag("filter_pocket").performClick()
         compose.onNodeWithTag("filter_pocket_option_1").performClick()
-        compose.onNodeWithText("Mercado").assertExists()
+        compose.waitUntilExactlyOneExists(hasText("Mercado"), 5_000)
         compose.onAllNodesWithText("Hotel").assertCountEquals(0)
         compose.onAllNodesWithText("Taxi").assertCountEquals(0)
         compose.onNodeWithTag("clear_filters").performClick()
@@ -189,7 +190,7 @@ class PocketAppFlowTest {
 
         compose.onNodeWithTag("filter_method").performClick()
         compose.onNodeWithTag("filter_method_option_1").performClick()
-        compose.onNodeWithText("Mercado").assertExists()
+        compose.waitUntilExactlyOneExists(hasText("Mercado"), 5_000)
         compose.onAllNodesWithText("Hotel").assertCountEquals(0)
         compose.onAllNodesWithText("Taxi").assertCountEquals(0)
     }
@@ -208,17 +209,17 @@ class PocketAppFlowTest {
         compose.setContent { PocketApp(ledger, undoWindowMillis = 1_000) }
         compose.waitUntilExactlyOneExists(hasText("Inicio"), 5_000)
         compose.onNodeWithText("Movimientos").performClick()
-        compose.onNodeWithText("-SAR 10.00").performClick()
+        compose.onNodeWithText("- SAR 10.00").performClick()
         compose.onNodeWithText("Eliminar").performClick()
         compose.waitUntilExactlyOneExists(hasText("Deshacer"), 5_000)
         compose.onNodeWithText("Deshacer").performClick()
-        compose.waitUntilExactlyOneExists(hasText("-SAR 10.00"), 5_000)
+        compose.waitUntilExactlyOneExists(hasText("- SAR 10.00"), 5_000)
 
-        compose.onNodeWithText("-SAR 10.00").performClick()
+        compose.onNodeWithText("- SAR 10.00").performClick()
         compose.onNodeWithText("Eliminar").performClick()
         compose.waitUntilExactlyOneExists(hasText("Deshacer"), 5_000)
         compose.waitUntilDoesNotExist(hasText("Deshacer"), 5_000)
-        compose.onAllNodesWithText("-SAR 10.00").assertCountEquals(0)
+        compose.onAllNodesWithText("- SAR 10.00").assertCountEquals(0)
     }
 
     @Test
@@ -236,7 +237,7 @@ class PocketAppFlowTest {
                 compose.waitUntilExactlyOneExists(hasText("Nuevo gasto"), 5_000)
                 compose.onNodeWithTag("movement_amount").performTextInput("12.34")
                 compose.onNodeWithTag("movement_pocket_Supermercado").performClick()
-                compose.onNodeWithText("Guardar gasto").performClick()
+                compose.onNodeWithText("Guardar gasto", substring = true).performClick()
                 compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
                 val saved = runBlocking {
                     application.ledger.state.first { it.movements.size == 1 }.movements.single()
