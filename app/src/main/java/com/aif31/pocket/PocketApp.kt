@@ -595,7 +595,10 @@ private fun MovementDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (refund) "Nueva devolución" else "Nuevo gasto") },
         text = {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyColumn(
+                modifier = Modifier.testTag("movement_form"),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 item {
                     if (state.templates.any { !it.archived }) {
                         Text("Plantillas")
@@ -842,7 +845,12 @@ private fun SettingsScreen(
             message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         }
         items(state.paymentMethods, key = { it.id }) { method ->
-            Card(Modifier.fillMaxWidth().clickable { editingMethod = method.id; methodName = method.name }) {
+            Card(
+                Modifier
+                    .fillMaxWidth()
+                    .testTag("payment_method_${method.name}")
+                    .clickable { editingMethod = method.id; methodName = method.name },
+            ) {
                 Row(Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(method.name + if (method.archived) " (archivado)" else "")
                     TextButton(onClick = { scope.launch { ledger.execute(LedgerCommand.ArchivePaymentMethod(method.id, !method.archived)) } }) {
@@ -859,7 +867,10 @@ private fun SettingsScreen(
             Text("Pocket")
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(state.pockets.filterNot { it.pocket.archived }, key = { it.pocket.id }) { pocket ->
-                    OutlinedButton(onClick = { templatePocketId = pocket.pocket.id }) {
+                    OutlinedButton(
+                        onClick = { templatePocketId = pocket.pocket.id },
+                        modifier = Modifier.testTag("template_pocket_${pocket.pocket.name}"),
+                    ) {
                         Text(if (templatePocketId == pocket.pocket.id) "✓ ${pocket.pocket.name}" else pocket.pocket.name)
                     }
                 }
@@ -868,7 +879,10 @@ private fun SettingsScreen(
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 item { OutlinedButton(onClick = { templateMethodId = null }) { Text(if (templateMethodId == null) "✓ Ninguno" else "Ninguno") } }
                 items(state.paymentMethods.filterNot { it.archived }, key = { it.id }) { method ->
-                    OutlinedButton(onClick = { templateMethodId = method.id }) {
+                    OutlinedButton(
+                        onClick = { templateMethodId = method.id },
+                        modifier = Modifier.testTag("template_method_${method.name}"),
+                    ) {
                         Text(if (templateMethodId == method.id) "✓ ${method.name}" else method.name)
                     }
                 }
