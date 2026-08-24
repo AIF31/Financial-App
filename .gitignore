@@ -8,3 +8,4 @@ captures/
 *.jks
 *.keystore
 .DS_Store
+/Skills-Guide.md
