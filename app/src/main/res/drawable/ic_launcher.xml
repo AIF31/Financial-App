@@ -7,7 +7,7 @@
         <bitmap
             android:antialias="true"
             android:filter="true"
-            android:gravity="center"
+            android:gravity="fill"
             android:src="@drawable/pocket_kaust_logo" />
     </item>
 </layer-list>
