@@ -1,5 +1,12 @@
 ## Agent skills
 
+### Development environment
+
+The canonical development checkout is the Windows project at
+`$env:USERPROFILE\StudioProjects\Financial-App`. Run builds, tests, and
+source edits there. Treat WSL copies as reference-only unless the user explicitly
+requests WSL development.
+
 ### Issue tracker
 
 Issues and specs are tracked in GitHub Issues for AIF31/Financial-App. See `docs/agents/issue-tracker.md`.

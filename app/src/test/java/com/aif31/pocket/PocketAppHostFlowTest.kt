@@ -69,23 +69,75 @@ class PocketAppHostFlowTest {
         compose.waitUntilAtLeastOneExists(hasText("SAR 1,000.00"), 5_000)
 
         compose.onNodeWithText("Pockets").performClick()
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("pocket_Supermercado"))
         compose.onNodeWithTag("pocket_Supermercado").performClick()
-        compose.onNodeWithTag("allocation_amount").performTextInput("300.00")
+        compose.onNodeWithTag("allocation_amount").performTextReplacement("300.00")
         compose.onNodeWithText("Guardar presupuesto").performClick()
-        compose.onNodeWithContentDescription("Añadir movimiento").performClick()
+        compose.onNodeWithText("Inicio").performClick()
+        compose.onNodeWithText("Registrar gasto").performClick()
         compose.onNodeWithTag("movement_amount").performTextInput("100.00")
         compose.onNodeWithTag("movement_pocket_Supermercado").performClick()
         compose.onNodeWithText("Guardar gasto").performClick()
 
         compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
-        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Gasto diario promedio"))
-        compose.onNodeWithText("Gasto diario promedio").assertIsDisplayed()
-        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Disponible: SAR 200.00"))
-        compose.onNodeWithText("Disponible: SAR 200.00").assertIsDisplayed()
+
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("SAR 200.00 disponibles"))
+        compose.onNodeWithText("SAR 200.00 disponibles").assertIsDisplayed()
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasTestTag("rollover_Supermercado"))
         compose.onNodeWithTag("rollover_Supermercado").assertIsDisplayed()
         compose.onNodeWithText("Movimientos").performClick()
         compose.onNodeWithText("-SAR 100.00").assertIsDisplayed()
+    }
+
+    @Test
+    fun dashboard_expense_action_opens_a_full_screen_task_and_returns_to_inicio() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone),
+            zone,
+        )
+        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000)) }
+
+        compose.setContent { PocketApp(ledger) }
+        compose.waitUntilExactlyOneExists(hasText("Registrar gasto"), 5_000)
+        compose.onNodeWithText("Registrar gasto").performClick()
+
+        compose.waitUntilExactlyOneExists(hasText("Nuevo gasto"), 5_000)
+        compose.onAllNodesWithText("Inicio").assertCountEquals(0)
+        compose.onNodeWithTag("movement_amount").performTextInput("12.34")
+        compose.onNodeWithTag("movement_pocket_Supermercado").performClick()
+        compose.onNodeWithText("Guardar gasto").performClick()
+
+        compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        compose.onNodeWithText("Inicio").assertExists()
+        val saved = runBlocking {
+            ledger.state.first { it.movements.size == 1 }.movements.single()
+        }
+        assertEquals(1_234L, saved.sarAmountMinor)
+    }
+
+    @Test
+    fun quick_expense_keeps_advanced_fields_behind_more_details() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone),
+            zone,
+        )
+        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000)) }
+
+        compose.setContent { PocketApp(ledger) }
+        compose.waitUntilExactlyOneExists(hasText("Registrar gasto"), 5_000)
+        compose.onNodeWithText("Registrar gasto").performClick()
+
+        compose.onNodeWithText("Fecha y hora").assertDoesNotExist()
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("Más detalles"))
+        compose.onNodeWithText("Más detalles").performClick()
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("Fecha y hora"))
+        compose.onNodeWithText("Fecha y hora").assertIsDisplayed()
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("Ocultar detalles"))
+        compose.onNodeWithText("Ocultar detalles").assertIsDisplayed()
     }
 
     @Test
@@ -99,6 +151,8 @@ class PocketAppHostFlowTest {
 
         compose.waitUntilExactlyOneExists(hasText("Inicio"), 5_000)
         compose.onNodeWithText("Ajustes").performClick()
+        compose.onNodeWithText("Recordatorios").performClick()
+        compose.onAllNodesWithText("Inicio").assertCountEquals(0)
         compose.onNodeWithTag("settings_list").performScrollToNode(hasTestTag("reminder_switch"))
         compose.onNodeWithTag("reminder_time").performTextReplacement("08:30")
         compose.onNodeWithTag("reminder_switch").performClick()
@@ -133,7 +187,7 @@ class PocketAppHostFlowTest {
                 sarAmountMinor = 3_000, occurredAtUtcMillis = clock.millis() + 2, localDate = nextPeriod.start,
                 merchant = "Taxi", paymentMethodId = card.id))
         }
-        val seededState = runBlocking { ledger.state.first { it.movements.size == 3 } }
+        runBlocking { ledger.state.first { it.movements.size == 3 } }
         compose.setContent { PocketApp(ledger) }
         compose.waitUntilExactlyOneExists(hasText("Inicio"), 5_000)
         compose.onNodeWithText("Movimientos").performClick()
@@ -144,24 +198,26 @@ class PocketAppHostFlowTest {
         compose.onNodeWithTag("history_search").performTextClearance()
 
         compose.onNodeWithTag("filter_period").performClick()
+        compose.onNodeWithTag("filter_period_option_1").performClick()
         compose.onNodeWithText("Hotel").assertExists()
         compose.onAllNodesWithText("Taxi").assertCountEquals(0)
-        repeat(seededState.periods.size) { compose.onNodeWithTag("filter_period").performClick() }
+        compose.onNodeWithTag("clear_filters").performClick()
 
         compose.onNodeWithTag("filter_pocket").performClick()
+        compose.onNodeWithTag("filter_pocket_option_1").performClick()
         compose.onNodeWithText("Mercado").assertExists()
         compose.onAllNodesWithText("Hotel").assertCountEquals(0)
         compose.onAllNodesWithText("Taxi").assertCountEquals(0)
-        repeat(seededState.pockets.size) { compose.onNodeWithTag("filter_pocket").performClick() }
+        compose.onNodeWithTag("clear_filters").performClick()
 
         compose.onNodeWithTag("filter_currency").performClick()
+        compose.onNodeWithTag("filter_currency_option_1").performClick()
         compose.onNodeWithText("Taxi").assertExists()
         compose.onAllNodesWithText("Hotel").assertCountEquals(0)
-        repeat(seededState.movements.map { it.originalCurrencyCode }.distinct().size) {
-            compose.onNodeWithTag("filter_currency").performClick()
-        }
+        compose.onNodeWithTag("clear_filters").performClick()
 
         compose.onNodeWithTag("filter_method").performClick()
+        compose.onNodeWithTag("filter_method_option_1").performClick()
         compose.onNodeWithText("Mercado").assertExists()
         compose.onAllNodesWithText("Hotel").assertCountEquals(0)
         compose.onAllNodesWithText("Taxi").assertCountEquals(0)

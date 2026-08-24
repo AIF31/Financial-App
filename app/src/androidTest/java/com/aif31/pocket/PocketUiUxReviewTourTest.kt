@@ -7,7 +7,6 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -105,18 +104,21 @@ class PocketUiUxReviewTourTest {
 
         // Dashboard: scan every metric and representative Pocket states.
         reviewScrollTarget("dashboard_list", "Tu periodo")
-        reviewScrollTarget("dashboard_list", "Gasto diario promedio")
-        reviewScrollTarget("dashboard_list", "Disponibilidad rastreada")
+        reviewScrollTarget("dashboard_list", "Disponibilidad de Pockets")
         reviewScrollTarget("dashboard_list", "Supermercado")
         reviewScrollTarget("dashboard_list", "Transporte")
+        compose.onNodeWithText("Más información").performClick()
+        reviewScrollTarget("dashboard_list", "Gasto diario promedio")
+        reviewScrollTarget("dashboard_list", "Proyección estimada")
 
         // New movement: cover Pocket choice, currencies, conversion status, type, payment,
         // date/time, merchant, note, and both dialog actions without mutating review data.
-        compose.onNodeWithContentDescription("Añadir movimiento").performClick()
+        compose.onNodeWithText("Registrar gasto").performClick()
         compose.waitUntilExactlyOneExists(hasText("Nuevo gasto"), TIMEOUT)
         pauseForReview()
         compose.onNodeWithTag("movement_amount").performTextInput("48.75")
         compose.onNodeWithTag("movement_pocket_Supermercado").performScrollTo().performClick()
+        compose.onNodeWithText("Más detalles").performClick()
         scrollMovementTo("USD")
         compose.onNodeWithText("USD").performClick()
         pauseForReview()
@@ -136,7 +138,7 @@ class PocketUiUxReviewTourTest {
         scrollMovementTo("Nota (opcional)")
         compose.onNodeWithText("Nota (opcional)").assertIsDisplayed()
         pauseForReview()
-        compose.onNodeWithText("Cancelar").performClick()
+        compose.onNodeWithContentDescription("Cerrar").performClick()
 
         // Movement history: all filter families, search, detail, and edit dialog.
         compose.onNodeWithText("Movimientos").performClick()
@@ -144,7 +146,9 @@ class PocketUiUxReviewTourTest {
         pauseForReview()
         listOf("filter_period", "filter_pocket", "filter_currency", "filter_method").forEach { tag ->
             compose.onNodeWithTag(tag).performClick()
+            compose.onNodeWithTag("${tag}_option_1").performClick()
             pauseForReview(SHORT_PAUSE)
+            compose.onNodeWithTag("clear_filters").performClick()
         }
         compose.onNodeWithTag("history_search").performTextInput("Tamimi")
         closeSoftKeyboard()
@@ -161,7 +165,7 @@ class PocketUiUxReviewTourTest {
         scrollMovementTo("MXN")
         compose.onNodeWithText("MXN").performClick()
         pauseForReview()
-        compose.onNodeWithText("Cancelar").performClick()
+        compose.onNodeWithContentDescription("Cerrar").performClick()
 
         // Pockets: period chooser, create/edit + rollover, allocation, order, archive controls.
         compose.onNodeWithText("Pockets").performClick()
@@ -172,12 +176,12 @@ class PocketUiUxReviewTourTest {
         compose.onAllNodes(isToggleable())[0].performClick()
         pauseForReview()
         compose.onNodeWithText("Cancelar").performClick()
-        compose.onNodeWithTag("pocket_Supermercado").performScrollTo().performClick()
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("pocket_Supermercado"))
+        compose.onNodeWithTag("pocket_Supermercado").performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("allocation_amount"), TIMEOUT)
         pauseForReview()
-        compose.onNodeWithText("Cancelar").performClick()
-        compose.onNodeWithContentDescription("Mover Supermercado abajo").performScrollTo().performClick()
-        compose.onAllNodesWithText("Editar")[0].performClick()
+        compose.onNodeWithContentDescription("Mover Supermercado abajo").performClick()
+        compose.onNodeWithText("Editar Pocket").performClick()
         compose.waitUntilExactlyOneExists(hasText("Editar Pocket"), TIMEOUT)
         pauseForReview()
         compose.onNodeWithText("Cancelar").performClick()
@@ -185,28 +189,33 @@ class PocketUiUxReviewTourTest {
 
         // Settings: review and exercise every configuration section.
         compose.onNodeWithText("Ajustes").performClick()
+        compose.onNodeWithText("Periodo y fondos").performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("settings_list"), TIMEOUT)
-        reviewSettingsSection("Periodo y fondos")
         compose.onNodeWithText("Guardar fondos").performClick()
         pauseForReview(SHORT_PAUSE)
-        reviewSettingsSection("Recordatorio diario")
+        compose.onNodeWithText("Atrás").performClick()
+        compose.onNodeWithText("Recordatorios").performClick()
         compose.onNodeWithTag("reminder_time").performTextReplacement("20:30")
         closeSoftKeyboard()
         compose.onNodeWithTag("reminder_switch").performClick()
         pauseForReview()
-        reviewSettingsSection("Métodos de pago")
+        compose.onNodeWithText("Atrás").performClick()
+        compose.onNodeWithText("Métodos de pago").performClick()
         compose.onNodeWithTag("settings_list").performScrollToNode(hasTestTag("payment_method_Tarjeta"))
         compose.onNodeWithTag("payment_method_Tarjeta").performClick()
         pauseForReview()
-        reviewSettingsSection("Plantillas recurrentes")
+        compose.onNodeWithText("Atrás").performClick()
+        compose.onNodeWithText("Plantillas recurrentes").performClick()
         compose.onNodeWithTag("template_pocket_Supermercado").performScrollTo().performClick()
         compose.onNodeWithTag("template_method_Tarjeta").performScrollTo().performClick()
         pauseForReview()
-        reviewSettingsSection("Portabilidad")
+        compose.onNodeWithText("Atrás").performClick()
+        compose.onNodeWithText("Datos y privacidad").performClick()
         compose.onNodeWithText("Crear backup completo").assertIsDisplayed()
         compose.onNodeWithText("Restaurar backup").assertIsDisplayed()
         compose.onNodeWithText("Exportar CSV").assertIsDisplayed()
         pauseForReview(LONG_PAUSE)
+        compose.onNodeWithText("Atrás").performClick()
 
         // End on the primary dashboard for a clear closing frame.
         compose.onNodeWithText("Inicio").performClick()
@@ -260,9 +269,6 @@ class PocketUiUxReviewTourTest {
         pauseForReview(delayMillis)
     }
 
-    private fun reviewSettingsSection(title: String) {
-        reviewScrollTarget("settings_list", title)
-    }
 
     private fun scrollMovementTo(text: String) {
         compose.onNodeWithTag("movement_form").performScrollToNode(hasText(text))
