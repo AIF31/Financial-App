@@ -25,6 +25,7 @@ import com.aif31.pocket.data.FinanceDatabase
 import com.aif31.pocket.data.RoomPocketLedger
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.MovementType
+import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.settings.AppPreferences
 import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
@@ -80,6 +81,13 @@ class PocketAppHostFlowTest {
         compose.onNodeWithText("Guardar gasto", substring = true).performClick()
 
         compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        compose.waitUntil(5_000) {
+            runBlocking {
+                ledger.state.first().pockets.any {
+                    it.pocket.name == "Supermercado" && it.availabilityMinor == 20_000L
+                }
+            }
+        }
 
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("SAR 200.00 disponibles"))
         compose.onNodeWithText("SAR 200.00 disponibles").assertIsDisplayed()
@@ -267,6 +275,63 @@ class PocketAppHostFlowTest {
         assertEquals("Supermercado", saved.pocketName)
     }
 
+    @Test
+    fun restore_confirmation_warns_before_replacing_initialized_data() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val clock = Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone)
+        val sourceDatabase = FinanceDatabase.inMemory(ApplicationProvider.getApplicationContext<Context>())
+        val backup = try {
+            val source = RoomPocketLedger(sourceDatabase, clock, zone)
+            runBlocking {
+                source.execute(LedgerCommand.Initialize(75_000))
+                source.exportBackup()
+            }
+        } finally {
+            sourceDatabase.close()
+        }
+        val target = RoomPocketLedger(database, clock, zone)
+        runBlocking { target.execute(LedgerCommand.Initialize(10_000)) }
+
+        compose.setContent {
+            PocketApp(
+                ledger = target,
+                restoreCandidate = backup,
+                onRestoreCandidateHandled = {},
+            )
+        }
+
+        compose.waitUntilExactlyOneExists(
+            hasText("Esta acción reemplazará los datos actuales y puede eliminar información anterior. No se puede deshacer."),
+            5_000,
+        )
+        compose.onNodeWithText("Restaurar y reemplazar").performClick()
+        compose.waitUntil(5_000) { runBlocking { target.state.first().newFundsMinor == 75_000L } }
+    }
+
+    @Test
+    fun new_pocket_offers_nine_generated_icons_and_persists_the_selection() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000)) }
+        compose.setContent { PocketApp(ledger) }
+
+        compose.waitUntilExactlyOneExists(hasText("Pockets"), 5_000)
+        compose.onNodeWithText("Pockets").performClick()
+        compose.onNodeWithText("Crear Pocket").performClick()
+        listOf(
+            "supermarket", "restaurant", "transport", "university", "health",
+            "travel", "leisure", "gifts", "emergency",
+        ).forEach { key -> compose.onNodeWithTag("pocket_icon_$key").assertExists() }
+        compose.onNodeWithTag("pocket_name").performTextInput("Vacaciones")
+        compose.onNodeWithTag("pocket_icon_travel").performClick()
+        compose.onNodeWithText("Guardar Pocket").performClick()
+
+        val created = runBlocking {
+            ledger.state.first { state -> state.pockets.any { it.pocket.name == "Vacaciones" } }
+                .pockets.first { it.pocket.name == "Vacaciones" }
+        }
+        assertEquals(PocketIconKey.TRAVEL, created.pocket.iconKey)
+    }
     private class FakePreferences : PreferencesStore {
         private val values = MutableStateFlow(AppPreferences())
         override val state = values

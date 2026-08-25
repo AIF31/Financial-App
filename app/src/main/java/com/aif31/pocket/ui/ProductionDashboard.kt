@@ -286,6 +286,18 @@ private fun PocketProgressRow(summary: PocketPeriodSummary, modifier: Modifier =
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top,
             ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(52.dp),
+                ) {
+                    PocketArtwork(
+                        summary.pocket.iconKey,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize().padding(4.dp),
+                    )
+                }
+                Spacer(Modifier.size(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium)
                     Text(

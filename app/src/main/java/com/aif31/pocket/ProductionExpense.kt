@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -60,6 +61,7 @@ import com.aif31.pocket.data.Movement
 import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.PocketLedger
 import com.aif31.pocket.domain.Money
+import com.aif31.pocket.ui.PocketArtwork
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -293,6 +295,8 @@ internal fun ProductionMovementScreen(
                                         androidx.compose.material3.ButtonDefaults.outlinedButtonColors()
                                     },
                                 ) {
+                                    PocketArtwork(pocket.pocket.iconKey, contentDescription = null, modifier = Modifier.size(36.dp))
+                                    Spacer(Modifier.size(8.dp))
                                     Text(if (isSelected) "✓ ${pocket.pocket.name}" else pocket.pocket.name)
                                 }
                             }

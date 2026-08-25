@@ -24,11 +24,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Settings
@@ -89,6 +87,7 @@ import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.Movement
 import com.aif31.pocket.data.ConversionStatus
+import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.data.PocketLedger
 import com.aif31.pocket.data.PocketPeriodSummary
 import com.aif31.pocket.domain.Money
@@ -96,6 +95,8 @@ import com.aif31.pocket.settings.AppPreferences
 import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
 import com.aif31.pocket.ui.ActionableDashboardContent
+import com.aif31.pocket.ui.PocketArtwork
+import com.aif31.pocket.ui.pocketIconOptions
 import com.aif31.pocket.ui.ProductionSettingsHub
 import com.aif31.pocket.ui.SettingsSection
 import java.text.DecimalFormat
@@ -161,10 +162,19 @@ fun PocketApp(
             onDismissRequest = { onRestoreCandidateHandled(); backupPreview = null; restoreError = null },
             title = { Text(if (restoreError != null) "No se pudo restaurar" else if (preview.valid) "Confirmar restauración" else "Backup inválido") },
             text = {
-                Text(
-                    restoreError ?: if (preview.valid) "Versión ${preview.version}: ${preview.periods} periodos, ${preview.pockets} Pockets y ${preview.movements} movimientos."
-                    else preview.message ?: "No se puede leer el archivo.",
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        restoreError ?: if (preview.valid) "Versión ${preview.version}: ${preview.periods} periodos, ${preview.pockets} Pockets y ${preview.movements} movimientos."
+                        else preview.message ?: "No se puede leer el archivo.",
+                    )
+                    if (restoreError == null && preview.valid && observedState?.needsOnboarding == false) {
+                        Text(
+                            "Esta acción reemplazará los datos actuales y puede eliminar información anterior. No se puede deshacer.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
             },
             confirmButton = {
                 if (preview.valid) Button(onClick = {
@@ -181,7 +191,7 @@ fun PocketApp(
                             is LedgerResult.Deleted -> Unit
                         }
                     }
-                }) { Text("Restaurar") }
+                }) { Text(if (observedState?.needsOnboarding == false) "Restaurar y reemplazar" else "Restaurar") }
             },
             dismissButton = { TextButton(onClick = { onRestoreCandidateHandled(); backupPreview = null; restoreError = null }) { Text("Cancelar") } },
         )
@@ -538,6 +548,8 @@ private fun MovementsScreen(
             items(movements, key = { it.id }) { movement ->
                 MovementCard(
                     movement = movement,
+                    iconKey = state.pockets.firstOrNull { it.pocket.id == movement.pocketId }?.pocket?.iconKey
+                        ?: PocketIconKey.forName(movement.pocketName),
                     onClick = { selected = movement },
                 )
             }
@@ -575,13 +587,8 @@ private fun MovementsScreen(
 }
 
 @Composable
-private fun MovementCard(movement: Movement, onClick: () -> Unit) {
+private fun MovementCard(movement: Movement, iconKey: PocketIconKey, onClick: () -> Unit) {
     val isRefund = movement.type == MovementType.REFUND
-    val leadingIcon = when {
-        isRefund -> Icons.AutoMirrored.Filled.Undo
-        movement.pocketName.contains("transporte", ignoreCase = true) -> Icons.Default.DirectionsCar
-        else -> Icons.Default.ShoppingCart
-    }
     val amountColor = if (isRefund) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
     val time = Instant.ofEpochMilli(movement.occurredAtUtcMillis)
         .atZone(java.time.ZoneId.of(movement.zoneId))
@@ -601,7 +608,11 @@ private fun MovementCard(movement: Movement, onClick: () -> Unit) {
                 modifier = Modifier.size(52.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(leadingIcon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    if (isRefund) {
+                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    } else {
+                        PocketArtwork(iconKey, contentDescription = null, modifier = Modifier.size(42.dp))
+                    }
                 }
             }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -794,7 +805,7 @@ private fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pad
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.Top,
                 ) {
-                    PocketGlyph(summary.pocket.name)
+                    PocketGlyph(summary.pocket.iconKey)
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -903,15 +914,14 @@ private fun PocketSummaryMetric(label: String, value: String, modifier: Modifier
 }
 
 @Composable
-private fun PocketGlyph(name: String) {
-    val icon = if (name.contains("transporte", ignoreCase = true)) Icons.Default.DirectionsCar else Icons.Default.ShoppingCart
+private fun PocketGlyph(iconKey: PocketIconKey) {
     Surface(
         shape = CircleShape,
         color = MaterialTheme.colorScheme.primaryContainer,
         modifier = Modifier.size(56.dp),
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            PocketArtwork(iconKey, contentDescription = null, modifier = Modifier.size(46.dp))
         }
     }
 }
@@ -929,14 +939,48 @@ private fun PocketEditorDialog(
 ) {
     var name by remember(existing?.pocket?.id) { mutableStateOf(existing?.pocket?.name.orEmpty()) }
     var rollover by remember(existing?.pocket?.id) { mutableStateOf(existing?.pocket?.rolloverEnabled ?: false) }
+    var selectedIcon by remember(existing?.pocket?.id) { mutableStateOf(existing?.pocket?.iconKey ?: PocketIconKey.SUPERMARKET) }
     var error by remember(existing?.pocket?.id) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (existing == null) "Crear Pocket" else "Editar Pocket") },
         text = {
-            Column {
-                OutlinedTextField(name, { name = it }, label = { Text("Nombre") })
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Nombre") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("pocket_name"),
+                )
+                Text("Elige un icono", style = MaterialTheme.typography.titleSmall)
+                pocketIconOptions.chunked(3).forEach { options ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        options.forEach { option ->
+                            val isSelected = selectedIcon == option.key
+                            OutlinedButton(
+                                onClick = { selectedIcon = option.key },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(72.dp)
+                                    .testTag("pocket_icon_${option.key.name.lowercase(Locale.ROOT)}")
+                                    .semantics {
+                                        contentDescription = "Icono ${option.label}${if (isSelected) ", seleccionado" else ""}"
+                                    },
+                                contentPadding = PaddingValues(8.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                                ),
+                            ) {
+                                PocketArtwork(option.key, contentDescription = null, modifier = Modifier.size(48.dp))
+                            }
+                        }
+                    }
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Aplicar rollover")
                     Switch(rollover, { rollover = it })
@@ -947,7 +991,7 @@ private fun PocketEditorDialog(
         confirmButton = {
             Button(onClick = {
                 scope.launch {
-                    when (val result = ledger.execute(LedgerCommand.UpsertPocket(existing?.pocket?.id, name, rollover))) {
+                    when (val result = ledger.execute(LedgerCommand.UpsertPocket(existing?.pocket?.id, name, rollover, selectedIcon))) {
                         LedgerResult.Success -> onDismiss()
                         is LedgerResult.Rejected -> error = result.message
                         is LedgerResult.Deleted -> Unit

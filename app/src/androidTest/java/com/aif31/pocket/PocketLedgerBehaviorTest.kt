@@ -111,13 +111,14 @@ class PocketLedgerBehaviorTest {
         val backup = source.exportBackup()
         assertTrue(source.previewBackup(backup).valid)
         assertFalse(source.previewBackup(backup.copyOf(backup.size / 2)).valid)
-        assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"version\": 1", "\"version\": 99").encodeToByteArray()).valid)
+        assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"version\": 2", "\"version\": 99").encodeToByteArray()).valid)
         assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"budgetMinor\": 25000", "\"budgetMinor\": 60000").encodeToByteArray()).valid)
-        assertTrue(source.restoreBackup(backup) is LedgerResult.Rejected)
+        assertEquals(LedgerResult.Success, source.restoreBackup(backup))
 
         val targetDb = FinanceDatabase.inMemory(ApplicationProvider.getApplicationContext<Context>())
         try {
             val target = RoomPocketLedger(targetDb, clock, zone)
+            assertEquals(LedgerResult.Success, target.execute(LedgerCommand.Initialize(99_900)))
             assertEquals(LedgerResult.Success, target.restoreBackup(backup))
             assertEquals(1, target.state.first { !it.needsOnboarding }.movements.size)
         } finally {

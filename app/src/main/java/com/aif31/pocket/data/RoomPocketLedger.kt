@@ -80,8 +80,8 @@ class RoomPocketLedger(
             )
         )
         dao.putPockets(
-            INITIAL_POCKETS.mapIndexed { index, name ->
-                PocketEntity(UUID.randomUUID().toString(), name, index, archived = false, rolloverEnabled = false)
+            INITIAL_POCKETS.mapIndexed { index, (name, iconKey) ->
+                PocketEntity(UUID.randomUUID().toString(), name, iconKey.name, index, archived = false, rolloverEnabled = false)
             }
         )
         dao.putPaymentMethods(
@@ -123,6 +123,7 @@ class RoomPocketLedger(
             PocketEntity(
                 id = existing?.id ?: UUID.randomUUID().toString(),
                 name = name,
+                iconKey = (command.iconKey ?: existing?.let { PocketIconKey.fromStored(it.iconKey, it.name) } ?: PocketIconKey.forName(name)).name,
                 sortOrder = existing?.sortOrder ?: nextOrder,
                 archived = existing?.archived ?: false,
                 rolloverEnabled = command.rolloverEnabled,
@@ -326,8 +327,16 @@ class RoomPocketLedger(
 
     private companion object {
         val INITIAL_POCKETS = listOf(
-            "Supermercado", "Restaurantes/café", "Transporte", "Universidad", "Salud",
-            "Viajes", "Ocio", "Regalos", "Emergencia", "Otros",
+            "Supermercado" to PocketIconKey.SUPERMARKET,
+            "Restaurantes/café" to PocketIconKey.RESTAURANT,
+            "Transporte" to PocketIconKey.TRANSPORT,
+            "Universidad" to PocketIconKey.UNIVERSITY,
+            "Salud" to PocketIconKey.HEALTH,
+            "Viajes" to PocketIconKey.TRAVEL,
+            "Ocio" to PocketIconKey.LEISURE,
+            "Regalos" to PocketIconKey.GIFTS,
+            "Emergencia" to PocketIconKey.EMERGENCY,
+            "Otros" to PocketIconKey.OTHER,
         )
     }
 }
@@ -340,7 +349,7 @@ private fun PeriodEntity.toModel() = Period(
     configuredStartDay = configuredStartDay,
 )
 
-private fun PocketEntity.toModel() = Pocket(id, name, sortOrder, archived, rolloverEnabled)
+private fun PocketEntity.toModel() = Pocket(id, name, PocketIconKey.fromStored(iconKey, name), sortOrder, archived, rolloverEnabled)
 
 private fun MovementEntity.toModel(
     pockets: Map<String, PocketEntity>,

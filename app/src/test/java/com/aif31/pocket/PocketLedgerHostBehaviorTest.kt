@@ -8,6 +8,7 @@ import com.aif31.pocket.data.ConversionStatus
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.MovementType
+import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.data.RoomPocketLedger
 import java.time.Clock
 import java.time.Instant
@@ -80,12 +81,24 @@ class PocketLedgerHostBehaviorTest {
 
         assertTrue(source.previewBackup(backup).valid)
         assertFalse(source.previewBackup(backup.copyOf(backup.size / 2)).valid)
-        assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"version\": 1", "\"version\": 99").encodeToByteArray()).valid)
+        assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"version\": 2", "\"version\": 99").encodeToByteArray()).valid)
         assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"budgetMinor\": 25000", "\"budgetMinor\": 60000").encodeToByteArray()).valid)
-        assertTrue(source.restoreBackup(backup) is LedgerResult.Rejected)
+        assertEquals(LedgerResult.Success, source.restoreBackup(backup))
         withFreshLedger { target ->
+            assertEquals(LedgerResult.Success, target.execute(LedgerCommand.Initialize(99_900)))
             assertEquals(LedgerResult.Success, target.restoreBackup(backup))
-            assertEquals(1, target.state.first { !it.needsOnboarding }.movements.size)
+            val restored = target.state.first { !it.needsOnboarding && it.movements.size == 1 }
+            assertEquals(50_000, restored.newFundsMinor)
+            assertEquals(PocketIconKey.SUPERMARKET, restored.pockets.first { it.pocket.name == "Supermercado" }.pocket.iconKey)
+        }
+        val legacyBackup = backup.decodeToString()
+            .replaceFirst("\"version\": 2", "\"version\": 1")
+            .replace(Regex(",\\s*\"iconKey\": \"[A-Z]+\""), "")
+            .encodeToByteArray()
+        withFreshLedger { target ->
+            assertEquals(LedgerResult.Success, target.restoreBackup(legacyBackup))
+            val restored = target.state.first { !it.needsOnboarding }
+            assertEquals(PocketIconKey.TRANSPORT, restored.pockets.first { it.pocket.name == "Transporte" }.pocket.iconKey)
         }
 
         val text = backup.decodeToString()

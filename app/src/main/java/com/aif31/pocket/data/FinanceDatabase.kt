@@ -1,6 +1,7 @@
 package com.aif31.pocket.data
 
 import android.content.Context
+import androidx.room.AutoMigration
 import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
@@ -27,6 +28,7 @@ data class PeriodEntity(
 data class PocketEntity(
     @androidx.room.PrimaryKey val id: String,
     val name: String,
+    @ColumnInfo(name = "icon_key", defaultValue = "'OTHER'") val iconKey: String = PocketIconKey.OTHER.name,
     @ColumnInfo(name = "sort_order") val sortOrder: Int,
     val archived: Boolean,
     @ColumnInfo(name = "rollover_enabled") val rolloverEnabled: Boolean,
@@ -144,7 +146,8 @@ interface FinanceDao {
 
 @Database(
     entities = [PeriodEntity::class, PocketEntity::class, AllocationEntity::class, PaymentMethodEntity::class, MovementEntity::class, RecurringTemplateEntity::class],
-    version = 1,
+    version = 2,
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
     exportSchema = true,
 )
 abstract class FinanceDatabase : RoomDatabase() {

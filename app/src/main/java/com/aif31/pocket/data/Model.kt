@@ -10,9 +10,41 @@ data class Period(
     val configuredStartDay: Int,
 )
 
+enum class PocketIconKey {
+    SUPERMARKET,
+    RESTAURANT,
+    TRANSPORT,
+    UNIVERSITY,
+    HEALTH,
+    TRAVEL,
+    LEISURE,
+    GIFTS,
+    EMERGENCY,
+    OTHER;
+
+    companion object {
+        fun fromStored(value: String?, pocketName: String): PocketIconKey =
+            entries.firstOrNull { it.name == value } ?: forName(pocketName)
+
+        fun forName(name: String): PocketIconKey = when {
+            name.contains("supermercado", ignoreCase = true) -> SUPERMARKET
+            name.contains("restaurante", ignoreCase = true) || name.contains("café", ignoreCase = true) -> RESTAURANT
+            name.contains("transporte", ignoreCase = true) -> TRANSPORT
+            name.contains("universidad", ignoreCase = true) -> UNIVERSITY
+            name.contains("salud", ignoreCase = true) -> HEALTH
+            name.contains("viaje", ignoreCase = true) -> TRAVEL
+            name.contains("ocio", ignoreCase = true) -> LEISURE
+            name.contains("regalo", ignoreCase = true) -> GIFTS
+            name.contains("emergencia", ignoreCase = true) -> EMERGENCY
+            else -> OTHER
+        }
+    }
+}
+
 data class Pocket(
     val id: String,
     val name: String,
+    val iconKey: PocketIconKey,
     val sortOrder: Int,
     val archived: Boolean,
     val rolloverEnabled: Boolean,
@@ -94,6 +126,7 @@ sealed interface LedgerCommand {
         val id: String? = null,
         val name: String,
         val rolloverEnabled: Boolean = false,
+        val iconKey: PocketIconKey? = null,
     ) : LedgerCommand
     data class ArchivePocket(val pocketId: String, val archived: Boolean = true) : LedgerCommand
     data class MovePocket(val pocketId: String, val direction: Int) : LedgerCommand

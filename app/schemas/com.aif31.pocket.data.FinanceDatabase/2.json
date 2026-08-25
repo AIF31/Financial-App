@@ -1,0 +1,509 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "6180093d11cbe32cb419d083dacaa297",
+    "entities": [
+      {
+        "tableName": "periods",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `start_epoch_day` INTEGER NOT NULL, `end_exclusive_epoch_day` INTEGER NOT NULL, `new_funds_minor` INTEGER NOT NULL, `configured_start_day` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startEpochDay",
+            "columnName": "start_epoch_day",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endExclusiveEpochDay",
+            "columnName": "end_exclusive_epoch_day",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "newFundsMinor",
+            "columnName": "new_funds_minor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "configuredStartDay",
+            "columnName": "configured_start_day",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_periods_start_epoch_day",
+            "unique": true,
+            "columnNames": [
+              "start_epoch_day"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_periods_start_epoch_day` ON `${TABLE_NAME}` (`start_epoch_day`)"
+          }
+        ]
+      },
+      {
+        "tableName": "pockets",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `icon_key` TEXT NOT NULL DEFAULT 'OTHER', `sort_order` INTEGER NOT NULL, `archived` INTEGER NOT NULL, `rollover_enabled` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "iconKey",
+            "columnName": "icon_key",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'OTHER'"
+          },
+          {
+            "fieldPath": "sortOrder",
+            "columnName": "sort_order",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "archived",
+            "columnName": "archived",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rolloverEnabled",
+            "columnName": "rollover_enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_pockets_name",
+            "unique": true,
+            "columnNames": [
+              "name"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_pockets_name` ON `${TABLE_NAME}` (`name`)"
+          }
+        ]
+      },
+      {
+        "tableName": "allocations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`period_id` TEXT NOT NULL, `pocket_id` TEXT NOT NULL, `budget_minor` INTEGER NOT NULL, `rollover_minor` INTEGER NOT NULL, PRIMARY KEY(`period_id`, `pocket_id`), FOREIGN KEY(`period_id`) REFERENCES `periods`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`pocket_id`) REFERENCES `pockets`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "periodId",
+            "columnName": "period_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pocketId",
+            "columnName": "pocket_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "budgetMinor",
+            "columnName": "budget_minor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rolloverMinor",
+            "columnName": "rollover_minor",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "period_id",
+            "pocket_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_allocations_period_id",
+            "unique": false,
+            "columnNames": [
+              "period_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_allocations_period_id` ON `${TABLE_NAME}` (`period_id`)"
+          },
+          {
+            "name": "index_allocations_pocket_id",
+            "unique": false,
+            "columnNames": [
+              "pocket_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_allocations_pocket_id` ON `${TABLE_NAME}` (`pocket_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "periods",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "period_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "pockets",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "pocket_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "payment_methods",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `archived` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "archived",
+            "columnName": "archived",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_payment_methods_name",
+            "unique": true,
+            "columnNames": [
+              "name"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_payment_methods_name` ON `${TABLE_NAME}` (`name`)"
+          }
+        ]
+      },
+      {
+        "tableName": "movements",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `period_id` TEXT NOT NULL, `pocket_id` TEXT NOT NULL, `type` TEXT NOT NULL, `sar_amount_minor` INTEGER NOT NULL, `occurred_at_utc_millis` INTEGER NOT NULL, `local_epoch_day` INTEGER NOT NULL, `zone_id` TEXT NOT NULL, `merchant` TEXT, `note` TEXT, `payment_method_id` TEXT, `original_amount_minor` INTEGER, `original_currency_code` TEXT NOT NULL, `conversion_status` TEXT NOT NULL, `rate` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`period_id`) REFERENCES `periods`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`pocket_id`) REFERENCES `pockets`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`payment_method_id`) REFERENCES `payment_methods`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "periodId",
+            "columnName": "period_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pocketId",
+            "columnName": "pocket_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sarAmountMinor",
+            "columnName": "sar_amount_minor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "occurredAtUtcMillis",
+            "columnName": "occurred_at_utc_millis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localEpochDay",
+            "columnName": "local_epoch_day",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "zoneId",
+            "columnName": "zone_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "merchant",
+            "columnName": "merchant",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "note",
+            "columnName": "note",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "paymentMethodId",
+            "columnName": "payment_method_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "originalAmountMinor",
+            "columnName": "original_amount_minor",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "originalCurrencyCode",
+            "columnName": "original_currency_code",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "conversionStatus",
+            "columnName": "conversion_status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rate",
+            "columnName": "rate",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_movements_period_id",
+            "unique": false,
+            "columnNames": [
+              "period_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_movements_period_id` ON `${TABLE_NAME}` (`period_id`)"
+          },
+          {
+            "name": "index_movements_pocket_id",
+            "unique": false,
+            "columnNames": [
+              "pocket_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_movements_pocket_id` ON `${TABLE_NAME}` (`pocket_id`)"
+          },
+          {
+            "name": "index_movements_payment_method_id",
+            "unique": false,
+            "columnNames": [
+              "payment_method_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_movements_payment_method_id` ON `${TABLE_NAME}` (`payment_method_id`)"
+          },
+          {
+            "name": "index_movements_local_epoch_day",
+            "unique": false,
+            "columnNames": [
+              "local_epoch_day"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_movements_local_epoch_day` ON `${TABLE_NAME}` (`local_epoch_day`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "periods",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "period_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "pockets",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "pocket_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "payment_methods",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "payment_method_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "recurring_templates",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `amount_minor` INTEGER NOT NULL, `pocket_id` TEXT NOT NULL, `payment_method_id` TEXT, `archived` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`pocket_id`) REFERENCES `pockets`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`payment_method_id`) REFERENCES `payment_methods`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "amountMinor",
+            "columnName": "amount_minor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pocketId",
+            "columnName": "pocket_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentMethodId",
+            "columnName": "payment_method_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "archived",
+            "columnName": "archived",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_recurring_templates_pocket_id",
+            "unique": false,
+            "columnNames": [
+              "pocket_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_recurring_templates_pocket_id` ON `${TABLE_NAME}` (`pocket_id`)"
+          },
+          {
+            "name": "index_recurring_templates_payment_method_id",
+            "unique": false,
+            "columnNames": [
+              "payment_method_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_recurring_templates_payment_method_id` ON `${TABLE_NAME}` (`payment_method_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "pockets",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "pocket_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "payment_methods",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "payment_method_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '6180093d11cbe32cb419d083dacaa297')"
+    ]
+  }
+}
