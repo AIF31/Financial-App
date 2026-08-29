@@ -39,3 +39,27 @@ _Avoid_: Account, wallet
 **Conversion status**:
 Whether a USD or MXN movement's manually entered SAR value is estimated or confirmed. The SAR value is frozen until the user edits it.
 _Avoid_: Live exchange rate, automatic conversion
+
+**Automatic period catch-up**:
+The transactional, idempotent creation of every missing budget period in sequence when the app launches or resumes. Only the current period requires review.
+_Avoid_: Skipping periods, creating only the latest period
+
+**Long transition period**:
+The single extended period used after changing the preferred start day. It ends at the first new-schedule boundary after the old schedule's next expected end and is compared using daily pace rather than absolute spending.
+_Avoid_: Short transition period, retroactive boundary change
+
+**Rollover release**:
+An explicit accounting adjustment that moves positive rollover from a Pocket being archived into unassigned funds. It reclassifies existing availability; it does not create new funds.
+_Avoid_: Income, refund, discarded rollover
+
+**Movement suggestion**:
+A normalized, temporary candidate derived from an allowed app's notification. It becomes a Movement only after confirmation, never stores raw notification text, and expires after 30 days while pending.
+_Avoid_: Imported transaction, automatic Movement
+
+**Experimental notification parser**:
+An opt-in beta parser for English and Spanish notifications from user-selected apps. It is generic, is tested with synthetic notifications, and makes no claim of supporting a particular bank.
+_Avoid_: Bank integration, transaction feed
+
+**Portable backup**:
+A versioned plaintext JSON document containing the financial ledger and app-owned financial settings. Restore replaces existing data after preview and confirmation rather than merging ledgers.
+_Avoid_: Encrypted vault, synchronized backup, merge import
