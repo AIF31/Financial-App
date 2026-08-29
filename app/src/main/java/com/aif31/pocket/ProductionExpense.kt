@@ -58,11 +58,12 @@ import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.Movement
+import com.aif31.pocket.data.MovementDefaults
 import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.PocketLedger
 import com.aif31.pocket.domain.Money
 import com.aif31.pocket.ui.PocketArtwork
-import java.math.BigDecimal
+import com.aif31.pocket.ui.MoneyText
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -76,29 +77,30 @@ internal fun ProductionMovementScreen(
     ledger: PocketLedger,
     onDismiss: () -> Unit,
     onSaved: () -> Unit,
+    movementDefaults: MovementDefaults,
     initialMovement: Movement? = null,
 ) {
     val stateKey = initialMovement?.id
-    var amount by remember(stateKey) {
+    var amount by rememberSaveable(stateKey) {
         mutableStateOf(initialMovement?.let { minorNumberForForm(it.sarAmountMinor) }.orEmpty())
     }
-    var selectedPocket by remember(stateKey) { mutableStateOf(initialMovement?.pocketId) }
-    var refund by remember(stateKey) { mutableStateOf(initialMovement?.type == MovementType.REFUND) }
-    var merchant by remember(stateKey) { mutableStateOf(initialMovement?.merchant.orEmpty()) }
-    var note by remember(stateKey) { mutableStateOf(initialMovement?.note.orEmpty()) }
-    var paymentMethod by remember(stateKey) { mutableStateOf(initialMovement?.paymentMethodId) }
-    var currency by remember(stateKey) { mutableStateOf(initialMovement?.originalCurrencyCode ?: "SAR") }
-    var originalAmount by remember(stateKey) {
+    var selectedPocket by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.pocketId) }
+    var refund by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.type == MovementType.REFUND) }
+    var merchant by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.merchant.orEmpty()) }
+    var note by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.note.orEmpty()) }
+    var paymentMethod by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.paymentMethodId) }
+    var currency by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.originalCurrencyCode ?: "SAR") }
+    var originalAmount by rememberSaveable(stateKey) {
         mutableStateOf(initialMovement?.originalAmountMinor?.let(::minorNumberForForm).orEmpty())
     }
-    var confirmed by remember(stateKey) {
+    var confirmed by rememberSaveable(stateKey) {
         mutableStateOf(initialMovement?.conversionStatus != ConversionStatus.ESTIMATED)
     }
-    var localDate by remember(stateKey) {
-        mutableStateOf((initialMovement?.localDate ?: state.currentLocalDate).toString())
+    var localDate by rememberSaveable(stateKey) {
+        mutableStateOf((initialMovement?.localDate ?: movementDefaults.localDate).toString())
     }
-    var localTime by remember(stateKey) {
-        val instant = initialMovement?.occurredAtUtcMillis ?: state.currentInstantMillis
+    var localTime by rememberSaveable(stateKey) {
+        val instant = initialMovement?.occurredAtUtcMillis ?: movementDefaults.instantMillis
         val zone = ZoneId.of(initialMovement?.zoneId ?: "Asia/Riyadh")
         mutableStateOf(
             Instant.ofEpochMilli(instant)
@@ -110,7 +112,7 @@ internal fun ProductionMovementScreen(
         )
     }
     var detailsExpanded by rememberSaveable(stateKey) { mutableStateOf(initialMovement != null) }
-    var error by remember(stateKey) { mutableStateOf<String?>(null) }
+    var error by rememberSaveable(stateKey) { mutableStateOf<String?>(null) }
     val focusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
 
@@ -438,4 +440,4 @@ internal fun ProductionMovementScreen(
 }
 
 private fun minorNumberForForm(minor: Long): String =
-    BigDecimal.valueOf(minor).movePointLeft(2).toPlainString()
+    MoneyText.editable(minor)

@@ -147,8 +147,14 @@ internal object BackupCodec {
         return payload
     }
 
-    private fun csvCell(value: String): String = "\"${value.replace("\"", "\"\"")}\""
+    private fun csvCell(value: String): String {
+        val firstContent = value.firstOrNull { !it.isWhitespace() }
+        val safeValue = if (firstContent in CSV_FORMULA_PREFIXES) "'$value" else value
+        return "\"${safeValue.replace("\"", "\"\"")}\""
+    }
     private fun minorString(value: Long): String = java.math.BigDecimal.valueOf(value, 2).toPlainString()
+
+    private val CSV_FORMULA_PREFIXES = setOf('=', '+', '-', '@')
 }
 
 private suspend fun FinanceDao.putPeriodEntities(values: List<PeriodEntity>) {

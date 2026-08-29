@@ -168,12 +168,18 @@ sealed interface LedgerResult {
 
 interface PocketLedger {
     val state: kotlinx.coroutines.flow.Flow<LedgerState>
+    fun movementDefaults(): MovementDefaults
     suspend fun execute(command: LedgerCommand): LedgerResult
     suspend fun exportBackup(): ByteArray
     suspend fun previewBackup(bytes: ByteArray): BackupPreview
     suspend fun restoreBackup(bytes: ByteArray): LedgerResult
     suspend fun exportCsv(): ByteArray
 }
+
+data class MovementDefaults(
+    val localDate: LocalDate,
+    val instantMillis: Long,
+)
 
 data class BackupPreview(
     val version: Int,

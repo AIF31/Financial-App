@@ -77,6 +77,10 @@ android {
         }
     }
 
+    sourceSets {
+        getByName("androidTest").assets.directories.add("$projectDir/schemas")
+    }
+
     packaging.resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
 }
 
@@ -121,6 +125,7 @@ dependencies {
     testImplementation(libs.androidx.test.ext.junit)
     testImplementation(libs.androidx.test.runner)
     testImplementation(libs.androidx.room.testing)
+    testImplementation(libs.androidx.work.testing)
 
     androidTestImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.test.ext.junit)

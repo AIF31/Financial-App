@@ -49,9 +49,6 @@ import androidx.compose.ui.unit.dp
 import com.aif31.pocket.R
 import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.PocketPeriodSummary
-import java.math.BigDecimal
-import java.text.DecimalFormat
-import java.text.DecimalFormatSymbols
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -353,10 +350,8 @@ private fun SupportingMetric(label: String, value: String) {
     }
 }
 
-private val sarFormat = DecimalFormat("#,##0.00", DecimalFormatSymbols(Locale.US))
-
 private fun formatSar(minor: Long): String =
-    "SAR " + sarFormat.format(BigDecimal.valueOf(minor).movePointLeft(2))
+    MoneyText.sar(minor)
 
 private fun formatPeriod(start: java.time.LocalDate, end: java.time.LocalDate): String {
     val formatter = DateTimeFormatter.ofPattern("d MMM", Locale.forLanguageTag("es"))

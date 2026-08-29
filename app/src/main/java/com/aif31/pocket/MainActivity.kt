@@ -13,12 +13,15 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import com.aif31.pocket.ui.PocketTheme
 import java.io.ByteArrayOutputStream
+import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private var restoreCandidate by mutableStateOf<ByteArray?>(null)
+    private var operationMessage by mutableStateOf<String?>(null)
 
     private val createBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         uri?.let { writeExport(it, backup = true) }
@@ -29,19 +32,26 @@ class MainActivity : ComponentActivity() {
     private val openBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { target ->
             lifecycleScope.launch {
-                restoreCandidate = withContext(Dispatchers.IO) {
-                    contentResolver.openInputStream(target)?.use { input ->
-                        val output = ByteArrayOutputStream()
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                        var total = 0
-                        while (total <= MAX_BACKUP_BYTES) {
-                            val count = input.read(buffer, 0, minOf(buffer.size, MAX_BACKUP_BYTES + 1 - total))
-                            if (count < 0) break
-                            output.write(buffer, 0, count)
-                            total += count
+                try {
+                    restoreCandidate = withContext(Dispatchers.IO) {
+                        val input = contentResolver.openInputStream(target)
+                            ?: throw IOException("The selected backup could not be opened")
+                        input.use {
+                            val output = ByteArrayOutputStream()
+                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                            var total = 0
+                            while (total <= MAX_BACKUP_BYTES) {
+                                val count = it.read(buffer, 0, minOf(buffer.size, MAX_BACKUP_BYTES + 1 - total))
+                                if (count < 0) break
+                                output.write(buffer, 0, count)
+                                total += count
+                            }
+                            output.toByteArray()
                         }
-                        output.toByteArray()
                     }
+                } catch (error: Exception) {
+                    if (error is CancellationException) throw error
+                    operationMessage = "No se pudo leer el backup. Comprueba el archivo y vuelve a intentarlo."
                 }
             }
         }
@@ -61,6 +71,8 @@ class MainActivity : ComponentActivity() {
                     openNewExpense = openExpense,
                     restoreCandidate = restoreCandidate,
                     onRestoreCandidateHandled = { restoreCandidate = null },
+                    operationMessage = operationMessage,
+                    onOperationMessageHandled = { operationMessage = null },
                     onCreateBackup = { createBackup.launch("pocket-${java.time.LocalDate.now()}.pocketbackup") },
                     onCreateCsv = { createCsv.launch("pocket-movimientos-${java.time.LocalDate.now()}.csv") },
                     onPickBackup = { openBackup.launch(arrayOf("application/octet-stream", "application/json", "*/*")) },
@@ -74,10 +86,22 @@ class MainActivity : ComponentActivity() {
 
     private fun writeExport(uri: Uri, backup: Boolean) {
         lifecycleScope.launch {
-            withContext(Dispatchers.IO) {
-                val ledger = (application as PocketApplication).ledger
-                val bytes = if (backup) ledger.exportBackup() else ledger.exportCsv()
-                contentResolver.openOutputStream(uri, "wt")?.use { it.write(bytes) }
+            try {
+                withContext(Dispatchers.IO) {
+                    val ledger = (application as PocketApplication).ledger
+                    val bytes = if (backup) ledger.exportBackup() else ledger.exportCsv()
+                    val output = contentResolver.openOutputStream(uri, "wt")
+                        ?: throw IOException("The selected document could not be opened")
+                    output.use { it.write(bytes) }
+                }
+                operationMessage = if (backup) "Backup creado." else "CSV exportado."
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                operationMessage = if (backup) {
+                    "No se pudo crear el backup. Comprueba el destino y vuelve a intentarlo."
+                } else {
+                    "No se pudo exportar el CSV. Comprueba el destino y vuelve a intentarlo."
+                }
             }
         }
     }

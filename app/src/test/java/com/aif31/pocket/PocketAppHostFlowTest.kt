@@ -4,9 +4,11 @@ import android.content.Context
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -31,6 +33,7 @@ import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -150,6 +153,25 @@ class PocketAppHostFlowTest {
     }
 
     @Test
+    fun movement_draft_survives_saved_state_restoration() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000)) }
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent { PocketApp(ledger) }
+        compose.waitUntilExactlyOneExists(hasTestTag("contextual_add"), 5_000)
+        compose.onNodeWithTag("contextual_add").performClick()
+        compose.onNodeWithTag("movement_amount").performTextInput("12.34")
+        compose.onNodeWithTag("movement_pocket_Supermercado").performClick()
+
+        restoration.emulateSavedInstanceStateRestore()
+
+        compose.waitUntilExactlyOneExists(hasTestTag("movement_amount"), 5_000)
+        compose.onNodeWithTag("movement_amount").assertTextContains("12.34")
+        compose.onNodeWithTag("movement_pocket_Supermercado").assertIsDisplayed()
+    }
+
+    @Test
     fun daily_reminder_can_be_enabled_and_disabled_through_settings() {
         val zone = ZoneId.of("Asia/Riyadh")
         val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
@@ -233,6 +255,40 @@ class PocketAppHostFlowTest {
     }
 
     @Test
+    fun movement_search_survives_saved_state_restoration() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val clock = Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone)
+        val ledger = RoomPocketLedger(database, clock, zone)
+        runBlocking {
+            ledger.execute(LedgerCommand.Initialize(100_000))
+            val pocket = ledger.state.first { !it.needsOnboarding }.pockets.first()
+            ledger.execute(
+                LedgerCommand.AddMovement(
+                    id = "market",
+                    pocketId = pocket.pocket.id,
+                    type = MovementType.EXPENSE,
+                    sarAmountMinor = 1_000,
+                    occurredAtUtcMillis = clock.millis(),
+                    localDate = LocalDate.of(2026, 2, 26),
+                    merchant = "Mercado",
+                    note = "fruta fresca",
+                )
+            )
+        }
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent { PocketApp(ledger) }
+        compose.waitUntilExactlyOneExists(hasText("Movimientos"), 5_000)
+        compose.onNodeWithText("Movimientos").performClick()
+        compose.onNodeWithTag("history_search").performTextInput("fruta")
+
+        restoration.emulateSavedInstanceStateRestore()
+
+        compose.waitUntilExactlyOneExists(hasTestTag("history_search"), 5_000)
+        compose.onNodeWithTag("history_search").assertTextContains("fruta")
+        compose.onNodeWithText("Mercado").assertIsDisplayed()
+    }
+
+    @Test
     fun delete_supports_undo_and_permanent_expiry_through_the_UI() {
         val zone = ZoneId.of("Asia/Riyadh")
         val clock = Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone)
@@ -306,6 +362,25 @@ class PocketAppHostFlowTest {
         )
         compose.onNodeWithText("Restaurar y reemplazar").performClick()
         compose.waitUntil(5_000) { runBlocking { target.state.first().newFundsMinor == 75_000L } }
+    }
+
+    @Test
+    fun document_failures_are_reported_through_the_public_UI() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000)) }
+        var handled = false
+
+        compose.setContent {
+            PocketApp(
+                ledger = ledger,
+                operationMessage = "No se pudo crear el backup.",
+                onOperationMessageHandled = { handled = true },
+            )
+        }
+
+        compose.waitUntilExactlyOneExists(hasText("No se pudo crear el backup."), 5_000)
+        compose.waitUntil(5_000) { handled }
     }
 
     @Test

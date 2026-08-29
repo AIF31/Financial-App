@@ -9,13 +9,17 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.withContext
 
 class RoomPocketLedger(
     private val database: FinanceDatabase,
     private val clock: Clock = Clock.systemUTC(),
     private val zoneId: ZoneId = ZoneId.of("Asia/Riyadh"),
+    private val codecDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : PocketLedger {
     private val dao = database.financeDao()
 
@@ -39,6 +43,14 @@ class RoomPocketLedger(
             methodEntities = activity.first,
             movementEntities = activity.second,
             templateEntities = activity.third,
+        )
+    }
+
+    override fun movementDefaults(): MovementDefaults {
+        val instant = clock.instant()
+        return MovementDefaults(
+            localDate = instant.atZone(zoneId).toLocalDate(),
+            instantMillis = instant.toEpochMilli(),
         )
     }
 
@@ -320,10 +332,10 @@ class RoomPocketLedger(
 
     private fun today(): LocalDate = clock.instant().atZone(zoneId).toLocalDate()
 
-    override suspend fun exportBackup(): ByteArray = BackupCodec.encode(database)
-    override suspend fun previewBackup(bytes: ByteArray): BackupPreview = BackupCodec.preview(bytes)
-    override suspend fun restoreBackup(bytes: ByteArray): LedgerResult = BackupCodec.restore(database, bytes)
-    override suspend fun exportCsv(): ByteArray = BackupCodec.csv(database)
+    override suspend fun exportBackup(): ByteArray = withContext(codecDispatcher) { BackupCodec.encode(database) }
+    override suspend fun previewBackup(bytes: ByteArray): BackupPreview = withContext(codecDispatcher) { BackupCodec.preview(bytes) }
+    override suspend fun restoreBackup(bytes: ByteArray): LedgerResult = withContext(codecDispatcher) { BackupCodec.restore(database, bytes) }
+    override suspend fun exportCsv(): ByteArray = withContext(codecDispatcher) { BackupCodec.csv(database) }
 
     private companion object {
         val INITIAL_POCKETS = listOf(

@@ -6,6 +6,7 @@ import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class DomainRulesTest {
@@ -54,6 +55,13 @@ class DomainRulesTest {
         assertEquals(3_000, PocketMath.rollover(allocatedMinor = 10_000, netSpendMinor = 7_000, enabled = true))
         assertEquals(0, PocketMath.rollover(allocatedMinor = 10_000, netSpendMinor = 7_000, enabled = false))
         assertEquals(0, PocketMath.rollover(allocatedMinor = 10_000, netSpendMinor = 12_000, enabled = true))
+    }
+
+    @Test
+    fun `rollover rejects values whose availability exceeds supported money range`() {
+        assertThrows(ArithmeticException::class.java) {
+            PocketMath.rollover(allocatedMinor = Long.MAX_VALUE, netSpendMinor = -1, enabled = true)
+        }
     }
 
     @Test

@@ -108,7 +108,7 @@ object PocketMath {
     }
 
     fun rollover(allocatedMinor: Long, netSpendMinor: Long, enabled: Boolean): Long =
-        if (enabled) (allocatedMinor - netSpendMinor).coerceAtLeast(0) else 0
+        if (enabled) Math.subtractExact(allocatedMinor, netSpendMinor).coerceAtLeast(0) else 0
 
     fun project(netSpendMinor: Long, elapsedDays: Int, totalDays: Int): SpendProjection {
         require(elapsedDays > 0 && totalDays >= elapsedDays)

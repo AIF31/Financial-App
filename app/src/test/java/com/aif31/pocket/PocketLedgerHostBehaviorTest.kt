@@ -179,6 +179,43 @@ class PocketLedgerHostBehaviorTest {
         assertEquals(500L, currentLedger.state.first { it.previousPeriodNetSpendMinor == 500L }.previousPeriodNetSpendMinor)
     }
 
+    @Test
+    fun movement_defaults_read_the_current_clock_without_a_database_emission() {
+        val mutableClock = MutableClock(Instant.parse("2026-02-26T20:59:00Z"), zone)
+        val ledger = RoomPocketLedger(database, mutableClock, zone)
+
+        assertEquals(LocalDate.of(2026, 2, 26), ledger.movementDefaults().localDate)
+
+        mutableClock.value = Instant.parse("2026-02-26T21:01:00Z")
+
+        assertEquals(LocalDate.of(2026, 2, 27), ledger.movementDefaults().localDate)
+        assertEquals(mutableClock.millis(), ledger.movementDefaults().instantMillis)
+    }
+
+    @Test
+    fun csv_export_escapes_quotes_newlines_and_neutralizes_formulas() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(100_000))
+        val pocket = ledger.state.first { !it.needsOnboarding }.pockets.first()
+        ledger.execute(
+            LedgerCommand.AddMovement(
+                id = "csv-risk",
+                pocketId = pocket.pocket.id,
+                type = MovementType.EXPENSE,
+                sarAmountMinor = 1_250,
+                occurredAtUtcMillis = clock.millis(),
+                localDate = LocalDate.of(2026, 2, 26),
+                merchant = "=2+2",
+                note = "línea \"uno\"\nlínea dos",
+            )
+        )
+
+        val csv = ledger.exportCsv().decodeToString()
+
+        assertTrue(csv.contains("\"'=2+2\""))
+        assertTrue(csv.contains("\"línea \"\"uno\"\"\nlínea dos\""))
+    }
+
     private suspend fun withFreshLedger(block: suspend (RoomPocketLedger) -> Unit) {
         val freshDb = FinanceDatabase.inMemory(ApplicationProvider.getApplicationContext<Context>())
         try {
@@ -186,5 +223,14 @@ class PocketLedgerHostBehaviorTest {
         } finally {
             freshDb.close()
         }
+    }
+
+    private class MutableClock(
+        var value: Instant,
+        private val zoneId: ZoneId,
+    ) : Clock() {
+        override fun getZone(): ZoneId = zoneId
+        override fun withZone(zone: ZoneId): Clock = MutableClock(value, zone)
+        override fun instant(): Instant = value
     }
 }
