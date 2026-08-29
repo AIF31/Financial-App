@@ -13,6 +13,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Update
 import androidx.room.Upsert
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "periods", indices = [Index(value = ["start_epoch_day"], unique = true)])
@@ -146,7 +148,7 @@ interface FinanceDao {
 
 @Database(
     entities = [PeriodEntity::class, PocketEntity::class, AllocationEntity::class, PaymentMethodEntity::class, MovementEntity::class, RecurringTemplateEntity::class],
-    version = 2,
+    version = 3,
     autoMigrations = [AutoMigration(from = 1, to = 2)],
     exportSchema = true,
 )
@@ -155,11 +157,34 @@ abstract class FinanceDatabase : RoomDatabase() {
 
     companion object {
         fun open(context: Context): FinanceDatabase =
-            Room.databaseBuilder(context.applicationContext, FinanceDatabase::class.java, "pocket.db").build()
+            Room.databaseBuilder(context.applicationContext, FinanceDatabase::class.java, "pocket.db")
+                .addMigrations(MIGRATION_2_3)
+                .build()
 
         fun inMemory(context: Context): FinanceDatabase =
             Room.inMemoryDatabaseBuilder(context.applicationContext, FinanceDatabase::class.java)
                 .allowMainThreadQueries()
                 .build()
+
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val legacyPockets = buildList {
+                    db.query("SELECT id, name FROM pockets WHERE icon_key = 'OTHER'").use { cursor ->
+                        while (cursor.moveToNext()) {
+                            add(cursor.getString(0) to cursor.getString(1))
+                        }
+                    }
+                }
+                legacyPockets.forEach { (id, name) ->
+                    val iconKey = PocketIconKey.forName(name)
+                    if (iconKey != PocketIconKey.OTHER) {
+                        db.execSQL(
+                            "UPDATE pockets SET icon_key = ? WHERE id = ?",
+                            arrayOf(iconKey.name, id),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
