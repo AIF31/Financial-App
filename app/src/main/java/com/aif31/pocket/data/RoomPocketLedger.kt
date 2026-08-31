@@ -211,6 +211,13 @@ class RoomPocketLedger(
         dao.putAllocation(AllocationEntity(currentPeriod.id, pocket.id, budgetMinor = 0, rolloverMinor = 0))
         dao.putPeriodPocket(snapshot.copy(retired = true))
         dao.putPocket(pocket.copy(archived = true))
+        val futurePeriodIds = dao.periods()
+            .filter { it.startEpochDay > currentPeriod.startEpochDay }
+            .map { it.id }
+        if (futurePeriodIds.isNotEmpty()) {
+            dao.deleteAllocations(pocket.id, futurePeriodIds)
+            dao.deletePeriodPockets(pocket.id, futurePeriodIds)
+        }
         recalculateRolloverFrom(currentPeriod.id)
         LedgerResult.Success
     }
@@ -423,6 +430,10 @@ class RoomPocketLedger(
 
     private suspend fun archiveTemplate(command: LedgerCommand.ArchiveTemplate): LedgerResult = database.withTransaction {
         val existing = requireNotNull(dao.templates().firstOrNull { it.id == command.id }) { "Plantilla inexistente" }
+        if (!command.archived) {
+            val pocket = requireNotNull(dao.pockets().firstOrNull { it.id == existing.pocketId }) { "Pocket inexistente" }
+            require(!pocket.archived) { "El Pocket está archivado" }
+        }
         dao.putTemplate(existing.copy(archived = command.archived))
         LedgerResult.Success
     }

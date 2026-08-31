@@ -230,6 +230,61 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
+    fun archiving_removes_pre_materialized_future_snapshots_and_releases_their_budget() = runTest {
+        val mutableClock = MutableClock(Instant.parse("2026-02-26T09:00:00Z"), zone)
+        val ledger = RoomPocketLedger(database, mutableClock, zone)
+        val dao = database.financeDao()
+        ledger.execute(LedgerCommand.Initialize(30_000))
+        val initial = ledger.state.first { !it.needsOnboarding }
+        val pocket = initial.pockets.first { it.pocket.name == "Viajes" }.pocket
+        val current = initial.currentPeriod!!
+        ledger.execute(LedgerCommand.SetAllocation(current.id, pocket.id, 10_000))
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.CreateNextPeriod()))
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.CreateNextPeriod()))
+
+        val materialized = ledger.state.first { it.periods.size == 3 }
+        val futurePeriods = materialized.periods.filter { it.start > current.start }
+        assertEquals(2, futurePeriods.size)
+        assertTrue(futurePeriods.all { period ->
+            materialized.pocketSummariesByPeriod.getValue(period.id).any { it.pocket.id == pocket.id }
+        })
+        assertTrue(dao.allocations().any { it.pocketId == pocket.id && it.periodId in futurePeriods.map { period -> period.id } })
+
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePocket(pocket.id)))
+
+        val archived = ledger.state.first { state ->
+            futurePeriods.all { period ->
+                state.pocketSummariesByPeriod.getValue(period.id).none { it.pocket.id == pocket.id }
+            }
+        }
+        assertTrue(futurePeriods.all { period ->
+            archived.pocketSummariesByPeriod.getValue(period.id).none { it.pocket.id == pocket.id }
+        })
+        assertTrue(dao.allocations().none { it.pocketId == pocket.id && it.periodId in futurePeriods.map { period -> period.id } })
+
+        mutableClock.value = Instant.parse("2026-03-26T09:00:00Z")
+        val nextCurrent = ledger.state.first { it.currentPeriod?.id == futurePeriods.first().id }
+        assertEquals(30_000L, nextCurrent.unallocatedMinor)
+    }
+
+    @Test
+    fun restoring_a_template_for_an_archived_pocket_is_rejected() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(30_000))
+        val state = ledger.state.first { !it.needsOnboarding }
+        val pocket = state.pockets.first { it.pocket.name == "Viajes" }.pocket
+
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.UpsertTemplate("template", "Viaje", 1_000, pocket.id)))
+        val templateId = ledger.state.first { it.templates.size == 1 }.templates.single().id
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchiveTemplate(templateId)))
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePocket(pocket.id)))
+
+        val restored = ledger.execute(LedgerCommand.ArchiveTemplate(templateId, archived = false)) as LedgerResult.Rejected
+        assertTrue(restored.message.contains("Pocket está archivado"))
+        assertTrue(ledger.state.first().templates.single { it.id == templateId }.archived)
+    }
+
+    @Test
     fun catch_up_with_no_missing_periods_keeps_the_existing_period_unchanged() = runTest {
         val ledger = RoomPocketLedger(database, clock, zone)
         ledger.execute(LedgerCommand.Initialize(100_000))
