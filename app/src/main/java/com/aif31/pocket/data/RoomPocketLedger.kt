@@ -484,10 +484,19 @@ class RoomPocketLedger(
         }
         val allSummaries = periods.associate { it.id to summariesFor(it.id) }
         val summaries = allSummaries.getValue(current.id)
-        val previousId = periods.filter { it.start < current.start }.maxByOrNull { it.start }?.id
-        val previousSpend = previousId?.let { id ->
-            movements.filter { it.periodId == id }.sumOf {
+        val previous = periods.filter { it.start < current.start }.maxByOrNull { it.start }
+        val previousSpend = previous?.let { period ->
+            movements.filter { it.periodId == period.id }.sumOf {
                 if (it.type == MovementType.EXPENSE) it.sarAmountMinor else -it.sarAmountMinor
+            }
+        }
+        val comparisonMode = if (current.isTransition) ComparisonMode.DAILY_PACE else ComparisonMode.TOTAL_SPEND
+        val previousComparison = when (comparisonMode) {
+            ComparisonMode.TOTAL_SPEND -> previousSpend
+            ComparisonMode.DAILY_PACE -> previous?.let { period ->
+                previousSpend?.div(
+                    (period.endExclusive.toEpochDay() - period.start.toEpochDay()).coerceAtLeast(1),
+                )
             }
         }
         val elapsed = ((today.coerceAtMost(current.endExclusive.minusDays(1)).toEpochDay() - current.start.toEpochDay()) + 1)
@@ -508,6 +517,8 @@ class RoomPocketLedger(
             netSpendMinor = netSpend,
             trackedAvailabilityMinor = summaries.sumOf { it.availabilityMinor },
             previousPeriodNetSpendMinor = previousSpend,
+            comparisonMode = comparisonMode,
+            previousPeriodComparisonMinor = previousComparison,
             elapsedDays = elapsed,
             totalDays = totalDays,
             projectionMinor = PocketMath.project(netSpend, elapsed, totalDays).amountMinor,

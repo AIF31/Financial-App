@@ -83,12 +83,23 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
                         },
                         modifier = Modifier.clickable { selectedPeriodId = period.id },
                     ) {
-                        Text(
-                            formatPeriodRange(period.start, period.endExclusive.minusDays(1)),
+                        Column(
                             modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                            style = MaterialTheme.typography.titleMedium,
-                        )
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                formatPeriodRange(period.start, period.endExclusive.minusDays(1)),
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            if (period.isTransition) {
+                                Text(
+                                    "Periodo de transición",
+                                    color = MaterialTheme.colorScheme.primary,
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
                     }
                 }
             }

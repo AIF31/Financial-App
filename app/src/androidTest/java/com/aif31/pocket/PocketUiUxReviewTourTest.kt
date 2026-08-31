@@ -3,6 +3,7 @@ package com.aif31.pocket
 import android.content.Context
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
@@ -11,12 +12,14 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.waitUntilExactlyOneExists
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -107,8 +110,10 @@ class PocketUiUxReviewTourTest {
         reviewScrollTarget("dashboard_list", "Disponible")
         reviewScrollTarget("dashboard_list", "Supermercado")
         reviewScrollTarget("dashboard_list", "Transporte")
-        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Más información"))
-        compose.onNodeWithText("Más información").performClick()
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasContentDescription("Mostrar métricas del periodo"))
+        compose.onNodeWithContentDescription("Mostrar métricas del periodo").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Mostrar métricas del periodo").performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitUntilExactlyOneExists(hasText("Ocultar más información"), TIMEOUT)
         reviewScrollTarget("dashboard_list", "Gasto diario promedio")
         reviewScrollTarget("dashboard_list", "Proyección estimada")
 
@@ -147,6 +152,7 @@ class PocketUiUxReviewTourTest {
         compose.waitUntilExactlyOneExists(hasTestTag("history_search"), TIMEOUT)
         pauseForReview()
         listOf("filter_period", "filter_pocket", "filter_currency", "filter_method").forEach { tag ->
+            compose.onNodeWithTag("history_filters").performScrollToNode(hasTestTag(tag))
             compose.onNodeWithTag(tag).performClick()
             compose.onNodeWithTag("${tag}_option_1").performClick()
             pauseForReview(SHORT_PAUSE)

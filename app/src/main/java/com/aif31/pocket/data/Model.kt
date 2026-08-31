@@ -12,6 +12,8 @@ data class Period(
     val needsReview: Boolean = false,
 )
 
+enum class ComparisonMode { TOTAL_SPEND, DAILY_PACE }
+
 enum class PocketIconKey {
     SUPERMARKET,
     RESTAURANT,
@@ -114,6 +116,8 @@ data class LedgerState(
     val netSpendMinor: Long = 0,
     val trackedAvailabilityMinor: Long = 0,
     val previousPeriodNetSpendMinor: Long? = null,
+    val comparisonMode: ComparisonMode = ComparisonMode.TOTAL_SPEND,
+    val previousPeriodComparisonMinor: Long? = null,
     val elapsedDays: Int = 0,
     val totalDays: Int = 0,
     val projectionMinor: Long = 0,

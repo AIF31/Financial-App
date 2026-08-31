@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.aif31.pocket.data.FinanceDatabase
 import com.aif31.pocket.data.ConversionStatus
+import com.aif31.pocket.data.ComparisonMode
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.MovementType
@@ -488,6 +489,62 @@ class PocketLedgerHostBehaviorTest {
         currentLedger.execute(LedgerCommand.AddMovement(id = "historical", pocketId = pocketId, type = MovementType.EXPENSE,
             sarAmountMinor = 500, occurredAtUtcMillis = clock.millis(), localDate = LocalDate.of(2026, 2, 26)))
         assertEquals(500L, currentLedger.state.first { it.previousPeriodNetSpendMinor == 500L }.previousPeriodNetSpendMinor)
+    }
+
+    @Test
+    fun ordinary_period_compares_the_previous_period_total_spend() = runTest {
+        val firstPeriodLedger = RoomPocketLedger(database, clock, zone)
+        firstPeriodLedger.execute(LedgerCommand.Initialize(20_000))
+        val firstState = firstPeriodLedger.state.first { !it.needsOnboarding }
+        firstPeriodLedger.execute(
+            LedgerCommand.AddMovement(
+                id = "ordinary-previous-spend",
+                pocketId = firstState.pockets.first().pocket.id,
+                type = MovementType.EXPENSE,
+                sarAmountMinor = 1_000,
+                occurredAtUtcMillis = clock.millis(),
+                localDate = LocalDate.of(2026, 2, 26),
+            ),
+        )
+        firstPeriodLedger.execute(LedgerCommand.CreateNextPeriod())
+
+        val currentLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone),
+            zone,
+        )
+
+        val state = currentLedger.state.first { it.currentPeriod?.start == LocalDate.of(2026, 3, 25) }
+        assertEquals(ComparisonMode.TOTAL_SPEND, state.comparisonMode)
+        assertEquals(1_000L, state.previousPeriodComparisonMinor)
+    }
+
+    @Test
+    fun transition_period_compares_the_previous_period_daily_pace() = runTest {
+        val firstPeriodLedger = RoomPocketLedger(database, clock, zone)
+        firstPeriodLedger.execute(LedgerCommand.Initialize(20_000))
+        val firstState = firstPeriodLedger.state.first { !it.needsOnboarding }
+        firstPeriodLedger.execute(
+            LedgerCommand.AddMovement(
+                id = "transition-previous-spend",
+                pocketId = firstState.pockets.first().pocket.id,
+                type = MovementType.EXPENSE,
+                sarAmountMinor = 1_000,
+                occurredAtUtcMillis = clock.millis(),
+                localDate = LocalDate.of(2026, 2, 26),
+            ),
+        )
+        firstPeriodLedger.execute(LedgerCommand.CreateNextPeriod(startDay = 10))
+
+        val currentLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone),
+            zone,
+        )
+
+        val state = currentLedger.state.first { it.currentPeriod?.isTransition == true }
+        assertEquals(ComparisonMode.DAILY_PACE, state.comparisonMode)
+        assertEquals(35L, state.previousPeriodComparisonMinor)
     }
 
     @Test

@@ -284,19 +284,19 @@ Commit as `feat: enforce Pocket archival accounting`.
 - `LedgerState.comparisonMode` is `TOTAL_SPEND` for ordinary periods and `DAILY_PACE` for a transition.
 - `LedgerState.previousPeriodComparisonMinor` contains the previous total or previous daily pace according to that mode.
 
-- [ ] **Step 1: Write failing reporting tests**
+- [x] **Step 1: Write failing reporting tests**
 
 Assert an ordinary period compares the prior total, while a transition compares `previousNetSpend / previous.totalDays`. Add Compose assertions for `Periodo de transición` and `Ritmo diario del periodo anterior`.
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run the targeted ledger and host-flow tests. Expected: absolute prior spend is displayed for every period and no transition marker exists.
 
-- [ ] **Step 3: Implement minimal reporting state and UI**
+- [x] **Step 3: Implement minimal reporting state and UI**
 
 Derive comparison mode from `currentPeriod.isTransition`; use integer minor-unit division by the prior period's actual day count. Mark transition chips and dashboard copy without changing ordinary-period labels.
 
-- [ ] **Step 4: Run full fresh verification**
+- [x] **Step 4: Run full fresh verification**
 
 Through one compact Gradle workflow under JDK 17, run:
 

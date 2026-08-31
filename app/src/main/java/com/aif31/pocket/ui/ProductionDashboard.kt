@@ -48,6 +48,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.R
+import com.aif31.pocket.data.ComparisonMode
 import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.PocketPeriodSummary
 import java.time.format.DateTimeFormatter
@@ -115,6 +116,13 @@ internal fun ActionableDashboardContent(
                                 style = MaterialTheme.typography.titleMedium,
                             )
                         }
+                    }
+                    if (period?.isTransition == true) {
+                        Text(
+                            "Periodo de transición",
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
                     }
                 }
                 Image(
@@ -233,8 +241,12 @@ internal fun ActionableDashboardContent(
             item {
                 Column(modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp)) {
                     SupportingMetric(
-                        "Periodo anterior",
-                        state.previousPeriodNetSpendMinor?.let(::formatSar)
+                        if (state.comparisonMode == ComparisonMode.DAILY_PACE) {
+                            "Ritmo diario del periodo anterior"
+                        } else {
+                            "Periodo anterior"
+                        },
+                        state.previousPeriodComparisonMinor?.let(::formatSar)
                             ?: "Aún no existe un periodo anterior",
                     )
                 }

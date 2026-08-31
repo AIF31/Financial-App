@@ -120,7 +120,10 @@ internal fun MovementsScreen(
         }
         item {
             Text("Filtros", style = MaterialTheme.typography.titleMedium)
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyRow(
+                modifier = Modifier.testTag("history_filters"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 item { HistoryFilter("filter_period", periodLabels, periodIndex) { periodIndex = it } }
                 item { HistoryFilter("filter_pocket", pocketLabels, pocketIndex) { pocketIndex = it } }
                 item { HistoryFilter("filter_currency", currencyLabels, currencyIndex) { currencyIndex = it } }

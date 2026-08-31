@@ -5,14 +5,17 @@ import android.content.Intent
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
@@ -20,6 +23,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.waitUntilExactlyOneExists
 import androidx.compose.ui.test.waitUntilAtLeastOneExists
 import androidx.compose.ui.test.waitUntilDoesNotExist
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -99,8 +103,10 @@ class PocketAppFlowTest {
         compose.onNodeWithText("Guardar gasto", substring = true).performClick()
 
         compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
-        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Más información"))
-        compose.onNodeWithText("Más información").performClick()
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasContentDescription("Mostrar métricas del periodo"))
+        compose.onNodeWithContentDescription("Mostrar métricas del periodo").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Mostrar métricas del periodo").performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitUntilExactlyOneExists(hasText("Ocultar más información"), 5_000)
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Gasto diario promedio"))
         compose.onNodeWithText("Gasto diario promedio").assertIsDisplayed()
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("SAR 200.00 disponibles"))
@@ -188,6 +194,7 @@ class PocketAppFlowTest {
         compose.onAllNodesWithText("Hotel").assertCountEquals(0)
         compose.onNodeWithTag("clear_filters").performClick()
 
+        compose.onNodeWithTag("history_filters").performScrollToNode(hasTestTag("filter_method"))
         compose.onNodeWithTag("filter_method").performClick()
         compose.onNodeWithTag("filter_method_option_1").performClick()
         compose.waitUntilExactlyOneExists(hasText("Mercado"), 5_000)

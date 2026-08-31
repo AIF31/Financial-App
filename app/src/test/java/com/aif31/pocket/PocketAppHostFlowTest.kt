@@ -5,6 +5,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -14,6 +15,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
@@ -21,6 +23,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.waitUntilExactlyOneExists
 import androidx.compose.ui.test.waitUntilAtLeastOneExists
 import androidx.compose.ui.test.waitUntilDoesNotExist
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.aif31.pocket.data.FinanceDatabase
@@ -464,6 +467,52 @@ class PocketAppHostFlowTest {
         compose.onAllNodesWithText("Editar Pocket").assertCountEquals(0)
         compose.onAllNodesWithText("Guardar presupuesto").assertCountEquals(0)
     }
+
+    @Test
+    fun transition_period_identifies_its_daily_pace_comparison() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val firstPeriodLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone),
+            zone,
+        )
+        runBlocking {
+            firstPeriodLedger.execute(LedgerCommand.Initialize(20_000))
+            val firstState = firstPeriodLedger.state.first { !it.needsOnboarding }
+            firstPeriodLedger.execute(
+                LedgerCommand.AddMovement(
+                    id = "transition-ui-previous-spend",
+                    pocketId = firstState.pockets.first().pocket.id,
+                    type = MovementType.EXPENSE,
+                    sarAmountMinor = 1_000,
+                    occurredAtUtcMillis = Instant.parse("2026-02-26T09:00:00Z").toEpochMilli(),
+                    localDate = LocalDate.of(2026, 2, 26),
+                ),
+            )
+            firstPeriodLedger.execute(LedgerCommand.CreateNextPeriod(startDay = 10))
+        }
+        val transitionLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone),
+            zone,
+        )
+        compose.setContent { PocketApp(transitionLedger) }
+
+        compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Periodo de transición"))
+        compose.onNodeWithText("Periodo de transición").assertIsDisplayed()
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasContentDescription("Mostrar métricas del periodo"))
+        compose.onNodeWithContentDescription("Mostrar métricas del periodo").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Mostrar métricas del periodo").performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitUntilExactlyOneExists(hasText("Ocultar más información"), 5_000)
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Ritmo diario del periodo anterior"))
+        compose.onNodeWithText("Ritmo diario del periodo anterior").assertIsDisplayed()
+        compose.onNodeWithText("Pockets").performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag("pockets_list"), 10_000)
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Periodo de transición"))
+        compose.onNodeWithText("Periodo de transición").assertIsDisplayed()
+    }
+
     private class FakePreferences : PreferencesStore {
         private val values = MutableStateFlow(AppPreferences())
         override val state = values
