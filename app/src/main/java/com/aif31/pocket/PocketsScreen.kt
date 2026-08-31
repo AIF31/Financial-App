@@ -52,6 +52,24 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
         item {
             Text("Pockets", style = MaterialTheme.typography.headlineMedium)
         }
+        if (selectedPeriod?.id == state.currentPeriod?.id && selectedPeriod?.needsReview == true) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                ) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Revisa el presupuesto de este periodo", style = MaterialTheme.typography.titleMedium)
+                        Text("Comprueba las asignaciones y el rollover antes de continuar.")
+                        Button(onClick = {
+                            scope.launch { ledger.execute(LedgerCommand.MarkPeriodReviewed(selectedPeriod.id)) }
+                        }) {
+                            Text("Marcar periodo como revisado")
+                        }
+                    }
+                }
+            }
+        }
         item {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(state.periods, key = { it.id }) { period ->

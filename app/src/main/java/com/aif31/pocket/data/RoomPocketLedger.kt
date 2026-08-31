@@ -3,6 +3,7 @@ package com.aif31.pocket.data
 import android.database.sqlite.SQLiteConstraintException
 import androidx.room.withTransaction
 import com.aif31.pocket.domain.BudgetCalendar
+import com.aif31.pocket.domain.PeriodSchedule
 import com.aif31.pocket.domain.PocketMath
 import java.time.Clock
 import java.time.Instant
@@ -66,6 +67,8 @@ class RoomPocketLedger(
             is LedgerCommand.DeleteMovement -> deleteMovement(command)
             is LedgerCommand.RestoreMovement -> restoreMovement(command)
             is LedgerCommand.CreateNextPeriod -> createNextPeriod(command.startDay)
+            is LedgerCommand.CatchUpPeriods -> catchUpPeriods(command.preferredStartDay)
+            is LedgerCommand.MarkPeriodReviewed -> markPeriodReviewed(command.periodId)
             is LedgerCommand.UpsertPaymentMethod -> upsertPaymentMethod(command)
             is LedgerCommand.ArchivePaymentMethod -> archivePaymentMethod(command)
             is LedgerCommand.UpsertTemplate -> upsertTemplate(command)
@@ -91,9 +94,13 @@ class RoomPocketLedger(
                 configuredStartDay = command.startDay,
             )
         )
-        dao.putPockets(
-            INITIAL_POCKETS.mapIndexed { index, (name, iconKey) ->
+        val pockets = INITIAL_POCKETS.mapIndexed { index, (name, iconKey) ->
                 PocketEntity(UUID.randomUUID().toString(), name, iconKey.name, index, archived = false, rolloverEnabled = false)
+            }
+        dao.putPockets(pockets)
+        dao.putPeriodPockets(
+            pockets.map { pocket ->
+                PeriodPocketEntity(periodId, pocket.id, rolloverEligible = pocket.rolloverEnabled, retired = false)
             }
         )
         dao.putPaymentMethods(
@@ -131,9 +138,10 @@ class RoomPocketLedger(
         }
         val existing = pockets.firstOrNull { it.id == command.id }
         val nextOrder = pockets.maxOfOrNull { it.sortOrder }?.plus(1) ?: 0
+        val pocketId = existing?.id ?: UUID.randomUUID().toString()
         dao.putPocket(
             PocketEntity(
-                id = existing?.id ?: UUID.randomUUID().toString(),
+                id = pocketId,
                 name = name,
                 iconKey = (command.iconKey ?: existing?.let { PocketIconKey.fromStored(it.iconKey, it.name) } ?: PocketIconKey.forName(name)).name,
                 sortOrder = existing?.sortOrder ?: nextOrder,
@@ -141,6 +149,22 @@ class RoomPocketLedger(
                 rolloverEnabled = command.rolloverEnabled,
             )
         )
+        val todayEpochDay = LocalDate.now(clock.withZone(zoneId)).toEpochDay()
+        dao.periods().firstOrNull {
+            todayEpochDay >= it.startEpochDay && todayEpochDay < it.endExclusiveEpochDay
+        }?.let { currentPeriod ->
+            val currentSnapshot = dao.periodPockets().firstOrNull {
+                it.periodId == currentPeriod.id && it.pocketId == pocketId
+            }
+            dao.putPeriodPocket(
+                PeriodPocketEntity(
+                    periodId = currentPeriod.id,
+                    pocketId = pocketId,
+                    rolloverEligible = command.rolloverEnabled,
+                    retired = currentSnapshot?.retired ?: false,
+                )
+            )
+        }
         LedgerResult.Success
     }
 
@@ -189,35 +213,81 @@ class RoomPocketLedger(
 
     private suspend fun createNextPeriod(requestedStartDay: Int?): LedgerResult = database.withTransaction {
         val previous = requireNotNull(dao.periods().maxByOrNull { it.startEpochDay }) { "No existe un periodo anterior" }
-        val startDay = requestedStartDay ?: previous.configuredStartDay
-        require(startDay in 1..31) { "Día de inicio inválido" }
-        val nextStart = LocalDate.ofEpochDay(previous.endExclusiveEpochDay)
-        val nextBounds = BudgetCalendar(startDay, zoneId).periodContaining(nextStart)
-        val nextId = UUID.randomUUID().toString()
-        dao.putPeriod(
-            previous.copy(
-                id = nextId,
-                startEpochDay = nextStart.toEpochDay(),
-                endExclusiveEpochDay = nextBounds.endExclusive.toEpochDay(),
-                configuredStartDay = startDay,
-            )
+        createPeriodAfter(previous, requestedStartDay ?: previous.configuredStartDay, needsReview = false)
+        LedgerResult.Success
+    }
+
+    private suspend fun catchUpPeriods(preferredStartDay: Int): LedgerResult = database.withTransaction {
+        require(preferredStartDay in 1..31) { "Día de inicio inválido" }
+        var previous = requireNotNull(dao.periods().maxByOrNull { it.startEpochDay }) { "No existe un periodo anterior" }
+        val created = mutableListOf<PeriodEntity>()
+        val todayEpochDay = today().toEpochDay()
+        while (todayEpochDay >= previous.endExclusiveEpochDay) {
+            previous = createPeriodAfter(previous, preferredStartDay, needsReview = false)
+            created += previous
+        }
+        created.lastOrNull()?.let { current ->
+            dao.updatePeriod(current.copy(needsReview = true))
+        }
+        LedgerResult.Success
+    }
+
+    private suspend fun markPeriodReviewed(periodId: String): LedgerResult = database.withTransaction {
+        val period = requireNotNull(dao.period(periodId)) { "Periodo inexistente" }
+        dao.updatePeriod(period.copy(needsReview = false))
+        LedgerResult.Success
+    }
+
+    private suspend fun createPeriodAfter(
+        previous: PeriodEntity,
+        preferredStartDay: Int,
+        needsReview: Boolean,
+    ): PeriodEntity {
+        val previousSchedule = PeriodSchedule(
+            start = LocalDate.ofEpochDay(previous.startEpochDay),
+            endExclusive = LocalDate.ofEpochDay(previous.endExclusiveEpochDay),
+            configuredStartDay = previous.configuredStartDay,
+            isTransition = previous.isTransition,
         )
-        val pockets = dao.pockets().associateBy { it.id }
-        val previousAllocations = dao.allocations().filter { it.periodId == previous.id }
+        val schedule = BudgetCalendar(previous.configuredStartDay, zoneId)
+            .nextPeriodAfter(previousSchedule, preferredStartDay)
+        val nextId = UUID.randomUUID().toString()
+        val next = previous.copy(
+            id = nextId,
+            startEpochDay = schedule.start.toEpochDay(),
+            endExclusiveEpochDay = schedule.endExclusive.toEpochDay(),
+            configuredStartDay = schedule.configuredStartDay,
+            isTransition = schedule.isTransition,
+            needsReview = needsReview,
+        )
+        dao.putPeriod(next)
+        val activePockets = dao.pockets().filterNot { it.archived }
+        val previousPeriodPockets = dao.periodPockets()
+            .filter { it.periodId == previous.id }
+            .associateBy { it.pocketId }
+        val previousAllocations = dao.allocations()
+            .filter { it.periodId == previous.id }
+            .associateBy { it.pocketId }
         val previousMovements = dao.movements().filter { it.periodId == previous.id }
-        val nextAllocations = previousAllocations.map { allocation ->
-            val spent = previousMovements.filter { it.pocketId == allocation.pocketId }.sumOf {
+        dao.putPeriodPockets(
+            activePockets.map { pocket ->
+                PeriodPocketEntity(nextId, pocket.id, rolloverEligible = pocket.rolloverEnabled, retired = false)
+            }
+        )
+        val nextAllocations = activePockets.map { pocket ->
+            val previousAllocation = previousAllocations[pocket.id]
+            val spent = previousMovements.filter { it.pocketId == pocket.id }.sumOf {
                 if (it.type == MovementType.EXPENSE.name) it.sarAmountMinor else -it.sarAmountMinor
             }
             val rollover = PocketMath.rollover(
-                allocatedMinor = allocation.budgetMinor + allocation.rolloverMinor,
+                allocatedMinor = (previousAllocation?.budgetMinor ?: 0) + (previousAllocation?.rolloverMinor ?: 0),
                 netSpendMinor = spent,
-                enabled = pockets[allocation.pocketId]?.rolloverEnabled == true,
+                enabled = previousPeriodPockets[pocket.id]?.rolloverEligible == true,
             )
-            allocation.copy(periodId = nextId, rolloverMinor = rollover)
+            AllocationEntity(nextId, pocket.id, previousAllocation?.budgetMinor ?: 0, rollover)
         }
         dao.putAllocations(nextAllocations)
-        LedgerResult.Success
+        return next
     }
 
     private suspend fun upsertPaymentMethod(command: LedgerCommand.UpsertPaymentMethod): LedgerResult = database.withTransaction {
@@ -270,7 +340,7 @@ class RoomPocketLedger(
     ): LedgerState {
         val periods = periodEntities.map { it.toModel() }
         val today = today()
-        val current = periods.firstOrNull { today >= it.start && today < it.endExclusive } ?: periods.lastOrNull()
+        val current = periods.firstOrNull { today >= it.start && today < it.endExclusive }
         val pocketsById = pocketEntities.associateBy { it.id }
         val methodsById = methodEntities.associateBy { it.id }
         val movements = movementEntities.map { it.toModel(pocketsById, methodsById) }

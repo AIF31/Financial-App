@@ -170,6 +170,10 @@ fun PocketApp(
         OnboardingScreen(ledger, preferences, onPickBackup)
         return
     }
+    if (state.currentPeriod == null) {
+        Text("Actualizando periodo…", modifier = Modifier.padding(24.dp))
+        return
+    }
 
     val backStack = rememberNavBackStack(RootRoute(RootScreen.DASHBOARD))
     val currentRoute = backStack.last()
@@ -191,8 +195,8 @@ fun PocketApp(
         backStack.add(RootRoute(destination))
     }
 
-    LaunchedEffect(openNewExpense, state.currentPeriod?.id) {
-        if (openNewExpense && state.currentPeriod != null && backStack.lastOrNull() !is MovementRoute) {
+    LaunchedEffect(openNewExpense, state.currentPeriod.id) {
+        if (openNewExpense && backStack.lastOrNull() !is MovementRoute) {
             backStack.add(MovementRoute())
         }
     }

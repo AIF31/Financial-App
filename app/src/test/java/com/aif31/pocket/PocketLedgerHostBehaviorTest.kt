@@ -21,6 +21,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -69,6 +70,61 @@ class PocketLedgerHostBehaviorTest {
         val nextPockets = state.pocketSummariesByPeriod.getValue(state.periods.maxBy { it.start }.id)
         assertEquals(15_000, nextPockets.first { it.pocket.id == travel.pocket.id }.rolloverMinor)
         assertEquals(0, nextPockets.first { it.pocket.id == supermarket.pocket.id }.rolloverMinor)
+    }
+
+    @Test
+    fun catch_up_with_no_missing_periods_keeps_the_existing_period_unchanged() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(100_000))
+        val before = ledger.state.first { !it.needsOnboarding }.periods
+
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay = 25)))
+
+        val after = ledger.state.first { it.periods.size == before.size }.periods
+        assertEquals(before, after)
+        assertFalse(after.single().needsReview)
+    }
+
+    @Test
+    fun catch_up_creates_one_missing_period_and_marks_only_it_for_review() = runTest {
+        val mutableClock = MutableClock(Instant.parse("2026-02-26T09:00:00Z"), zone)
+        val ledger = RoomPocketLedger(database, mutableClock, zone)
+        ledger.execute(LedgerCommand.Initialize(100_000))
+        mutableClock.value = Instant.parse("2026-03-26T09:00:00Z")
+
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay = 25)))
+
+        val periods = ledger.state.first { it.periods.size == 2 }.periods
+        assertEquals(listOf(LocalDate.of(2026, 2, 25), LocalDate.of(2026, 3, 25)), periods.map { it.start })
+        assertEquals(listOf(false, true), periods.map { it.needsReview })
+        assertEquals(LocalDate.of(2026, 3, 25), periods.last().start)
+    }
+
+    @Test
+    fun catch_up_creates_every_missing_period_sequentially_and_is_idempotent() = runTest {
+        val mutableClock = MutableClock(Instant.parse("2026-02-26T09:00:00Z"), zone)
+        val ledger = RoomPocketLedger(database, mutableClock, zone)
+        ledger.execute(LedgerCommand.Initialize(100_000))
+        mutableClock.value = Instant.parse("2026-06-26T09:00:00Z")
+
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay = 25)))
+        val firstCatchUp = ledger.state.first { it.periods.size == 5 }.periods
+        assertEquals(
+            listOf(
+                LocalDate.of(2026, 2, 25),
+                LocalDate.of(2026, 3, 25),
+                LocalDate.of(2026, 4, 25),
+                LocalDate.of(2026, 5, 25),
+                LocalDate.of(2026, 6, 25),
+            ),
+            firstCatchUp.map { it.start },
+        )
+        assertEquals(listOf(false, false, false, false, true), firstCatchUp.map { it.needsReview })
+
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay = 25)))
+        val repeated = ledger.state.first { it.periods.size == 5 }.periods
+        assertEquals(firstCatchUp.map { it.id }, repeated.map { it.id })
+        assertEquals(firstCatchUp, repeated)
     }
 
     @Test
@@ -137,9 +193,11 @@ class PocketLedgerHostBehaviorTest {
         dao.clearPeriodPockets()
 
         assertEquals(LedgerResult.Success, ledger.restoreBackup(backup))
+        val restoredPeriodPockets = dao.periodPockets()
+        assertEquals(state.pockets.size, restoredPeriodPockets.size)
         assertEquals(
-            listOf(PeriodPocketEntity(periodId, pocketId, rolloverEligible = true, retired = true)),
-            dao.periodPockets(),
+            PeriodPocketEntity(periodId, pocketId, rolloverEligible = true, retired = true),
+            restoredPeriodPockets.single { it.periodId == periodId && it.pocketId == pocketId },
         )
         assertEquals(
             listOf(RolloverReleaseEntity(periodId, pocketId, amountMinor = 5_000)),
@@ -231,6 +289,20 @@ class PocketLedgerHostBehaviorTest {
 
         assertEquals(LocalDate.of(2026, 2, 27), ledger.movementDefaults().localDate)
         assertEquals(mutableClock.millis(), ledger.movementDefaults().instantMillis)
+    }
+
+    @Test
+    fun state_does_not_expose_an_expired_period_as_current_before_catch_up() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(20_000))
+
+        val laterLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-05-01T09:00:00Z"), zone),
+            zone,
+        )
+
+        assertNull(laterLedger.state.first { it.periods.isNotEmpty() }.currentPeriod)
     }
 
     @Test

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -121,6 +122,20 @@ internal fun ActionableDashboardContent(
                     contentDescription = null,
                     modifier = Modifier.size(56.dp).clip(CircleShape),
                 )
+            }
+        }
+        if (period?.needsReview == true) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                ) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Revisa el presupuesto de este periodo", style = MaterialTheme.typography.titleMedium)
+                        Text("Se crearon periodos pendientes mientras la app estaba cerrada. Confirma que los importes siguen siendo correctos.")
+                        Button(onClick = onManagePockets) { Text("Revisar Pockets") }
+                    }
+                }
             }
         }
         item {

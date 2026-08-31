@@ -332,6 +332,43 @@ class PocketAppHostFlowTest {
     }
 
     @Test
+    fun catch_up_review_banner_routes_to_pockets_and_can_be_cleared() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val initialLedger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { initialLedger.execute(LedgerCommand.Initialize(100_000)) }
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-05-01T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.CatchUpPeriods(25)) }
+
+        compose.setContent { PocketApp(ledger) }
+
+        compose.waitUntilExactlyOneExists(hasText("Revisa el presupuesto de este periodo"), 5_000)
+        compose.onNodeWithText("Revisar Pockets").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Marcar periodo como revisado"), 5_000)
+        compose.onNodeWithText("Marcar periodo como revisado").performClick()
+        compose.waitUntilDoesNotExist(hasText("Marcar periodo como revisado"), 5_000)
+        assertEquals(false, runBlocking { ledger.state.first { it.currentPeriod?.needsReview == false }.currentPeriod!!.needsReview })
+    }
+
+    @Test
+    fun launcher_shortcut_after_catch_up_records_against_the_new_current_period() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val initialLedger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { initialLedger.execute(LedgerCommand.Initialize(100_000)) }
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-05-01T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.CatchUpPeriods(25)) }
+        val currentPeriodId = runBlocking { ledger.state.first { it.currentPeriod != null }.currentPeriod!!.id }
+
+        compose.setContent { PocketApp(ledger, openNewExpense = true) }
+        compose.waitUntilExactlyOneExists(hasText("Nuevo gasto"), 5_000)
+        compose.onNodeWithTag("movement_amount").performTextInput("12.34")
+        compose.onNodeWithTag("movement_pocket_Supermercado").performClick()
+        compose.onNodeWithText("Guardar gasto", substring = true).performClick()
+
+        val saved = runBlocking { ledger.state.first { it.movements.size == 1 }.movements.single() }
+        assertEquals(currentPeriodId, saved.periodId)
+    }
+
+    @Test
     fun restore_confirmation_warns_before_replacing_initialized_data() {
         val zone = ZoneId.of("Asia/Riyadh")
         val clock = Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone)

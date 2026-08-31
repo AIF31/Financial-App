@@ -148,7 +148,7 @@ Commit schema, migration, models, codec, and migration tests as `feat: persist p
 - `LedgerState.currentPeriod` is null while a nonempty ledger is behind today's date; UI displays an updating state until catch-up completes.
 - Only the final catch-up-created current period has `needsReview = true`.
 
-- [ ] **Step 1: Write failing zero/one/many/idempotence tests**
+- [x] **Step 1: Write failing zero/one/many/idempotence tests**
 
 Use a mutable `Clock` and a real in-memory Room database. Assert zero missing periods leaves IDs unchanged; one adds one period; many adds every contiguous period; a repeated call leaves the full period list unchanged.
 
@@ -162,23 +162,23 @@ assertEquals(listOf(
 assertEquals(listOf(false, false, false, true), state.periods.map { it.needsReview })
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run the targeted host ledger test. Expected: unresolved `CatchUpPeriods` or assertion failure because only one manually requested period can be created.
 
-- [ ] **Step 3: Implement catch-up inside one Room transaction**
+- [x] **Step 3: Implement catch-up inside one Room transaction**
 
 Loop from the latest period while `today >= endExclusive`, constructing each successor sequentially. Copy new funds and budgets, create period Pocket snapshots only for non-archived Pockets, calculate rollover from the immediately previous source period, and set review only on the resulting current period. Repeated and concurrent calls must observe the already inserted unique start and make no duplicate.
 
-- [ ] **Step 4: Add launch/resume adapter and review UI**
+- [x] **Step 4: Add launch/resume adapter and review UI**
 
 In `MainActivity`, launch catch-up during `onCreate` and `onResume` using `preferences.state.first().futurePeriodStartDay`. In Compose, wait when onboarding is complete but `currentPeriod == null`. Show a current-period review banner with a route to Pockets and an explicit `MarkPeriodReviewed` action; do not block quick Movement capture after catch-up.
 
-- [ ] **Step 5: Verify green**
+- [x] **Step 5: Verify green**
 
 Run the targeted host tests, then `:app:testDebugUnitTest`. Add a Robolectric host-flow assertion that the shortcut Movement flow opens after catch-up rather than against a stale period.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Commit as `feat: catch up missing budget periods`.
 

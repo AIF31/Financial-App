@@ -150,6 +150,8 @@ sealed interface LedgerCommand {
     data class DeleteMovement(val movementId: String) : LedgerCommand
     data class RestoreMovement(val movement: Movement) : LedgerCommand
     data class CreateNextPeriod(val startDay: Int? = null) : LedgerCommand
+    data class CatchUpPeriods(val preferredStartDay: Int) : LedgerCommand
+    data class MarkPeriodReviewed(val periodId: String) : LedgerCommand
     data class UpsertPaymentMethod(val id: String? = null, val name: String) : LedgerCommand
     data class ArchivePaymentMethod(val id: String, val archived: Boolean = true) : LedgerCommand
     data class UpsertTemplate(

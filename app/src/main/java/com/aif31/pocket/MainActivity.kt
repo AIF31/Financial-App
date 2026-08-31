@@ -11,11 +11,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
+import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.ui.PocketTheme
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -61,6 +63,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        catchUpPeriods()
         val openExpense = intent?.action == ACTION_NEW_EXPENSE
         setContent {
             PocketTheme {
@@ -81,6 +84,19 @@ class MainActivity : ComponentActivity() {
                     },
                 )
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        catchUpPeriods()
+    }
+
+    private fun catchUpPeriods() {
+        lifecycleScope.launch {
+            val application = application as PocketApplication
+            val preferredStartDay = application.preferences.state.first().futurePeriodStartDay
+            application.ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay))
         }
     }
 
