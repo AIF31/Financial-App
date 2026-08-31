@@ -274,7 +274,7 @@ internal fun ProductionMovementScreen(
             item {
                 Text("¿De qué Pocket?", style = MaterialTheme.typography.titleLarge)
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    state.pockets.filterNot { it.pocket.archived }.chunked(2).forEach { rowPockets ->
+                    state.pockets.filterNot { it.pocket.archived || it.retiredThisPeriod }.chunked(2).forEach { rowPockets ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),

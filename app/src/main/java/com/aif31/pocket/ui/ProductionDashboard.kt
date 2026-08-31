@@ -62,7 +62,7 @@ internal fun ActionableDashboardContent(
 ) {
     var supportingMetricsExpanded by rememberSaveable { mutableStateOf(false) }
     val activePockets = state.pockets
-        .filterNot { it.pocket.archived }
+        .filterNot { it.pocket.archived || it.retiredThisPeriod }
         .sortedBy { summary ->
             when {
                 summary.exhausted -> 0

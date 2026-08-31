@@ -444,6 +444,26 @@ class PocketAppHostFlowTest {
         }
         assertEquals(PocketIconKey.TRAVEL, created.pocket.iconKey)
     }
+
+    @Test
+    fun retired_current_period_pocket_is_visible_without_edit_actions() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking {
+            ledger.execute(LedgerCommand.Initialize(100_000))
+            val pocket = ledger.state.first { !it.needsOnboarding }.pockets.first { it.pocket.name == "Viajes" }.pocket
+            ledger.execute(LedgerCommand.ArchivePocket(pocket.id))
+        }
+        compose.setContent { PocketApp(ledger) }
+
+        compose.onNodeWithText("Pockets").performClick()
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Retirado este periodo"))
+        compose.onNodeWithText("Retirado este periodo").assertIsDisplayed()
+        compose.onNodeWithTag("retired_Viajes").performClick()
+        compose.onNodeWithText("Pocket retirado").assertIsDisplayed()
+        compose.onAllNodesWithText("Editar Pocket").assertCountEquals(0)
+        compose.onAllNodesWithText("Guardar presupuesto").assertCountEquals(0)
+    }
     private class FakePreferences : PreferencesStore {
         private val values = MutableStateFlow(AppPreferences())
         override val state = values

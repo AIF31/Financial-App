@@ -38,7 +38,8 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
     val scope = rememberCoroutineScope()
     val selectedPeriod = state.periods.firstOrNull { it.id == selectedPeriodId } ?: state.currentPeriod
     val shownPockets = state.pocketSummariesByPeriod[selectedPeriodId].orEmpty()
-    val activePockets = shownPockets.filterNot { it.pocket.archived }
+    val activePockets = shownPockets.filterNot { it.pocket.archived || it.retiredThisPeriod }
+    val retiredPockets = shownPockets.filter { it.retiredThisPeriod && selectedPeriod?.id == state.currentPeriod?.id }
     val allocatedMinor = shownPockets.sumOf { it.budgetMinor }
     val availableMinor = shownPockets.sumOf { it.availabilityMinor }
     val periodFundsMinor = selectedPeriod?.newFundsMinor ?: state.newFundsMinor
@@ -231,9 +232,25 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
                 }
             }
         }
-        if (shownPockets.any { it.pocket.archived }) {
+        if (retiredPockets.isNotEmpty()) {
+            item { Text("Retirado este periodo", style = MaterialTheme.typography.titleMedium) }
+            items(retiredPockets, key = { "retired-${it.pocket.id}" }) { summary ->
+                Card(
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag("retired_${summary.pocket.name}")
+                        .clickable { selected = summary },
+                ) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium)
+                        Text("Movimientos conservados · ${money(summary.rolloverReleasedMinor)} de rollover liberado")
+                    }
+                }
+            }
+        }
+        if (shownPockets.any { it.pocket.archived && !it.retiredThisPeriod }) {
             item { Text("Archivados", style = MaterialTheme.typography.titleMedium) }
-            items(shownPockets.filter { it.pocket.archived }, key = { "archived-${it.pocket.id}" }) { summary ->
+            items(shownPockets.filter { it.pocket.archived && !it.retiredThisPeriod }, key = { "archived-${it.pocket.id}" }) { summary ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(summary.pocket.name)
                     TextButton(onClick = { scope.launch { ledger.execute(LedgerCommand.ArchivePocket(summary.pocket.id, false)) } }) {
@@ -365,6 +382,21 @@ private fun PocketManagementDialog(
     onEdit: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    if (summary.retiredThisPeriod) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Pocket retirado") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium)
+                    Text("Sus gastos y reembolsos se conservan como historial.")
+                    Text("Rollover liberado: ${money(summary.rolloverReleasedMinor)}")
+                }
+            },
+            confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } },
+        )
+        return
+    }
     var amount by rememberSaveable(summary.pocket.id, periodId) { mutableStateOf(minorNumber(summary.budgetMinor)) }
     var error by rememberSaveable(summary.pocket.id, periodId) { mutableStateOf<String?>(null) }
     var confirmingArchive by rememberSaveable(summary.pocket.id) { mutableStateOf(false) }

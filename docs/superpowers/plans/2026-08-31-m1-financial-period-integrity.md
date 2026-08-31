@@ -236,7 +236,7 @@ Commit as `feat: cascade historical rollover corrections`.
 - `ArchivePocket` rejects with a message listing every active dependent recurring template.
 - Current-period archive zeroes that Pocket's budget and incoming rollover, records the released rollover amount, and marks its period row retired.
 
-- [ ] **Step 1: Write failing archive behavior tests**
+- [x] **Step 1: Write failing archive behavior tests**
 
 Cover: two named active templates block archival; archived templates do not block; budget returns to unassigned; positive incoming rollover becomes one explicit release; expense/refund rows remain; the current retired summary is read-only; next period has no row for the archived Pocket; and new allocations, Movements, templates, and rollover are rejected/absent.
 
@@ -249,23 +249,23 @@ assertTrue(retired.retiredThisPeriod)
 assertFalse(nextSummaries.any { it.pocket.id == pocketId })
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run the archive tests. Expected: current implementation archives blindly, retains the allocation, and permits new financial references.
 
-- [ ] **Step 3: Implement archive transaction and validation**
+- [x] **Step 3: Implement archive transaction and validation**
 
 List active templates before any write. For a valid archive, insert/update one rollover release, zero budget/rollover, mark the current period Pocket retired, archive the global Pocket, and cascade later materialized rollover. Reject archived Pocket IDs in `SetAllocation`, `AddMovement`, and `UpsertTemplate`.
 
-- [ ] **Step 4: Implement read-only retired UI**
+- [x] **Step 4: Implement read-only retired UI**
 
 Show a `Retirado este periodo` section only for the current period, retaining spending/refund values but no edit, allocation, Movement, template, reorder, or rollover controls. Keep historical visibility through period selection.
 
-- [ ] **Step 5: Verify green**
+- [x] **Step 5: Verify green**
 
 Run archive host tests and the complete host suite. Add a Robolectric semantics assertion for the retired label and absence of edit actions.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Commit as `feat: enforce Pocket archival accounting`.
 

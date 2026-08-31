@@ -257,7 +257,7 @@ private fun SettingsDetailScreen(
             OutlinedTextField(templateAmount, { templateAmount = it }, label = { Text("Importe SAR") })
             Text("Pocket")
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(state.pockets.filterNot { it.pocket.archived }, key = { it.pocket.id }) { pocket ->
+                items(state.pockets.filterNot { it.pocket.archived || it.retiredThisPeriod }, key = { it.pocket.id }) { pocket ->
                     OutlinedButton(
                         onClick = { templatePocketId = pocket.pocket.id },
                         modifier = Modifier.testTag("template_pocket_${pocket.pocket.name}"),

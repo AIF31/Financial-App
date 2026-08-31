@@ -175,6 +175,61 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
+    fun archive_is_blocked_by_active_templates_then_releases_current_accounting_and_rejects_new_references() = runTest {
+        val firstLedger = RoomPocketLedger(database, clock, zone)
+        firstLedger.execute(LedgerCommand.Initialize(30_000))
+        var state = firstLedger.state.first { !it.needsOnboarding }
+        val pocket = state.pockets.first { it.pocket.name == "Viajes" }.pocket
+        val first = state.currentPeriod!!
+        firstLedger.execute(LedgerCommand.UpsertPocket(pocket.id, pocket.name, rolloverEnabled = true))
+        firstLedger.execute(LedgerCommand.SetAllocation(first.id, pocket.id, 10_000))
+        firstLedger.execute(LedgerCommand.AddMovement("first-expense", pocket.id, MovementType.EXPENSE, 5_000, clock.millis(), LocalDate.of(2026, 2, 26)))
+        firstLedger.execute(LedgerCommand.CreateNextPeriod())
+
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone), zone)
+        state = ledger.state.first { it.currentPeriod?.start == LocalDate.of(2026, 3, 25) }
+        val current = state.currentPeriod!!
+        ledger.execute(LedgerCommand.UpdatePeriodFunds(current.id, 30_000))
+        ledger.execute(LedgerCommand.SetAllocation(current.id, pocket.id, 30_000))
+        ledger.execute(LedgerCommand.AddMovement("kept-expense", pocket.id, MovementType.EXPENSE, 2_000, clock.millis(), LocalDate.of(2026, 3, 26)))
+        ledger.execute(LedgerCommand.AddMovement("kept-refund", pocket.id, MovementType.REFUND, 1_000, clock.millis(), LocalDate.of(2026, 3, 26)))
+        ledger.execute(LedgerCommand.UpsertTemplate("phone", "Teléfono", 1_000, pocket.id))
+        ledger.execute(LedgerCommand.UpsertTemplate("subscription", "Suscripción", 2_000, pocket.id))
+
+        val blocked = ledger.execute(LedgerCommand.ArchivePocket(pocket.id)) as LedgerResult.Rejected
+        assertTrue(blocked.message.contains("Teléfono"))
+        assertTrue(blocked.message.contains("Suscripción"))
+        assertFalse(database.financeDao().pockets().single { it.id == pocket.id }.archived)
+
+        val templateIds = ledger.state.first { it.templates.size == 2 }.templates.associate { it.name to it.id }
+        ledger.execute(LedgerCommand.ArchiveTemplate(templateIds.getValue("Teléfono")))
+        ledger.execute(LedgerCommand.ArchiveTemplate(templateIds.getValue("Suscripción")))
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePocket(pocket.id)))
+
+        state = ledger.state.first { it.pockets.any { summary -> summary.pocket.id == pocket.id && summary.retiredThisPeriod } }
+        val retired = state.pockets.single { it.pocket.id == pocket.id }
+        assertEquals(30_000L, state.unallocatedMinor)
+        assertEquals(0L, retired.budgetMinor)
+        assertEquals(0L, retired.rolloverMinor)
+        assertEquals(5_000L, retired.rolloverReleasedMinor)
+        assertTrue(retired.retiredThisPeriod)
+        assertEquals(
+            setOf("kept-expense", "kept-refund"),
+            state.movements.filter { it.periodId == current.id && it.pocketId == pocket.id }.map { it.id }.toSet(),
+        )
+        assertEquals(5_000L, database.financeDao().rolloverReleases().single { it.periodId == current.id && it.pocketId == pocket.id }.amountMinor)
+
+        assertTrue(ledger.execute(LedgerCommand.SetAllocation(current.id, pocket.id, 1_000)) is LedgerResult.Rejected)
+        assertTrue(ledger.execute(LedgerCommand.AddMovement("new", pocket.id, MovementType.EXPENSE, 1_000, clock.millis(), LocalDate.of(2026, 3, 26))) is LedgerResult.Rejected)
+        assertTrue(ledger.execute(LedgerCommand.UpsertTemplate(name = "Nueva", amountMinor = 1_000, pocketId = pocket.id)) is LedgerResult.Rejected)
+
+        ledger.execute(LedgerCommand.CreateNextPeriod())
+        val after = ledger.state.first { it.periods.size == 3 }
+        assertFalse(after.pocketSummariesByPeriod.getValue(after.periods.last().id).any { it.pocket.id == pocket.id })
+        assertTrue(after.pocketSummariesByPeriod.getValue(first.id).any { it.pocket.id == pocket.id })
+    }
+
+    @Test
     fun catch_up_with_no_missing_periods_keeps_the_existing_period_unchanged() = runTest {
         val ledger = RoomPocketLedger(database, clock, zone)
         ledger.execute(LedgerCommand.Initialize(100_000))
