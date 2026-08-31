@@ -46,6 +46,18 @@ data class BudgetPeriodBounds(
     val totalDays: Int get() = (endExclusive.toEpochDay() - start.toEpochDay()).toInt()
 }
 
+data class PeriodSchedule(
+    val start: LocalDate,
+    val endExclusive: LocalDate,
+    val configuredStartDay: Int,
+    val isTransition: Boolean,
+) {
+    init {
+        require(start < endExclusive)
+        require(configuredStartDay in 1..31)
+    }
+}
+
 class BudgetCalendar(val startDay: Int, val zoneId: ZoneId) {
     init {
         require(startDay in 1..31)
@@ -59,6 +71,25 @@ class BudgetCalendar(val startDay: Int, val zoneId: ZoneId) {
             start = boundary(startMonth),
             endExclusive = boundary(startMonth.plusMonths(1)),
             zoneId = zoneId,
+        )
+    }
+
+    fun nextPeriodAfter(previous: PeriodSchedule, preferredStartDay: Int): PeriodSchedule {
+        require(previous.configuredStartDay == startDay)
+        require(preferredStartDay in 1..31)
+        val nextStart = previous.endExclusive
+        val oldNextExpectedEnd = periodContaining(nextStart).endExclusive
+        val isTransition = preferredStartDay != previous.configuredStartDay
+        val nextEnd = if (isTransition) {
+            BudgetCalendar(preferredStartDay, zoneId).periodContaining(oldNextExpectedEnd).endExclusive
+        } else {
+            oldNextExpectedEnd
+        }
+        return PeriodSchedule(
+            start = nextStart,
+            endExclusive = nextEnd,
+            configuredStartDay = preferredStartDay,
+            isTransition = isTransition,
         )
     }
 

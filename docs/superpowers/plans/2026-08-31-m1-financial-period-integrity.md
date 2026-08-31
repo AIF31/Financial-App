@@ -34,7 +34,7 @@
 - Consumes: existing `BudgetCalendar.periodContaining(LocalDate)`.
 - Produces: `BudgetCalendar.nextPeriodAfter(PeriodSchedule, preferredStartDay): PeriodSchedule` and `PeriodSchedule(start, endExclusive, configuredStartDay, isTransition)`.
 
-- [ ] **Step 1: Write failing table-driven calendar tests**
+- [x] **Step 1: Write failing table-driven calendar tests**
 
 Add literal expectations for unchanged day 25, nearby changes 25→10 and 25→30, clamped month ends, and a December/January transition. The core assertions are:
 
@@ -49,11 +49,11 @@ assertEquals(
 )
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run the wrapper-owned `:app:testDebugUnitTest --tests com.aif31.pocket.domain.DomainRulesTest`. Expected: compilation/test failure because `PeriodSchedule` and `nextPeriodAfter` do not exist.
 
-- [ ] **Step 3: Implement the minimal pure calendar rule**
+- [x] **Step 3: Implement the minimal pure calendar rule**
 
 Use the prior period's configured calendar to find its next expected end. If the preferred day is unchanged, end there. Otherwise find the first preferred-day boundary strictly after that old expected end and mark the new period as a transition.
 
@@ -68,11 +68,11 @@ data class PeriodSchedule(
 fun BudgetCalendar.nextPeriodAfter(previous: PeriodSchedule, preferredStartDay: Int): PeriodSchedule
 ```
 
-- [ ] **Step 4: Verify green and refactor**
+- [x] **Step 4: Verify green and refactor**
 
 Run the same targeted test, then `:app:testDebugUnitTest --tests com.aif31.pocket.domain.*`. Keep boundary calculation private to `BudgetCalendar`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit `test/domain` and `main/domain` as `feat: model long transition periods`.
 
