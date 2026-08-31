@@ -192,7 +192,7 @@ Commit as `feat: catch up missing budget periods`.
 - Adds one private transaction-local implementation function: `recalculateRolloverFrom(sourcePeriodId: String)`.
 - Keeps later `newFundsMinor`, `budgetMinor`, and Movement rows byte-for-byte unchanged while updating only materialized incoming `rolloverMinor`.
 
-- [ ] **Step 1: Write failing cascade tests**
+- [x] **Step 1: Write failing cascade tests**
 
 Create three later periods with distinct new-fund values, Pocket budgets, and Movement IDs. Edit a first-period Movement and assert rollover changes in every later period while snapshots of later funds, budgets, and Movements remain equal. Add separate literal tests for refund-only availability with no allocation row and negative availability.
 
@@ -205,19 +205,19 @@ assertEquals(4_000L, refundOnlyRollover)
 assertEquals(0L, negativeAvailabilityRollover)
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run only the new host tests. Expected: current code leaves later materialized rollover stale and omits the refund-only Pocket.
 
-- [ ] **Step 3: Implement minimal recalculation**
+- [x] **Step 3: Implement minimal recalculation**
 
 For each adjacent source/target period pair, calculate source availability from budget + incoming rollover − expenses + refunds. Apply the source period's `rolloverEligible` snapshot, clamp negative availability to zero, and update only the target allocation's rollover column. Invoke from allocation changes, Movement insert/update/move/delete/restore, current-period eligibility changes, and archival changes; for a moved Movement start at the earlier old/new period.
 
-- [ ] **Step 4: Verify green and mutation cases**
+- [x] **Step 4: Verify green and mutation cases**
 
 Run the targeted host class and ensure tests fail if eligibility is read from `PocketEntity`, if refunds are ignored, or if recalculation stops after one successor.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit as `feat: cascade historical rollover corrections`.
 

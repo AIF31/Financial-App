@@ -126,6 +126,7 @@ class RoomPocketLedger(
         dao.putAllocation(
             AllocationEntity(command.periodId, command.pocketId, command.amountMinor, existing?.rolloverMinor ?: 0)
         )
+        recalculateRolloverFrom(command.periodId)
         LedgerResult.Success
     }
 
@@ -164,6 +165,7 @@ class RoomPocketLedger(
                     retired = currentSnapshot?.retired ?: false,
                 )
             )
+            recalculateRolloverFrom(currentPeriod.id)
         }
         LedgerResult.Success
     }
@@ -195,7 +197,11 @@ class RoomPocketLedger(
             command.localDate.toEpochDay() >= it.startEpochDay && command.localDate.toEpochDay() < it.endExclusiveEpochDay
         }) { "La fecha no pertenece a un periodo existente" }
         require(dao.pockets().any { it.id == command.pocketId }) { "Pocket inexistente" }
+        val existing = command.id?.let { dao.movement(it) }
         dao.putMovement(command.toEntity(period.id, zoneId.id))
+        val sourcePeriodId = listOfNotNull(existing?.periodId, period.id)
+            .minBy { id -> periods.first { it.id == id }.startEpochDay }
+        recalculateRolloverFrom(sourcePeriodId)
         LedgerResult.Success
     }
 
@@ -203,11 +209,14 @@ class RoomPocketLedger(
         val entity = requireNotNull(dao.movement(command.movementId)) { "Movimiento inexistente" }
         val movement = entity.toModel(dao.pockets().associateBy { it.id }, dao.paymentMethods().associateBy { it.id })
         dao.deleteMovement(entity.id)
+        recalculateRolloverFrom(entity.periodId)
         LedgerResult.Deleted(movement)
     }
 
     private suspend fun restoreMovement(command: LedgerCommand.RestoreMovement): LedgerResult = database.withTransaction {
-        dao.putMovement(command.movement.toEntity())
+        val entity = command.movement.toEntity()
+        dao.putMovement(entity)
+        recalculateRolloverFrom(entity.periodId)
         LedgerResult.Success
     }
 
@@ -236,6 +245,49 @@ class RoomPocketLedger(
         val period = requireNotNull(dao.period(periodId)) { "Periodo inexistente" }
         dao.updatePeriod(period.copy(needsReview = false))
         LedgerResult.Success
+    }
+
+    private suspend fun recalculateRolloverFrom(sourcePeriodId: String) {
+        val periods = dao.periods().sortedBy { it.startEpochDay }
+        val startIndex = periods.indexOfFirst { it.id == sourcePeriodId }
+        if (startIndex < 0 || startIndex == periods.lastIndex) return
+
+        val periodPockets = dao.periodPockets()
+        val movements = dao.movements()
+        val allocations = dao.allocations()
+            .associateByTo(mutableMapOf()) { it.periodId to it.pocketId }
+
+        for (index in startIndex until periods.lastIndex) {
+            val source = periods[index]
+            val target = periods[index + 1]
+            val sourceSnapshots = periodPockets.filter { it.periodId == source.id }.associateBy { it.pocketId }
+            val targetSnapshots = periodPockets.filter { it.periodId == target.id && !it.retired }
+            val sourceMovements = movements.filter { it.periodId == source.id }
+
+            targetSnapshots.forEach { targetSnapshot ->
+                val pocketId = targetSnapshot.pocketId
+                val sourceAllocation = allocations[source.id to pocketId]
+                val netSpend = sourceMovements.filter { it.pocketId == pocketId }.sumOf {
+                    if (it.type == MovementType.EXPENSE.name) it.sarAmountMinor else -it.sarAmountMinor
+                }
+                val sourceSnapshot = sourceSnapshots[pocketId]
+                val rollover = PocketMath.rollover(
+                    allocatedMinor = (sourceAllocation?.budgetMinor ?: 0) + (sourceAllocation?.rolloverMinor ?: 0),
+                    netSpendMinor = netSpend,
+                    enabled = sourceSnapshot?.rolloverEligible == true && !sourceSnapshot.retired,
+                )
+                val targetKey = target.id to pocketId
+                val targetAllocation = allocations[targetKey]
+                val updated = AllocationEntity(
+                    periodId = target.id,
+                    pocketId = pocketId,
+                    budgetMinor = targetAllocation?.budgetMinor ?: 0,
+                    rolloverMinor = rollover,
+                )
+                dao.putAllocation(updated)
+                allocations[targetKey] = updated
+            }
+        }
     }
 
     private suspend fun createPeriodAfter(

@@ -73,6 +73,108 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
+    fun editing_historical_spend_cascades_rollover_without_mutating_later_period_data() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        val dao = database.financeDao()
+        ledger.execute(LedgerCommand.Initialize(100_000))
+        var state = ledger.state.first { !it.needsOnboarding }
+        val pocket = state.pockets.first { it.pocket.name == "Viajes" }.pocket
+        val first = state.currentPeriod!!
+        ledger.execute(LedgerCommand.UpsertPocket(pocket.id, pocket.name, rolloverEnabled = true))
+        ledger.execute(LedgerCommand.SetAllocation(first.id, pocket.id, 20_000))
+        ledger.execute(LedgerCommand.AddMovement("first-spend", pocket.id, MovementType.EXPENSE, 8_000, clock.millis(), LocalDate.of(2026, 2, 26)))
+        ledger.execute(LedgerCommand.CreateNextPeriod())
+
+        state = ledger.state.first { it.periods.size == 2 }
+        val second = state.periods[1]
+        ledger.execute(LedgerCommand.UpdatePeriodFunds(second.id, 110_000))
+        ledger.execute(LedgerCommand.SetAllocation(second.id, pocket.id, 10_000))
+        ledger.execute(LedgerCommand.AddMovement("second-spend", pocket.id, MovementType.EXPENSE, 5_000, clock.millis(), LocalDate.of(2026, 3, 26)))
+        ledger.execute(LedgerCommand.CreateNextPeriod())
+
+        state = ledger.state.first { it.periods.size == 3 }
+        val third = state.periods[2]
+        ledger.execute(LedgerCommand.UpdatePeriodFunds(third.id, 120_000))
+        ledger.execute(LedgerCommand.SetAllocation(third.id, pocket.id, 11_000))
+        ledger.execute(LedgerCommand.AddMovement("third-spend", pocket.id, MovementType.EXPENSE, 6_000, clock.millis(), LocalDate.of(2026, 4, 26)))
+        ledger.execute(LedgerCommand.CreateNextPeriod())
+
+        state = ledger.state.first { it.periods.size == 4 }
+        val fourth = state.periods[3]
+        ledger.execute(LedgerCommand.UpdatePeriodFunds(fourth.id, 130_000))
+        val laterIds = state.periods.drop(1).map { it.id }.toSet()
+        suspend fun laterRollover() = dao.allocations().filter { it.periodId in laterIds && it.pocketId == pocket.id }
+            .sortedBy { allocation -> state.periods.indexOfFirst { it.id == allocation.periodId } }
+            .map { it.rolloverMinor }
+        assertEquals(listOf(12_000L, 17_000L, 22_000L), laterRollover())
+        val laterFundsBefore = dao.periods().filter { it.id in laterIds }.map { it.id to it.newFundsMinor }
+        val laterBudgetsBefore = dao.allocations().filter { it.periodId in laterIds }.map { Triple(it.periodId, it.pocketId, it.budgetMinor) }
+        val laterMovementsBefore = dao.movements().filter { it.periodId in laterIds }
+
+        ledger.execute(LedgerCommand.AddMovement("first-spend", pocket.id, MovementType.EXPENSE, 10_000, clock.millis(), LocalDate.of(2026, 2, 26)))
+
+        assertEquals(listOf(10_000L, 15_000L, 20_000L), laterRollover())
+        assertEquals(laterFundsBefore, dao.periods().filter { it.id in laterIds }.map { it.id to it.newFundsMinor })
+        assertEquals(laterBudgetsBefore, dao.allocations().filter { it.periodId in laterIds }.map { Triple(it.periodId, it.pocketId, it.budgetMinor) })
+        assertEquals(laterMovementsBefore, dao.movements().filter { it.periodId in laterIds })
+    }
+
+    @Test
+    fun rollover_includes_refunds_without_a_budget_and_clamps_negative_availability() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(20_000))
+        val state = ledger.state.first { !it.needsOnboarding }
+        val refundPocket = state.pockets.first { it.pocket.name == "Viajes" }.pocket
+        val negativePocket = state.pockets.first { it.pocket.name == "Ocio" }.pocket
+        ledger.execute(LedgerCommand.UpsertPocket(refundPocket.id, refundPocket.name, rolloverEnabled = true))
+        ledger.execute(LedgerCommand.UpsertPocket(negativePocket.id, negativePocket.name, rolloverEnabled = true))
+        ledger.execute(LedgerCommand.AddMovement("refund-only", refundPocket.id, MovementType.REFUND, 4_000, clock.millis(), LocalDate.of(2026, 2, 26)))
+        ledger.execute(LedgerCommand.SetAllocation(state.currentPeriod!!.id, negativePocket.id, 2_000))
+        ledger.execute(LedgerCommand.AddMovement("overspent", negativePocket.id, MovementType.EXPENSE, 3_000, clock.millis(), LocalDate.of(2026, 2, 26)))
+
+        ledger.execute(LedgerCommand.CreateNextPeriod())
+
+        val next = ledger.state.first { it.periods.size == 2 }.pocketSummariesByPeriod.getValue(ledger.state.first().periods.last().id)
+        assertEquals(4_000L, next.first { it.pocket.id == refundPocket.id }.rolloverMinor)
+        assertEquals(0L, next.first { it.pocket.id == negativePocket.id }.rolloverMinor)
+    }
+
+    @Test
+    fun allocation_delete_restore_move_and_historical_eligibility_recalculate_from_the_earliest_source() = runTest {
+        val firstLedger = RoomPocketLedger(database, clock, zone)
+        firstLedger.execute(LedgerCommand.Initialize(30_000))
+        var state = firstLedger.state.first { !it.needsOnboarding }
+        val pocket = state.pockets.first { it.pocket.name == "Viajes" }.pocket
+        val first = state.currentPeriod!!
+        firstLedger.execute(LedgerCommand.UpsertPocket(pocket.id, pocket.name, rolloverEnabled = true))
+        firstLedger.execute(LedgerCommand.SetAllocation(first.id, pocket.id, 10_000))
+        firstLedger.execute(LedgerCommand.AddMovement("mutable", pocket.id, MovementType.EXPENSE, 3_000, clock.millis(), LocalDate.of(2026, 2, 26)))
+        firstLedger.execute(LedgerCommand.CreateNextPeriod())
+        state = firstLedger.state.first { it.periods.size == 2 }
+        val second = state.periods[1]
+
+        val secondLedger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone), zone)
+        secondLedger.execute(LedgerCommand.UpsertPocket(pocket.id, pocket.name, rolloverEnabled = false))
+        secondLedger.execute(LedgerCommand.CreateNextPeriod())
+        val third = secondLedger.state.first { it.periods.size == 3 }.periods[2]
+        suspend fun rollover(periodId: String) = database.financeDao().allocation(periodId, pocket.id)!!.rolloverMinor
+
+        firstLedger.execute(LedgerCommand.SetAllocation(first.id, pocket.id, 12_000))
+        assertEquals(9_000L, rollover(second.id))
+        assertEquals(0L, rollover(third.id))
+
+        val deleted = firstLedger.execute(LedgerCommand.DeleteMovement("mutable")) as LedgerResult.Deleted
+        assertEquals(12_000L, rollover(second.id))
+        assertEquals(0L, rollover(third.id))
+        firstLedger.execute(LedgerCommand.RestoreMovement(deleted.movement))
+        assertEquals(9_000L, rollover(second.id))
+
+        firstLedger.execute(LedgerCommand.AddMovement("mutable", pocket.id, MovementType.EXPENSE, 3_000, clock.millis(), LocalDate.of(2026, 3, 26)))
+        assertEquals(12_000L, rollover(second.id))
+        assertEquals(0L, rollover(third.id))
+    }
+
+    @Test
     fun catch_up_with_no_missing_periods_keeps_the_existing_period_unchanged() = runTest {
         val ledger = RoomPocketLedger(database, clock, zone)
         ledger.execute(LedgerCommand.Initialize(100_000))
