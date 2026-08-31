@@ -7,16 +7,32 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 internal object BackupCodec {
-    private const val VERSION = 2
+    private const val VERSION = 3
     private val json = Json { ignoreUnknownKeys = false; encodeDefaults = true; prettyPrint = true }
 
     suspend fun encode(database: FinanceDatabase): ByteArray {
         val dao = database.financeDao()
         val payload = BackupPayload(
             version = VERSION,
-            periods = dao.periods().map { PeriodDto(it.id, it.startEpochDay, it.endExclusiveEpochDay, it.newFundsMinor, it.configuredStartDay) },
+            periods = dao.periods().map {
+                PeriodDto(
+                    it.id,
+                    it.startEpochDay,
+                    it.endExclusiveEpochDay,
+                    it.newFundsMinor,
+                    it.configuredStartDay,
+                    it.isTransition,
+                    it.needsReview,
+                )
+            },
             pockets = dao.pockets().map { PocketDto(it.id, it.name, it.sortOrder, it.archived, it.rolloverEnabled, it.iconKey) },
             allocations = dao.allocations().map { AllocationDto(it.periodId, it.pocketId, it.budgetMinor, it.rolloverMinor) },
+            periodPockets = dao.periodPockets().map {
+                PeriodPocketDto(it.periodId, it.pocketId, it.rolloverEligible, it.retired)
+            },
+            rolloverReleases = dao.rolloverReleases().map {
+                RolloverReleaseDto(it.periodId, it.pocketId, it.amountMinor)
+            },
             paymentMethods = dao.paymentMethods().map { PaymentMethodDto(it.id, it.name, it.archived) },
             movements = dao.movements().map {
                 MovementDto(
@@ -50,14 +66,18 @@ internal object BackupCodec {
                 val dao = database.financeDao()
                 dao.clearTemplates()
                 dao.clearMovements()
+                dao.clearRolloverReleases()
                 dao.clearAllocations()
+                dao.clearPeriodPockets()
                 dao.clearPaymentMethods()
                 dao.clearPockets()
                 dao.clearPeriods()
                 dao.putPeriodEntities(payload.periods.map { it.toEntity() })
                 dao.putPockets(payload.pockets.map { it.toEntity() })
                 dao.putPaymentMethods(payload.paymentMethods.map { it.toEntity() })
+                dao.putPeriodPockets(payload.periodPockets.map { it.toEntity() })
                 dao.putAllocations(payload.allocations.map { it.toEntity() })
+                dao.putRolloverReleases(payload.rolloverReleases.map { it.toEntity() })
                 dao.putMovements(payload.movements.map { it.toEntity() })
                 dao.putTemplates(payload.templates.map { it.toEntity() })
             }
@@ -97,8 +117,19 @@ internal object BackupCodec {
 
     private fun decodeAndValidate(bytes: ByteArray): BackupPayload {
         require(bytes.isNotEmpty() && bytes.size <= 10 * 1024 * 1024) { "Tamaño de backup inválido" }
-        val payload = json.decodeFromString(BackupPayload.serializer(), bytes.toString(StandardCharsets.UTF_8))
-        require(payload.version in 1..VERSION) { "Versión de backup incompatible" }
+        val decoded = json.decodeFromString(BackupPayload.serializer(), bytes.toString(StandardCharsets.UTF_8))
+        require(decoded.version in 1..VERSION) { "Versión de backup incompatible" }
+        val payload = if (decoded.version < 3 && decoded.periodPockets.isEmpty()) {
+            decoded.copy(
+                periodPockets = decoded.periods.flatMap { period ->
+                    decoded.pockets.map { pocket ->
+                        PeriodPocketDto(period.id, pocket.id, pocket.rollover, retired = false)
+                    }
+                }
+            )
+        } else {
+            decoded
+        }
         require(payload.periods.isNotEmpty()) { "El backup no contiene ningún periodo" }
         require(payload.periods.map { it.id }.distinct().size == payload.periods.size) { "Periodos duplicados" }
         require(payload.pockets.map { it.id }.distinct().size == payload.pockets.size) { "Pockets duplicados" }
@@ -125,6 +156,20 @@ internal object BackupCodec {
         }
         require(payload.allocations.map { it.periodId to it.pocketId }.distinct().size == payload.allocations.size) {
             "Presupuestos duplicados"
+        }
+        require(payload.periodPockets.map { it.periodId to it.pocketId }.distinct().size == payload.periodPockets.size) {
+            "Estados de Pocket por periodo duplicados"
+        }
+        require(payload.rolloverReleases.map { it.periodId to it.pocketId }.distinct().size == payload.rolloverReleases.size) {
+            "Liberaciones de rollover duplicadas"
+        }
+        require(payload.periodPockets.all { it.periodId in periodIds && it.pocketId in pocketIds }) {
+            "Relación de Pocket por periodo inválida"
+        }
+        require(payload.rolloverReleases.all {
+            it.periodId in periodIds && it.pocketId in pocketIds && it.amountMinor >= 0
+        }) {
+            "Liberación de rollover inválida"
         }
         require(payload.allocations.all { it.periodId in periodIds && it.pocketId in pocketIds && it.budgetMinor >= 0 && it.rolloverMinor >= 0 }) { "Relación de presupuesto inválida" }
         val periodsById = payload.periods.associateBy { it.id }
@@ -167,13 +212,24 @@ private data class BackupPayload(
     val periods: List<PeriodDto>,
     val pockets: List<PocketDto>,
     val allocations: List<AllocationDto>,
+    val periodPockets: List<PeriodPocketDto> = emptyList(),
+    val rolloverReleases: List<RolloverReleaseDto> = emptyList(),
     val paymentMethods: List<PaymentMethodDto>,
     val movements: List<MovementDto>,
     val templates: List<TemplateDto>,
 )
 
-@Serializable private data class PeriodDto(val id: String, val start: Long, val endExclusive: Long, val newFundsMinor: Long, val startDay: Int) {
-    fun toEntity() = PeriodEntity(id, start, endExclusive, newFundsMinor, startDay)
+@Serializable
+private data class PeriodDto(
+    val id: String,
+    val start: Long,
+    val endExclusive: Long,
+    val newFundsMinor: Long,
+    val startDay: Int,
+    val isTransition: Boolean = false,
+    val needsReview: Boolean = false,
+) {
+    fun toEntity() = PeriodEntity(id, start, endExclusive, newFundsMinor, startDay, isTransition, needsReview)
 }
 @Serializable private data class PocketDto(
     val id: String,
@@ -187,6 +243,23 @@ private data class BackupPayload(
 }
 @Serializable private data class AllocationDto(val periodId: String, val pocketId: String, val budgetMinor: Long, val rolloverMinor: Long) {
     fun toEntity() = AllocationEntity(periodId, pocketId, budgetMinor, rolloverMinor)
+}
+@Serializable
+private data class PeriodPocketDto(
+    val periodId: String,
+    val pocketId: String,
+    val rolloverEligible: Boolean,
+    val retired: Boolean,
+) {
+    fun toEntity() = PeriodPocketEntity(periodId, pocketId, rolloverEligible, retired)
+}
+@Serializable
+private data class RolloverReleaseDto(
+    val periodId: String,
+    val pocketId: String,
+    val amountMinor: Long,
+) {
+    fun toEntity() = RolloverReleaseEntity(periodId, pocketId, amountMinor)
 }
 @Serializable private data class PaymentMethodDto(val id: String, val name: String, val archived: Boolean) {
     fun toEntity() = PaymentMethodEntity(id, name, archived)

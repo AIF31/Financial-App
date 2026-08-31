@@ -90,7 +90,7 @@ Commit `test/domain` and `main/domain` as `feat: model long transition periods`.
 - Extends `PeriodEntity`/`Period` with `isTransition` and `needsReview`.
 - Extends backup version 3 with period Pocket rows and rollover releases while retaining restore support for versions 1 and 2 through defaulted DTO fields.
 
-- [ ] **Step 1: Write the failing 3→4 migration test**
+- [x] **Step 1: Write the failing 3→4 migration test**
 
 Create a version-3 database containing two periods, active/archived Pockets, allocations, and Movements. Use reflection for the initial red to request `MIGRATION_3_4`, run the migration, and assert literal rows/columns:
 
@@ -102,11 +102,11 @@ assertEquals(0, rolloverReleaseCount)
 assertEquals(0, transitionFlag)
 ```
 
-- [ ] **Step 2: Verify red**
+- [x] **Step 2: Verify red**
 
 Run the wrapper-owned `:app:pixel6Api35DebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.aif31.pocket.data.FinanceDatabaseMigrationTest`. Expected: the new migration test fails at runtime because database version 4 / `MIGRATION_3_4` does not exist.
 
-- [ ] **Step 3: Add the version-4 schema and migration**
+- [x] **Step 3: Add the version-4 schema and migration**
 
 Migration SQL must:
 
@@ -120,15 +120,15 @@ CREATE TABLE rollover_releases (... PRIMARY KEY(period_id, pocket_id), amount_mi
 
 Add DAO observation/query/upsert methods for both new tables and clear them in foreign-key-safe restore order.
 
-- [ ] **Step 4: Update backup round-trip behavior**
+- [x] **Step 4: Update backup round-trip behavior**
 
 Encode version 3 with `periodPockets` and `rolloverReleases`. For older backups, derive period Pocket snapshots from each Pocket's stored rollover preference and use an empty release list. Validate nonnegative releases and valid period/Pocket foreign keys.
 
-- [ ] **Step 5: Verify green and schema export**
+- [x] **Step 5: Verify green and schema export**
 
 Run `:app:compileDebugAndroidTestKotlin`, `:app:testDebugUnitTest`, and the managed-device migration class. Confirm `4.json` is generated and tracked.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Commit schema, migration, models, codec, and migration tests as `feat: persist period Pocket accounting state`.
 

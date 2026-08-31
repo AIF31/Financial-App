@@ -9,6 +9,8 @@ import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.PocketIconKey
+import com.aif31.pocket.data.PeriodPocketEntity
+import com.aif31.pocket.data.RolloverReleaseEntity
 import com.aif31.pocket.data.RoomPocketLedger
 import java.time.Clock
 import java.time.Instant
@@ -81,7 +83,7 @@ class PocketLedgerHostBehaviorTest {
 
         assertTrue(source.previewBackup(backup).valid)
         assertFalse(source.previewBackup(backup.copyOf(backup.size / 2)).valid)
-        assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"version\": 2", "\"version\": 99").encodeToByteArray()).valid)
+        assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"version\": 3", "\"version\": 99").encodeToByteArray()).valid)
         assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"budgetMinor\": 25000", "\"budgetMinor\": 60000").encodeToByteArray()).valid)
         assertEquals(LedgerResult.Success, source.restoreBackup(backup))
         withFreshLedger { target ->
@@ -92,7 +94,7 @@ class PocketLedgerHostBehaviorTest {
             assertEquals(PocketIconKey.SUPERMARKET, restored.pockets.first { it.pocket.name == "Supermercado" }.pocket.iconKey)
         }
         val legacyBackup = backup.decodeToString()
-            .replaceFirst("\"version\": 2", "\"version\": 1")
+            .replaceFirst("\"version\": 3", "\"version\": 1")
             .replace(Regex(",\\s*\"iconKey\": \"[A-Z]+\""), "")
             .encodeToByteArray()
         withFreshLedger { target ->
@@ -116,6 +118,45 @@ class PocketLedgerHostBehaviorTest {
         assertTrue(csv.startsWith("id,tipo,fecha,zona,pocket,importe_sar"))
         assertTrue(csv.contains("\"KAUST Market\""))
         assertTrue(csv.contains("\"12.50\""))
+    }
+
+    @Test
+    fun backup_version_three_round_trips_period_Pocket_state_and_rollover_releases() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(50_000))
+        val state = ledger.state.first { !it.needsOnboarding }
+        val periodId = state.currentPeriod!!.id
+        val pocketId = state.pockets.first { it.pocket.name == "Viajes" }.pocket.id
+        val dao = database.financeDao()
+        dao.putPeriodPocket(PeriodPocketEntity(periodId, pocketId, rolloverEligible = true, retired = true))
+        dao.putRolloverRelease(RolloverReleaseEntity(periodId, pocketId, amountMinor = 5_000))
+
+        val backup = ledger.exportBackup()
+        assertTrue(backup.decodeToString().contains("\"version\": 3"))
+        dao.clearRolloverReleases()
+        dao.clearPeriodPockets()
+
+        assertEquals(LedgerResult.Success, ledger.restoreBackup(backup))
+        assertEquals(
+            listOf(PeriodPocketEntity(periodId, pocketId, rolloverEligible = true, retired = true)),
+            dao.periodPockets(),
+        )
+        assertEquals(
+            listOf(RolloverReleaseEntity(periodId, pocketId, amountMinor = 5_000)),
+            dao.rolloverReleases(),
+        )
+
+        val legacyVersionTwo = backup.decodeToString()
+            .replaceFirst("\"version\": 3", "\"version\": 2")
+            .replace(
+                Regex(
+                    "\\s*\"periodPockets\": \\[.*?],\\s*\"rolloverReleases\": \\[.*?],",
+                    RegexOption.DOT_MATCHES_ALL,
+                ),
+                "",
+            )
+            .encodeToByteArray()
+        assertTrue(ledger.previewBackup(legacyVersionTwo).valid)
     }
 
     @Test

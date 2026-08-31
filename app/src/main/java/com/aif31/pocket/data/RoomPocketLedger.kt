@@ -359,6 +359,8 @@ private fun PeriodEntity.toModel() = Period(
     endExclusive = LocalDate.ofEpochDay(endExclusiveEpochDay),
     newFundsMinor = newFundsMinor,
     configuredStartDay = configuredStartDay,
+    isTransition = isTransition,
+    needsReview = needsReview,
 )
 
 private fun PocketEntity.toModel() = Pocket(id, name, PocketIconKey.fromStored(iconKey, name), sortOrder, archived, rolloverEnabled)

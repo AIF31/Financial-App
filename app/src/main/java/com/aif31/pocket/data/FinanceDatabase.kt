@@ -24,6 +24,8 @@ data class PeriodEntity(
     @ColumnInfo(name = "end_exclusive_epoch_day") val endExclusiveEpochDay: Long,
     @ColumnInfo(name = "new_funds_minor") val newFundsMinor: Long,
     @ColumnInfo(name = "configured_start_day") val configuredStartDay: Int,
+    @ColumnInfo(name = "is_transition", defaultValue = "0") val isTransition: Boolean = false,
+    @ColumnInfo(name = "needs_review", defaultValue = "0") val needsReview: Boolean = false,
 )
 
 @Entity(tableName = "pockets", indices = [Index(value = ["name"], unique = true)])
@@ -50,6 +52,37 @@ data class AllocationEntity(
     @ColumnInfo(name = "pocket_id") val pocketId: String,
     @ColumnInfo(name = "budget_minor") val budgetMinor: Long,
     @ColumnInfo(name = "rollover_minor") val rolloverMinor: Long,
+)
+
+@Entity(
+    tableName = "period_pockets",
+    primaryKeys = ["period_id", "pocket_id"],
+    foreignKeys = [
+        ForeignKey(entity = PeriodEntity::class, parentColumns = ["id"], childColumns = ["period_id"], onDelete = ForeignKey.CASCADE),
+        ForeignKey(entity = PocketEntity::class, parentColumns = ["id"], childColumns = ["pocket_id"], onDelete = ForeignKey.RESTRICT),
+    ],
+    indices = [Index("period_id"), Index("pocket_id")],
+)
+data class PeriodPocketEntity(
+    @ColumnInfo(name = "period_id") val periodId: String,
+    @ColumnInfo(name = "pocket_id") val pocketId: String,
+    @ColumnInfo(name = "rollover_eligible") val rolloverEligible: Boolean,
+    val retired: Boolean,
+)
+
+@Entity(
+    tableName = "rollover_releases",
+    primaryKeys = ["period_id", "pocket_id"],
+    foreignKeys = [
+        ForeignKey(entity = PeriodEntity::class, parentColumns = ["id"], childColumns = ["period_id"], onDelete = ForeignKey.CASCADE),
+        ForeignKey(entity = PocketEntity::class, parentColumns = ["id"], childColumns = ["pocket_id"], onDelete = ForeignKey.RESTRICT),
+    ],
+    indices = [Index("period_id"), Index("pocket_id")],
+)
+data class RolloverReleaseEntity(
+    @ColumnInfo(name = "period_id") val periodId: String,
+    @ColumnInfo(name = "pocket_id") val pocketId: String,
+    @ColumnInfo(name = "amount_minor") val amountMinor: Long,
 )
 
 @Entity(tableName = "payment_methods", indices = [Index(value = ["name"], unique = true)])
@@ -108,6 +141,8 @@ interface FinanceDao {
     @Query("SELECT * FROM periods ORDER BY start_epoch_day") fun observePeriods(): Flow<List<PeriodEntity>>
     @Query("SELECT * FROM pockets ORDER BY sort_order, name") fun observePockets(): Flow<List<PocketEntity>>
     @Query("SELECT * FROM allocations") fun observeAllocations(): Flow<List<AllocationEntity>>
+    @Query("SELECT * FROM period_pockets") fun observePeriodPockets(): Flow<List<PeriodPocketEntity>>
+    @Query("SELECT * FROM rollover_releases") fun observeRolloverReleases(): Flow<List<RolloverReleaseEntity>>
     @Query("SELECT * FROM payment_methods ORDER BY name") fun observePaymentMethods(): Flow<List<PaymentMethodEntity>>
     @Query("SELECT * FROM movements ORDER BY occurred_at_utc_millis DESC") fun observeMovements(): Flow<List<MovementEntity>>
     @Query("SELECT * FROM recurring_templates ORDER BY name") fun observeTemplates(): Flow<List<RecurringTemplateEntity>>
@@ -115,6 +150,8 @@ interface FinanceDao {
     @Query("SELECT * FROM periods ORDER BY start_epoch_day") suspend fun periods(): List<PeriodEntity>
     @Query("SELECT * FROM pockets ORDER BY sort_order, name") suspend fun pockets(): List<PocketEntity>
     @Query("SELECT * FROM allocations") suspend fun allocations(): List<AllocationEntity>
+    @Query("SELECT * FROM period_pockets") suspend fun periodPockets(): List<PeriodPocketEntity>
+    @Query("SELECT * FROM rollover_releases") suspend fun rolloverReleases(): List<RolloverReleaseEntity>
     @Query("SELECT * FROM payment_methods ORDER BY name") suspend fun paymentMethods(): List<PaymentMethodEntity>
     @Query("SELECT * FROM movements ORDER BY occurred_at_utc_millis DESC") suspend fun movements(): List<MovementEntity>
     @Query("SELECT * FROM recurring_templates ORDER BY name") suspend fun templates(): List<RecurringTemplateEntity>
@@ -129,6 +166,10 @@ interface FinanceDao {
     @Upsert suspend fun putPocket(value: PocketEntity)
     @Upsert suspend fun putAllocation(value: AllocationEntity)
     @Upsert suspend fun putAllocations(values: List<AllocationEntity>)
+    @Upsert suspend fun putPeriodPockets(values: List<PeriodPocketEntity>)
+    @Upsert suspend fun putPeriodPocket(value: PeriodPocketEntity)
+    @Upsert suspend fun putRolloverReleases(values: List<RolloverReleaseEntity>)
+    @Upsert suspend fun putRolloverRelease(value: RolloverReleaseEntity)
     @Upsert suspend fun putPaymentMethods(values: List<PaymentMethodEntity>)
     @Upsert suspend fun putPaymentMethod(value: PaymentMethodEntity)
     @Upsert suspend fun putMovement(value: MovementEntity)
@@ -140,15 +181,26 @@ interface FinanceDao {
     @Query("DELETE FROM movements WHERE id = :id") suspend fun deleteMovement(id: String)
     @Query("DELETE FROM recurring_templates") suspend fun clearTemplates()
     @Query("DELETE FROM movements") suspend fun clearMovements()
+    @Query("DELETE FROM rollover_releases") suspend fun clearRolloverReleases()
     @Query("DELETE FROM allocations") suspend fun clearAllocations()
+    @Query("DELETE FROM period_pockets") suspend fun clearPeriodPockets()
     @Query("DELETE FROM payment_methods") suspend fun clearPaymentMethods()
     @Query("DELETE FROM pockets") suspend fun clearPockets()
     @Query("DELETE FROM periods") suspend fun clearPeriods()
 }
 
 @Database(
-    entities = [PeriodEntity::class, PocketEntity::class, AllocationEntity::class, PaymentMethodEntity::class, MovementEntity::class, RecurringTemplateEntity::class],
-    version = 3,
+    entities = [
+        PeriodEntity::class,
+        PocketEntity::class,
+        AllocationEntity::class,
+        PeriodPocketEntity::class,
+        RolloverReleaseEntity::class,
+        PaymentMethodEntity::class,
+        MovementEntity::class,
+        RecurringTemplateEntity::class,
+    ],
+    version = 4,
     autoMigrations = [AutoMigration(from = 1, to = 2)],
     exportSchema = true,
 )
@@ -158,7 +210,7 @@ abstract class FinanceDatabase : RoomDatabase() {
     companion object {
         fun open(context: Context): FinanceDatabase =
             Room.databaseBuilder(context.applicationContext, FinanceDatabase::class.java, "pocket.db")
-                .addMigrations(MIGRATION_2_3)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
                 .build()
 
         fun inMemory(context: Context): FinanceDatabase =
@@ -184,6 +236,35 @@ abstract class FinanceDatabase : RoomDatabase() {
                         )
                     }
                 }
+            }
+        }
+
+        internal val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE periods ADD COLUMN is_transition INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE periods ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS period_pockets (" +
+                        "period_id TEXT NOT NULL, pocket_id TEXT NOT NULL, rollover_eligible INTEGER NOT NULL, " +
+                        "retired INTEGER NOT NULL, PRIMARY KEY(period_id, pocket_id), " +
+                        "FOREIGN KEY(period_id) REFERENCES periods(id) ON UPDATE NO ACTION ON DELETE CASCADE, " +
+                        "FOREIGN KEY(pocket_id) REFERENCES pockets(id) ON UPDATE NO ACTION ON DELETE RESTRICT)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_period_pockets_period_id ON period_pockets(period_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_period_pockets_pocket_id ON period_pockets(pocket_id)")
+                db.execSQL(
+                    "INSERT INTO period_pockets (period_id, pocket_id, rollover_eligible, retired) " +
+                        "SELECT periods.id, pockets.id, pockets.rollover_enabled, 0 FROM periods CROSS JOIN pockets"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS rollover_releases (" +
+                        "period_id TEXT NOT NULL, pocket_id TEXT NOT NULL, amount_minor INTEGER NOT NULL, " +
+                        "PRIMARY KEY(period_id, pocket_id), " +
+                        "FOREIGN KEY(period_id) REFERENCES periods(id) ON UPDATE NO ACTION ON DELETE CASCADE, " +
+                        "FOREIGN KEY(pocket_id) REFERENCES pockets(id) ON UPDATE NO ACTION ON DELETE RESTRICT)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_rollover_releases_period_id ON rollover_releases(period_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_rollover_releases_pocket_id ON rollover_releases(pocket_id)")
             }
         }
     }

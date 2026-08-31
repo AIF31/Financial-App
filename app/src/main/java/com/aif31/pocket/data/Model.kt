@@ -8,6 +8,8 @@ data class Period(
     val endExclusive: LocalDate,
     val newFundsMinor: Long,
     val configuredStartDay: Int,
+    val isTransition: Boolean = false,
+    val needsReview: Boolean = false,
 )
 
 enum class PocketIconKey {
