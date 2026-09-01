@@ -1,13 +1,16 @@
 package com.aif31.pocket.data
 
 import androidx.room.withTransaction
+import com.aif31.pocket.domain.FrozenRate
+import com.aif31.pocket.domain.SupportedCurrency
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNames
 
 internal object BackupCodec {
-    private const val VERSION = 3
+    private const val VERSION = 4
     private val json = Json { ignoreUnknownKeys = false; encodeDefaults = true; prettyPrint = true }
 
     suspend fun encode(database: FinanceDatabase): ByteArray {
@@ -24,6 +27,11 @@ internal object BackupCodec {
                         it.configuredStartDay,
                         it.isTransition,
                         it.needsReview,
+                        it.accountingCurrencyCode,
+                        it.priorBoundaryFromCurrencyCode,
+                        it.priorBoundaryRate,
+                        it.priorBoundaryEffectiveEpochDay,
+                        it.priorBoundarySource,
                     )
                 },
                 pockets = dao.pockets().map { PocketDto(it.id, it.name, it.sortOrder, it.archived, it.rolloverEnabled, it.iconKey) },
@@ -37,14 +45,44 @@ internal object BackupCodec {
                 paymentMethods = dao.paymentMethods().map { PaymentMethodDto(it.id, it.name, it.archived) },
                 movements = dao.movements().map {
                     MovementDto(
-                        it.id, it.periodId, it.pocketId, it.type, it.accountingAmountMinor, it.occurredAtUtcMillis,
-                        it.localEpochDay, it.zoneId, it.merchant, it.note, it.paymentMethodId,
-                        it.originalAmountMinor, it.originalCurrencyCode, it.conversionStatus, it.rate,
+                        id = it.id,
+                        periodId = it.periodId,
+                        pocketId = it.pocketId,
+                        type = it.type,
+                        accountingAmountMinor = it.accountingAmountMinor,
+                        occurredAt = it.occurredAtUtcMillis,
+                        localDate = it.localEpochDay,
+                        zoneId = it.zoneId,
+                        merchant = it.merchant,
+                        note = it.note,
+                        paymentMethodId = it.paymentMethodId,
+                        originalAmountMinor = it.originalAmountMinor,
+                        currency = it.originalCurrencyCode,
+                        conversion = it.conversionStatus,
+                        rate = it.rate,
                     )
                 },
                 templates = dao.templates().map {
-                    TemplateDto(it.id, it.name, it.amountMinor, it.pocketId, it.paymentMethodId, it.archived)
+                    TemplateDto(
+                        it.id,
+                        it.name,
+                        it.amountMinor,
+                        it.pocketId,
+                        it.paymentMethodId,
+                        it.archived,
+                        it.inputCurrencyCode,
+                    )
                 },
+                pendingCurrencyChange = dao.pendingCurrencyChange()?.let {
+                    PendingCurrencyChangeDto(
+                        it.fromCurrencyCode,
+                        it.targetCurrencyCode,
+                        it.rate,
+                        it.effectiveEpochDay,
+                        it.source,
+                    )
+                },
+                ledgerPreferences = dao.ledgerPreferences()?.let { LedgerPreferencesDto(it.defaultPaymentMethodId) },
             )
         }
         return json.encodeToString(BackupPayload.serializer(), payload).toByteArray(StandardCharsets.UTF_8)
@@ -66,6 +104,8 @@ internal object BackupCodec {
         return try {
             database.withTransaction {
                 val dao = database.financeDao()
+                dao.clearPendingCurrencyChange()
+                dao.clearLedgerPreferences()
                 dao.clearTemplates()
                 dao.clearMovements()
                 dao.clearRolloverReleases()
@@ -82,6 +122,13 @@ internal object BackupCodec {
                 dao.putRolloverReleases(payload.rolloverReleases.map { it.toEntity() })
                 dao.putMovements(payload.movements.map { it.toEntity() })
                 dao.putTemplates(payload.templates.map { it.toEntity() })
+                payload.pendingCurrencyChange?.let { dao.putPendingCurrencyChange(it.toEntity()) }
+                val restoredPreferences = payload.ledgerPreferences ?: LedgerPreferencesDto(
+                    payload.paymentMethods.firstOrNull {
+                        !it.archived && it.name.equals("Tarjeta", ignoreCase = true)
+                    }?.id
+                )
+                dao.putLedgerPreferences(restoredPreferences.toEntity())
             }
             LedgerResult.Success
         } catch (error: Exception) {
@@ -143,10 +190,28 @@ internal object BackupCodec {
         val methodIds = payload.paymentMethods.mapTo(mutableSetOf()) { it.id }
         require(payload.periods.all { it.start < it.endExclusive && it.newFundsMinor >= 0 && it.startDay in 1..31 }) { "Periodo inválido" }
         val orderedPeriods = payload.periods.sortedBy { it.start }
+        require(orderedPeriods.all { runCatching { SupportedCurrency.fromCode(it.accountingCurrencyCode) }.isSuccess }) {
+            "Moneda de periodo inválida"
+        }
         require(orderedPeriods.map { it.start }.distinct().size == orderedPeriods.size) { "Inicios de periodo duplicados" }
         require(orderedPeriods.zipWithNext().all { (current, next) -> current.endExclusive == next.start }) {
             "Los periodos deben ser contiguos y no solaparse"
         }
+        require(orderedPeriods.zipWithNext().all { (current, next) ->
+            val currentCurrency = SupportedCurrency.fromCode(current.accountingCurrencyCode)
+            val nextCurrency = SupportedCurrency.fromCode(next.accountingCurrencyCode)
+            if (currentCurrency == nextCurrency) {
+                next.priorBoundaryRate == null && next.priorBoundaryFromCurrencyCode == null &&
+                    next.priorBoundaryEffectiveEpochDay == null && next.priorBoundarySource == null
+            } else {
+                next.priorBoundaryFromCurrencyCode == currentCurrency.name &&
+                    next.priorBoundaryEffectiveEpochDay == next.start &&
+                    !next.priorBoundarySource.isNullOrBlank() &&
+                    next.priorBoundaryRate?.let { rate ->
+                        runCatching { FrozenRate(currentCurrency, nextCurrency, rate) }.isSuccess
+                    } == true
+            }
+        }) { "Conversión entre periodos inválida" }
         require(payload.pockets.all { it.name.isNotBlank() }) { "Pocket inválido" }
         require(payload.pockets.all { it.iconKey == null || PocketIconKey.entries.any { key -> key.name == it.iconKey } }) { "Icono de Pocket inválido" }
         require(payload.pockets.map { it.name.trim().lowercase(Locale.ROOT) }.distinct().size == payload.pockets.size) {
@@ -193,16 +258,30 @@ internal object BackupCodec {
         }) { "Los presupuestos superan los fondos del periodo" }
         require(payload.movements.all {
             it.periodId in periodIds && it.pocketId in pocketIds && (it.paymentMethodId == null || it.paymentMethodId in methodIds) &&
-                it.sarAmountMinor > 0 && it.type in MovementType.entries.map { type -> type.name } &&
+                it.accountingAmountMinor > 0 && it.type in MovementType.entries.map { type -> type.name } &&
                 it.currency.matches(Regex("[A-Z]{3}")) && it.conversion in ConversionStatus.entries.map { status -> status.name } &&
                 it.localDate >= periodsById.getValue(it.periodId).start && it.localDate < periodsById.getValue(it.periodId).endExclusive &&
                 (it.currency == "SAR" || (it.originalAmountMinor ?: 0) > 0) && it.zoneId == "Asia/Riyadh"
         }) { "Relación de movimiento inválida" }
         require(payload.templates.all {
             it.name.isNotBlank() && it.amountMinor > 0 && it.pocketId in pocketIds &&
-                (it.paymentMethodId == null || it.paymentMethodId in methodIds)
+                (it.paymentMethodId == null || it.paymentMethodId in methodIds) &&
+                runCatching { SupportedCurrency.fromCode(it.inputCurrencyCode) }.isSuccess
         }) {
             "Relación de plantilla inválida"
+        }
+        require(payload.ledgerPreferences?.defaultPaymentMethodId.let { it == null || it in methodIds }) {
+            "Método predeterminado inválido"
+        }
+        payload.pendingCurrencyChange?.let { pending ->
+            val latest = orderedPeriods.last()
+            val from = SupportedCurrency.fromCode(pending.fromCurrencyCode)
+            val target = SupportedCurrency.fromCode(pending.targetCurrencyCode)
+            require(
+                from.name == latest.accountingCurrencyCode && from != target &&
+                    pending.effectiveEpochDay == latest.endExclusive && pending.source.isNotBlank() &&
+                    runCatching { FrozenRate(from, target, pending.rate) }.isSuccess
+            ) { "Cambio de moneda pendiente inválido" }
         }
         return payload
     }
@@ -232,6 +311,8 @@ private data class BackupPayload(
     val paymentMethods: List<PaymentMethodDto>,
     val movements: List<MovementDto>,
     val templates: List<TemplateDto>,
+    val pendingCurrencyChange: PendingCurrencyChangeDto? = null,
+    val ledgerPreferences: LedgerPreferencesDto? = null,
 )
 
 @Serializable
@@ -243,8 +324,26 @@ private data class PeriodDto(
     val startDay: Int,
     val isTransition: Boolean = false,
     val needsReview: Boolean = false,
+    val accountingCurrencyCode: String = "SAR",
+    val priorBoundaryFromCurrencyCode: String? = null,
+    val priorBoundaryRate: String? = null,
+    val priorBoundaryEffectiveEpochDay: Long? = null,
+    val priorBoundarySource: String? = null,
 ) {
-    fun toEntity() = PeriodEntity(id, start, endExclusive, newFundsMinor, startDay, isTransition, needsReview)
+    fun toEntity() = PeriodEntity(
+        id,
+        start,
+        endExclusive,
+        newFundsMinor,
+        startDay,
+        isTransition,
+        needsReview,
+        accountingCurrencyCode,
+        priorBoundaryFromCurrencyCode,
+        priorBoundaryRate,
+        priorBoundaryEffectiveEpochDay,
+        priorBoundarySource,
+    )
 }
 @Serializable private data class PocketDto(
     val id: String,
@@ -280,12 +379,13 @@ private data class RolloverReleaseDto(
     fun toEntity() = PaymentMethodEntity(id, name, archived)
 }
 @Serializable
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
 private data class MovementDto(
     val id: String,
     val periodId: String,
     val pocketId: String,
     val type: String,
-    val sarAmountMinor: Long,
+    @JsonNames("sarAmountMinor") val accountingAmountMinor: Long,
     val occurredAt: Long,
     val localDate: Long,
     val zoneId: String,
@@ -298,7 +398,7 @@ private data class MovementDto(
     val rate: String?,
 ) {
     fun toEntity() = MovementEntity(
-        id, periodId, pocketId, type, sarAmountMinor, occurredAt, localDate, zoneId, merchant, note,
+        id, periodId, pocketId, type, accountingAmountMinor, occurredAt, localDate, zoneId, merchant, note,
         paymentMethodId, originalAmountMinor, currency, conversion, rate,
     )
 }
@@ -309,6 +409,29 @@ private data class MovementDto(
     val pocketId: String,
     val paymentMethodId: String?,
     val archived: Boolean,
+    val inputCurrencyCode: String = "SAR",
 ) {
-    fun toEntity() = RecurringTemplateEntity(id, name, amountMinor, pocketId, paymentMethodId, archived)
+    fun toEntity() = RecurringTemplateEntity(id, name, amountMinor, pocketId, paymentMethodId, archived, inputCurrencyCode)
+}
+
+@Serializable
+private data class PendingCurrencyChangeDto(
+    val fromCurrencyCode: String,
+    val targetCurrencyCode: String,
+    val rate: String,
+    val effectiveEpochDay: Long,
+    val source: String,
+) {
+    fun toEntity() = PendingCurrencyChangeEntity(
+        fromCurrencyCode = fromCurrencyCode,
+        targetCurrencyCode = targetCurrencyCode,
+        rate = rate,
+        effectiveEpochDay = effectiveEpochDay,
+        source = source,
+    )
+}
+
+@Serializable
+private data class LedgerPreferencesDto(val defaultPaymentMethodId: String?) {
+    fun toEntity() = LedgerPreferencesEntity(defaultPaymentMethodId = defaultPaymentMethodId)
 }

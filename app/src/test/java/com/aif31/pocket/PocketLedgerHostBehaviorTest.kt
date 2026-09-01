@@ -7,11 +7,13 @@ import com.aif31.pocket.data.FinanceDatabase
 import com.aif31.pocket.data.ConversionStatus
 import com.aif31.pocket.data.ComparisonMode
 import com.aif31.pocket.data.LedgerCommand
+import com.aif31.pocket.data.LedgerPreferencesEntity
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.data.PeriodPocketEntity
 import com.aif31.pocket.data.RolloverReleaseEntity
+import com.aif31.pocket.data.RecurringTemplateEntity
 import com.aif31.pocket.data.RoomPocketLedger
 import com.aif31.pocket.domain.SupportedCurrency
 import java.time.Clock
@@ -542,6 +544,152 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
+    fun backup_version_four_round_trips_currency_provenance_pending_change_templates_and_payment_default() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        val dao = database.financeDao()
+        ledger.execute(LedgerCommand.Initialize(100_000))
+        var state = ledger.state.first { !it.needsOnboarding }
+        val first = state.currentPeriod!!
+        val pocketId = state.pockets.first { it.pocket.name == "Viajes" }.pocket.id
+        val cardId = state.paymentMethods.first { it.name == "Tarjeta" }.id
+        ledger.execute(
+            LedgerCommand.ScheduleCurrencyChange(SupportedCurrency.MXN, "2", first.endExclusive, "TEST-SAR-MXN")
+        )
+        ledger.execute(LedgerCommand.CreateNextPeriod())
+        state = ledger.state.first { it.periods.size == 2 }
+        val second = state.periods[1]
+        ledger.execute(
+            LedgerCommand.AddMovement(
+                id = "manual-fx",
+                pocketId = pocketId,
+                type = MovementType.EXPENSE,
+                sarAmountMinor = 1_234,
+                occurredAtUtcMillis = clock.millis(),
+                localDate = LocalDate.of(2026, 3, 26),
+                paymentMethodId = cardId,
+                originalAmountMinor = 500,
+                originalCurrencyCode = "USD",
+                conversionStatus = ConversionStatus.CONFIRMED,
+                rate = "2.468",
+            )
+        )
+        dao.putTemplate(
+            RecurringTemplateEntity(
+                id = "mxn-template",
+                name = "Viaje MXN",
+                amountMinor = 5_000,
+                pocketId = pocketId,
+                paymentMethodId = cardId,
+                archived = false,
+                inputCurrencyCode = "MXN",
+            )
+        )
+        dao.putLedgerPreferences(LedgerPreferencesEntity(defaultPaymentMethodId = cardId))
+        ledger.execute(
+            LedgerCommand.ScheduleCurrencyChange(SupportedCurrency.USD, "0.1", second.endExclusive, "TEST-MXN-USD")
+        )
+
+        val backup = ledger.exportBackup()
+        val text = backup.decodeToString()
+        assertTrue(text.contains("\"version\": 4"))
+        assertFalse(text.contains("token", ignoreCase = true))
+        assertFalse(text.contains("cache", ignoreCase = true))
+
+        val freshDb = FinanceDatabase.inMemory(ApplicationProvider.getApplicationContext<Context>())
+        try {
+            val restoredLedger = RoomPocketLedger(freshDb, clock, zone)
+            assertEquals(LedgerResult.Success, restoredLedger.restoreBackup(backup))
+            val restoredDao = freshDb.financeDao()
+            val restoredPeriods = restoredDao.periods().sortedBy { it.startEpochDay }
+            assertEquals(listOf("SAR", "MXN"), restoredPeriods.map { it.accountingCurrencyCode })
+            assertEquals("SAR", restoredPeriods[1].priorBoundaryFromCurrencyCode)
+            assertEquals("2", restoredPeriods[1].priorBoundaryRate)
+            assertEquals("TEST-SAR-MXN", restoredPeriods[1].priorBoundarySource)
+            val restoredMovement = restoredDao.movements().single { it.id == "manual-fx" }
+            assertEquals(1_234L, restoredMovement.accountingAmountMinor)
+            assertEquals(500L, restoredMovement.originalAmountMinor)
+            assertEquals("USD", restoredMovement.originalCurrencyCode)
+            assertEquals("2.468", restoredMovement.rate)
+            assertEquals("MXN", restoredDao.templates().single { it.id == "mxn-template" }.inputCurrencyCode)
+            assertEquals(cardId, restoredDao.ledgerPreferences()!!.defaultPaymentMethodId)
+            val pending = restoredDao.pendingCurrencyChange()!!
+            assertEquals("MXN", pending.fromCurrencyCode)
+            assertEquals("USD", pending.targetCurrencyCode)
+            assertEquals("0.1", pending.rate)
+            assertEquals("TEST-MXN-USD", pending.source)
+        } finally {
+            freshDb.close()
+        }
+    }
+
+    @Test
+    fun backup_versions_one_through_three_restore_legacy_amounts_periods_templates_and_default_card_as_sar() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(50_000))
+        val state = ledger.state.first { !it.needsOnboarding }
+        val pocketId = state.pockets.first().pocket.id
+        ledger.execute(
+            LedgerCommand.AddMovement(
+                id = "legacy-movement",
+                pocketId = pocketId,
+                type = MovementType.EXPENSE,
+                sarAmountMinor = 1_250,
+                occurredAtUtcMillis = clock.millis(),
+                localDate = LocalDate.of(2026, 2, 26),
+            )
+        )
+        ledger.execute(LedgerCommand.UpsertTemplate("legacy-template", "Legacy", 2_500, pocketId))
+        val versionFour = ledger.exportBackup().decodeToString()
+
+        for (version in 1..3) {
+            var legacy = versionFour
+                .replaceFirst("\"version\": 4", "\"version\": $version")
+                .replace("\"accountingAmountMinor\"", "\"sarAmountMinor\"")
+                .replace(
+                    Regex(
+                        ",\\s*\"accountingCurrencyCode\": \"SAR\",\\s*" +
+                            "\"priorBoundaryFromCurrencyCode\": null,\\s*" +
+                            "\"priorBoundaryRate\": null,\\s*" +
+                            "\"priorBoundaryEffectiveEpochDay\": null,\\s*" +
+                            "\"priorBoundarySource\": null",
+                    ),
+                    "",
+                )
+                .replace(Regex(",\\s*\"inputCurrencyCode\": \"SAR\""), "")
+                .replace(
+                    Regex(",\\s*\"pendingCurrencyChange\": null,\\s*\"ledgerPreferences\": null\\s*}"),
+                    "\n}",
+                )
+            if (version < 3) {
+                legacy = legacy.replace(
+                    Regex(
+                        "\\s*\"periodPockets\": \\[.*?],\\s*\"rolloverReleases\": \\[.*?],",
+                        RegexOption.DOT_MATCHES_ALL,
+                    ),
+                    "",
+                )
+            }
+
+            val freshDb = FinanceDatabase.inMemory(ApplicationProvider.getApplicationContext<Context>())
+            try {
+                val target = RoomPocketLedger(freshDb, clock, zone)
+                assertEquals("legacy version $version", LedgerResult.Success, target.restoreBackup(legacy.encodeToByteArray()))
+                val restoredDao = freshDb.financeDao()
+                assertTrue(restoredDao.periods().all { it.accountingCurrencyCode == "SAR" })
+                assertEquals(1_250L, restoredDao.movements().single().accountingAmountMinor)
+                assertEquals("SAR", restoredDao.templates().single().inputCurrencyCode)
+                val restoredDefaultId = restoredDao.ledgerPreferences()!!.defaultPaymentMethodId
+                assertEquals(
+                    restoredDao.paymentMethods().single { it.name == "Tarjeta" }.id,
+                    restoredDefaultId,
+                )
+            } finally {
+                freshDb.close()
+            }
+        }
+    }
+
+    @Test
     fun backup_restore_rejects_bad_relationships_atomically_and_csv_is_observable() = runTest {
         val source = RoomPocketLedger(database, clock, zone)
         source.execute(LedgerCommand.Initialize(50_000))
@@ -553,7 +701,7 @@ class PocketLedgerHostBehaviorTest {
 
         assertTrue(source.previewBackup(backup).valid)
         assertFalse(source.previewBackup(backup.copyOf(backup.size / 2)).valid)
-        assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"version\": 3", "\"version\": 99").encodeToByteArray()).valid)
+        assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"version\": 4", "\"version\": 99").encodeToByteArray()).valid)
         assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"budgetMinor\": 25000", "\"budgetMinor\": 60000").encodeToByteArray()).valid)
         assertEquals(LedgerResult.Success, source.restoreBackup(backup))
         withFreshLedger { target ->
@@ -564,7 +712,7 @@ class PocketLedgerHostBehaviorTest {
             assertEquals(PocketIconKey.SUPERMARKET, restored.pockets.first { it.pocket.name == "Supermercado" }.pocket.iconKey)
         }
         val legacyBackup = backup.decodeToString()
-            .replaceFirst("\"version\": 3", "\"version\": 1")
+            .replaceFirst("\"version\": 4", "\"version\": 1")
             .replace(Regex(",\\s*\"iconKey\": \"[A-Z]+\""), "")
             .encodeToByteArray()
         withFreshLedger { target ->
@@ -591,7 +739,7 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
-    fun backup_version_three_round_trips_period_Pocket_state_and_rollover_releases() = runTest {
+    fun backup_version_four_round_trips_period_Pocket_state_and_rollover_releases() = runTest {
         val ledger = RoomPocketLedger(database, clock, zone)
         ledger.execute(LedgerCommand.Initialize(50_000))
         val state = ledger.state.first { !it.needsOnboarding }
@@ -602,7 +750,7 @@ class PocketLedgerHostBehaviorTest {
         dao.putRolloverRelease(RolloverReleaseEntity(periodId, pocketId, amountMinor = 5_000))
 
         val backup = ledger.exportBackup()
-        assertTrue(backup.decodeToString().contains("\"version\": 3"))
+        assertTrue(backup.decodeToString().contains("\"version\": 4"))
         dao.clearRolloverReleases()
         dao.clearPeriodPockets()
 
@@ -619,7 +767,7 @@ class PocketLedgerHostBehaviorTest {
         )
 
         val legacyVersionTwo = backup.decodeToString()
-            .replaceFirst("\"version\": 3", "\"version\": 2")
+            .replaceFirst("\"version\": 4", "\"version\": 2")
             .replace(
                 Regex(
                     "\\s*\"periodPockets\": \\[.*?],\\s*\"rolloverReleases\": \\[.*?],",
@@ -632,7 +780,7 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
-    fun backup_version_three_rejects_an_allocation_without_period_Pocket_state() = runTest {
+    fun backup_version_four_rejects_an_allocation_without_period_Pocket_state() = runTest {
         val ledger = RoomPocketLedger(database, clock, zone)
         ledger.execute(LedgerCommand.Initialize(50_000))
         val state = ledger.state.first { !it.needsOnboarding }
@@ -654,7 +802,7 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
-    fun backup_version_three_rejects_a_movement_without_period_Pocket_state() = runTest {
+    fun backup_version_four_rejects_a_movement_without_period_Pocket_state() = runTest {
         val ledger = RoomPocketLedger(database, clock, zone)
         ledger.execute(LedgerCommand.Initialize(50_000))
         val state = ledger.state.first { !it.needsOnboarding }
@@ -679,7 +827,7 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
-    fun backup_version_three_rejects_a_rollover_release_for_a_nonretired_Pocket() = runTest {
+    fun backup_version_four_rejects_a_rollover_release_for_a_nonretired_Pocket() = runTest {
         val ledger = RoomPocketLedger(database, clock, zone)
         ledger.execute(LedgerCommand.Initialize(50_000))
         val state = ledger.state.first { !it.needsOnboarding }
