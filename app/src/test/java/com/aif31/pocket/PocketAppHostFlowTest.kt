@@ -1,8 +1,13 @@
 package com.aif31.pocket
 
 import android.content.Context
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasContentDescription
@@ -508,6 +513,7 @@ class PocketAppHostFlowTest {
         }
         compose.setContent { PocketApp(ledger) }
 
+        compose.waitUntilExactlyOneExists(hasText("Pockets"), 5_000)
         compose.onNodeWithText("Pockets").performClick()
         compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Retirado este periodo"))
         compose.onNodeWithText("Retirado este periodo").assertIsDisplayed()
@@ -569,6 +575,205 @@ class PocketAppHostFlowTest {
         compose.onNodeWithText("Gastos SAR 20.00").assertIsDisplayed()
         compose.onNodeWithText("Reembolsos SAR 5.00").assertIsDisplayed()
         compose.onAllNodesWithText("Restaurar").assertCountEquals(0)
+    }
+
+    @Test
+    fun historical_period_uses_its_snapshots_and_exposes_only_read_only_details() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val firstPeriodLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone),
+            zone,
+        )
+        runBlocking {
+            firstPeriodLedger.execute(LedgerCommand.Initialize(100_000))
+            val firstState = firstPeriodLedger.state.first { !it.needsOnboarding }
+            val pocket = firstState.pockets.first { it.pocket.name == "Viajes" }.pocket
+            val releasedPocket = firstState.pockets.first { it.pocket.name == "Ocio" }.pocket
+            firstPeriodLedger.execute(
+                LedgerCommand.UpsertPocket(
+                    id = pocket.id,
+                    name = pocket.name,
+                    rolloverEnabled = true,
+                    iconKey = pocket.iconKey,
+                )
+            )
+            firstPeriodLedger.execute(
+                LedgerCommand.UpsertPocket(
+                    id = releasedPocket.id,
+                    name = releasedPocket.name,
+                    rolloverEnabled = true,
+                    iconKey = releasedPocket.iconKey,
+                )
+            )
+            firstPeriodLedger.execute(LedgerCommand.SetAllocation(firstState.currentPeriod!!.id, pocket.id, 10_000))
+            firstPeriodLedger.execute(LedgerCommand.SetAllocation(firstState.currentPeriod.id, releasedPocket.id, 5_000))
+            firstPeriodLedger.execute(LedgerCommand.CreateNextPeriod())
+        }
+
+        val middlePeriodLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone),
+            zone,
+        )
+        runBlocking {
+            val middleState = middlePeriodLedger.state.first { it.currentPeriod?.start == LocalDate.of(2026, 3, 25) }
+            val pocket = middleState.pockets.first { it.pocket.name == "Viajes" }.pocket
+            middlePeriodLedger.execute(
+                LedgerCommand.AddMovement(
+                    id = "historical-expense",
+                    pocketId = pocket.id,
+                    type = MovementType.EXPENSE,
+                    sarAmountMinor = 2_000,
+                    occurredAtUtcMillis = Instant.parse("2026-03-26T09:00:00Z").toEpochMilli(),
+                    localDate = LocalDate.of(2026, 3, 26),
+                )
+            )
+            middlePeriodLedger.execute(
+                LedgerCommand.AddMovement(
+                    id = "historical-refund",
+                    pocketId = pocket.id,
+                    type = MovementType.REFUND,
+                    sarAmountMinor = 500,
+                    occurredAtUtcMillis = Instant.parse("2026-03-26T09:01:00Z").toEpochMilli(),
+                    localDate = LocalDate.of(2026, 3, 26),
+                )
+            )
+            val releasedPocket = middleState.pockets.first { it.pocket.name == "Ocio" }.pocket
+            middlePeriodLedger.execute(LedgerCommand.ArchivePocket(releasedPocket.id))
+            middlePeriodLedger.execute(LedgerCommand.CreateNextPeriod())
+        }
+
+        val currentLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-04-26T09:00:00Z"), zone),
+            zone,
+        )
+        runBlocking {
+            val pocket = currentLedger.state.first { it.currentPeriod?.start == LocalDate.of(2026, 4, 25) }
+                .pockets.first { it.pocket.name == "Viajes" }.pocket
+            currentLedger.execute(LedgerCommand.ArchivePocket(pocket.id))
+        }
+        compose.setContent { PocketApp(currentLedger) }
+
+        compose.waitUntilExactlyOneExists(hasText("Pockets"), 5_000)
+        compose.onNodeWithText("Pockets").performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag("pockets_list"), 5_000)
+        compose.onNodeWithText("25 mar – 24 abr").performClick()
+        compose.onNodeWithText("Vista histórica · Solo lectura").assertIsDisplayed()
+        compose.onNodeWithText("Moneda del periodo · SAR").assertIsDisplayed()
+        compose.onNodeWithText("Asignado").assertIsDisplayed()
+        compose.onNodeWithText("SAR 900.00 sin asignar").assertIsDisplayed()
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("pocket_Viajes"))
+        compose.onNodeWithTag("pocket_Viajes").assertIsDisplayed()
+        compose.onAllNodesWithText("Crear Pocket").assertCountEquals(0)
+        compose.onAllNodesWithText("Restaurar").assertCountEquals(0)
+
+        compose.onNodeWithTag("pocket_Viajes").performClick()
+        compose.onNodeWithText("Detalle histórico").assertIsDisplayed()
+        compose.onNodeWithText("Presupuesto: SAR 100.00").assertIsDisplayed()
+        compose.onNodeWithText("Rollover recibido: SAR 100.00").assertIsDisplayed()
+        compose.onNodeWithText("Gastos: SAR 20.00").assertIsDisplayed()
+        compose.onNodeWithText("Reembolsos: SAR 5.00").assertIsDisplayed()
+        compose.onNodeWithText("Rollover liberado: SAR 0.00").assertIsDisplayed()
+        compose.onNodeWithText("Disponibilidad final: SAR 185.00").assertIsDisplayed()
+        compose.onAllNodesWithText("Guardar presupuesto").assertCountEquals(0)
+        compose.onAllNodesWithText("Editar Pocket").assertCountEquals(0)
+        compose.onAllNodesWithText("Archivar Pocket").assertCountEquals(0)
+        compose.onAllNodesWithText("Subir").assertCountEquals(0)
+        compose.onAllNodesWithText("Bajar").assertCountEquals(0)
+        compose.onAllNodesWithText("Aplicar rollover").assertCountEquals(0)
+        compose.onNodeWithText("Cerrar").performClick()
+
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("retired_Ocio"))
+        compose.onNodeWithTag("retired_Ocio").performClick()
+        compose.onNodeWithText("Rollover liberado: SAR 50.00").assertIsDisplayed()
+        compose.onNodeWithText("Disponibilidad final: SAR 0.00").assertIsDisplayed()
+    }
+
+    @Test
+    fun zero_allocation_is_an_empty_input_with_a_zero_placeholder() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000)) }
+        compose.setContent { PocketApp(ledger) }
+
+        compose.waitUntilExactlyOneExists(hasText("Pockets"), 5_000)
+        compose.onNodeWithText("Pockets").performClick()
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("pocket_Viajes"))
+        compose.onNodeWithTag("pocket_Viajes").performClick()
+        compose.onNodeWithTag("allocation_amount").assertTextContains("0.00")
+        compose.onNodeWithTag("allocation_amount").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(""))
+        )
+        compose.onNodeWithTag("allocation_amount").performClick()
+        compose.onNodeWithTag("allocation_amount").performTextInput("25.00")
+        compose.onNodeWithTag("allocation_amount").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("25.00"))
+        )
+        compose.onNodeWithText("Guardar presupuesto").performClick()
+
+        val savedBudget = runBlocking {
+            ledger.state.first { state -> state.pockets.any { it.pocket.name == "Viajes" && it.budgetMinor == 2_500L } }
+                .pockets.first { it.pocket.name == "Viajes" }.budgetMinor
+        }
+        assertEquals(2_500L, savedBudget)
+    }
+
+    @Test
+    fun untouched_empty_allocation_saves_as_zero() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000)) }
+        compose.setContent { PocketApp(ledger) }
+
+        compose.waitUntilExactlyOneExists(hasText("Pockets"), 5_000)
+        compose.onNodeWithText("Pockets").performClick()
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("pocket_Viajes"))
+        compose.onNodeWithTag("pocket_Viajes").performClick()
+        compose.onNodeWithTag("allocation_amount").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(""))
+        )
+        compose.onNodeWithText("Guardar presupuesto").performClick()
+
+        compose.waitUntilDoesNotExist(hasTestTag("allocation_amount"), 5_000)
+        val savedBudget = runBlocking {
+            ledger.state.first().pockets.first { it.pocket.name == "Viajes" }.budgetMinor
+        }
+        assertEquals(0L, savedBudget)
+    }
+
+    @Test
+    fun first_focus_selects_an_existing_allocation_so_typing_replaces_it() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking {
+            ledger.execute(LedgerCommand.Initialize(100_000))
+            val state = ledger.state.first { !it.needsOnboarding }
+            val pocket = state.pockets.first { it.pocket.name == "Viajes" }.pocket
+            ledger.execute(LedgerCommand.SetAllocation(state.currentPeriod!!.id, pocket.id, 10_000))
+        }
+        compose.setContent { PocketApp(ledger) }
+
+        compose.waitUntilExactlyOneExists(hasText("Pockets"), 5_000)
+        compose.onNodeWithText("Pockets").performClick()
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("pocket_Viajes"))
+        compose.onNodeWithTag("pocket_Viajes").performClick()
+        compose.onNodeWithTag("allocation_amount").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("100.00"))
+        )
+        compose.onNodeWithTag("allocation_amount").assertIsFocused()
+        compose.onNodeWithTag("allocation_amount").performTextInput("250.00")
+        compose.onNodeWithTag("allocation_amount").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("250.00"))
+        )
+        compose.onNodeWithText("Guardar presupuesto").performClick()
+
+        val savedBudget = runBlocking {
+            ledger.state.first { state -> state.pockets.any { it.pocket.name == "Viajes" && it.budgetMinor == 25_000L } }
+                .pockets.first { it.pocket.name == "Viajes" }.budgetMinor
+        }
+        assertEquals(25_000L, savedBudget)
     }
 
     @Test

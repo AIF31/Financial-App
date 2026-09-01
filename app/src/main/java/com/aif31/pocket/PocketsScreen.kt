@@ -13,11 +13,14 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.*
 import com.aif31.pocket.domain.Money
@@ -38,7 +41,10 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
     val scope = rememberCoroutineScope()
     val selectedPeriod = state.periods.firstOrNull { it.id == selectedPeriodId } ?: state.currentPeriod
     val shownPockets = state.pocketSummariesByPeriod[selectedPeriodId].orEmpty()
-    val activePockets = shownPockets.filterNot { it.pocket.archived || it.retiredThisPeriod }
+    val isHistorical = selectedPeriod?.id != null && selectedPeriod.id != state.currentPeriod?.id
+    val activePockets = shownPockets.filterNot { summary ->
+        summary.retiredThisPeriod || (!isHistorical && summary.pocket.archived)
+    }
     val retiredPockets = shownPockets.filter { it.retiredThisPeriod }
     val allocatedMinor = shownPockets.sumOf { it.budgetMinor }
     val availableMinor = shownPockets.sumOf { it.availabilityMinor }
@@ -52,6 +58,19 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
     ) {
         item {
             Text("Pockets", style = MaterialTheme.typography.headlineMedium)
+        }
+        if (isHistorical) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                ) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Vista histórica · Solo lectura", style = MaterialTheme.typography.titleMedium)
+                        Text("Moneda del periodo · SAR", color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    }
+                }
+            }
         }
         if (selectedPeriod?.id == state.currentPeriod?.id && selectedPeriod?.needsReview == true) {
             item {
@@ -127,24 +146,29 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
                 }
             }
         }
-        item {
-            Button(
-                onClick = { creating = true },
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.tertiary,
-                    contentColor = MaterialTheme.colorScheme.onTertiary,
-                ),
-            ) {
-                Icon(Icons.Default.Add, contentDescription = null)
-                Spacer(Modifier.size(8.dp))
-                Text("Crear Pocket", style = MaterialTheme.typography.titleMedium)
+        if (!isHistorical) {
+            item {
+                Button(
+                    onClick = { creating = true },
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary,
+                        contentColor = MaterialTheme.colorScheme.onTertiary,
+                    ),
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("Crear Pocket", style = MaterialTheme.typography.titleMedium)
+                }
             }
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Pockets activos", style = MaterialTheme.typography.titleLarge)
-                Text("Toca uno para ver y administrar", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (isHistorical) "Toca uno para ver el detalle" else "Toca uno para ver y administrar",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         items(activePockets, key = { it.pocket.id }) { summary ->
@@ -178,11 +202,13 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                            IconButton(
-                                onClick = { selected = summary },
-                                modifier = Modifier.semantics { contentDescription = "Gestionar ${summary.pocket.name}" },
-                            ) {
-                                Icon(Icons.Default.MoreVert, contentDescription = null)
+                            if (!isHistorical) {
+                                IconButton(
+                                    onClick = { selected = summary },
+                                    modifier = Modifier.semantics { contentDescription = "Gestionar ${summary.pocket.name}" },
+                                ) {
+                                    Icon(Icons.Default.MoreVert, contentDescription = null)
+                                }
                             }
                         }
                         Text(
@@ -237,8 +263,13 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Aún no hay Pockets activos", style = MaterialTheme.typography.titleMedium)
-                        Text("Crea un Pocket para asignar fondos y seguir su disponibilidad.")
+                        Text(
+                            if (isHistorical) "No hubo Pockets activos en este periodo" else "Aún no hay Pockets activos",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        if (!isHistorical) {
+                            Text("Crea un Pocket para asignar fondos y seguir su disponibilidad.")
+                        }
                     }
                 }
             }
@@ -261,7 +292,7 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
                 }
             }
         }
-        if (shownPockets.any { it.pocket.archived && !it.retiredThisPeriod }) {
+        if (!isHistorical && shownPockets.any { it.pocket.archived && !it.retiredThisPeriod }) {
             item { Text("Archivados", style = MaterialTheme.typography.titleMedium) }
             items(shownPockets.filter { it.pocket.archived && !it.retiredThisPeriod }, key = { "archived-${it.pocket.id}" }) { summary ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -279,6 +310,7 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
             periodId = selectedPeriodId ?: state.currentPeriod!!.id,
             summary = summary,
             ledger = ledger,
+            readOnly = isHistorical,
             onEdit = { selected = null; editing = summary },
             onDismiss = { selected = null },
         )
@@ -392,9 +424,29 @@ private fun PocketManagementDialog(
     periodId: String,
     summary: PocketPeriodSummary,
     ledger: PocketLedger,
+    readOnly: Boolean,
     onEdit: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    if (readOnly) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Detalle histórico") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium)
+                    Text("Presupuesto: ${money(summary.budgetMinor)}")
+                    Text("Rollover recibido: ${money(summary.rolloverMinor)}")
+                    Text("Gastos: ${money(summary.expenseMinor)}")
+                    Text("Reembolsos: ${money(summary.refundMinor)}")
+                    Text("Rollover liberado: ${money(summary.rolloverReleasedMinor)}")
+                    Text("Disponibilidad final: ${money(summary.availabilityMinor)}")
+                }
+            },
+            confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } },
+        )
+        return
+    }
     if (summary.retiredThisPeriod) {
         AlertDialog(
             onDismissRequest = onDismiss,
@@ -411,10 +463,23 @@ private fun PocketManagementDialog(
         )
         return
     }
-    var amount by rememberSaveable(summary.pocket.id, periodId) { mutableStateOf(minorNumber(summary.budgetMinor)) }
+    val initialAmount = if (summary.budgetMinor == 0L) "" else minorNumber(summary.budgetMinor)
+    var amount by rememberSaveable(summary.pocket.id, periodId, stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(initialAmount))
+    }
+    var hasReceivedInitialFocus by rememberSaveable(summary.pocket.id, periodId) { mutableStateOf(false) }
+    var amountIsFocused by remember { mutableStateOf(false) }
     var error by rememberSaveable(summary.pocket.id, periodId) { mutableStateOf<String?>(null) }
     var confirmingArchive by rememberSaveable(summary.pocket.id) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    LaunchedEffect(amountIsFocused) {
+        if (amountIsFocused && !hasReceivedInitialFocus) {
+            hasReceivedInitialFocus = true
+            if (amount.text.isNotEmpty()) {
+                amount = amount.copy(selection = TextRange(0, amount.text.length))
+            }
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(summary.pocket.name) },
@@ -425,8 +490,14 @@ private fun PocketManagementDialog(
                     value = amount,
                     onValueChange = { amount = it; error = null },
                     label = { Text("Presupuesto SAR") },
+                    placeholder = { Text("0.00") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth().testTag("allocation_amount"),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { focusState ->
+                            amountIsFocused = focusState.isFocused
+                        }
+                        .testTag("allocation_amount"),
                 )
                 Text("Fondos del periodo: ${money(state.periods.firstOrNull { it.id == periodId }?.newFundsMinor ?: 0)}")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -463,9 +534,13 @@ private fun PocketManagementDialog(
         confirmButton = {
             Button(onClick = {
                 scope.launch {
-                    val parsed = runCatching { Money.parse(amount, "SAR").minor }.getOrNull() ?: run {
-                        error = "Escribe un presupuesto válido"
-                        return@launch
+                    val parsed = if (amount.text.isBlank()) {
+                        0L
+                    } else {
+                        runCatching { Money.parse(amount.text, "SAR").minor }.getOrNull() ?: run {
+                            error = "Escribe un presupuesto válido"
+                            return@launch
+                        }
                     }
                     when (val result = ledger.execute(LedgerCommand.SetAllocation(periodId, summary.pocket.id, parsed))) {
                         LedgerResult.Success -> onDismiss()
