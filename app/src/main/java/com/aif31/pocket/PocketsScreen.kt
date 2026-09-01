@@ -39,7 +39,7 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
     val selectedPeriod = state.periods.firstOrNull { it.id == selectedPeriodId } ?: state.currentPeriod
     val shownPockets = state.pocketSummariesByPeriod[selectedPeriodId].orEmpty()
     val activePockets = shownPockets.filterNot { it.pocket.archived || it.retiredThisPeriod }
-    val retiredPockets = shownPockets.filter { it.retiredThisPeriod && selectedPeriod?.id == state.currentPeriod?.id }
+    val retiredPockets = shownPockets.filter { it.retiredThisPeriod }
     val allocatedMinor = shownPockets.sumOf { it.budgetMinor }
     val availableMinor = shownPockets.sumOf { it.availabilityMinor }
     val periodFundsMinor = selectedPeriod?.newFundsMinor ?: state.newFundsMinor
@@ -254,6 +254,8 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
                 ) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium)
+                        Text("Gastos ${money(summary.expenseMinor)}")
+                        Text("Reembolsos ${money(summary.refundMinor)}")
                         Text("Movimientos conservados · ${money(summary.rolloverReleasedMinor)} de rollover liberado")
                     }
                 }
@@ -400,7 +402,8 @@ private fun PocketManagementDialog(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium)
-                    Text("Sus gastos y reembolsos se conservan como historial.")
+                    Text("Gastos: ${money(summary.expenseMinor)}")
+                    Text("Reembolsos: ${money(summary.refundMinor)}")
                     Text("Rollover liberado: ${money(summary.rolloverReleasedMinor)}")
                 }
             },

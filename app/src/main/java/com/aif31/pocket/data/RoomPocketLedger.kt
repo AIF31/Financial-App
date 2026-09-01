@@ -186,9 +186,11 @@ class RoomPocketLedger(
             dao.putPocket(pocket.copy(archived = false))
             val currentPeriod = dao.periods().firstOrNull { today().toEpochDay() in it.startEpochDay until it.endExclusiveEpochDay }
             currentPeriod?.let { period ->
-                dao.periodPockets().firstOrNull { it.periodId == period.id && it.pocketId == pocket.id }?.let { snapshot ->
-                    dao.putPeriodPocket(snapshot.copy(retired = false))
-                }
+                val snapshot = dao.periodPockets().firstOrNull { it.periodId == period.id && it.pocketId == pocket.id }
+                dao.putPeriodPocket(
+                    snapshot?.copy(retired = false)
+                        ?: PeriodPocketEntity(period.id, pocket.id, pocket.rolloverEnabled, retired = false)
+                )
             }
             return@withTransaction LedgerResult.Success
         }
@@ -243,11 +245,12 @@ class RoomPocketLedger(
         val period = requireNotNull(periods.firstOrNull {
             command.localDate.toEpochDay() >= it.startEpochDay && command.localDate.toEpochDay() < it.endExclusiveEpochDay
         }) { "La fecha no pertenece a un periodo existente" }
-        val pocket = requireNotNull(dao.pockets().firstOrNull { it.id == command.pocketId }) { "Pocket inexistente" }
-        require(!pocket.archived) { "El Pocket está archivado" }
-        val snapshot = dao.periodPockets().firstOrNull { it.periodId == period.id && it.pocketId == command.pocketId }
-        require(snapshot != null && !snapshot.retired) { "El Pocket no está activo en este periodo" }
         val existing = command.id?.let { dao.movement(it) }
+        val pocket = requireNotNull(dao.pockets().firstOrNull { it.id == command.pocketId }) { "Pocket inexistente" }
+        val editsSamePocket = existing?.pocketId == pocket.id
+        require(!pocket.archived || editsSamePocket) { "El Pocket está archivado" }
+        val snapshot = dao.periodPockets().firstOrNull { it.periodId == period.id && it.pocketId == command.pocketId }
+        require(snapshot != null && (!snapshot.retired || editsSamePocket)) { "El Pocket no está activo en este periodo" }
         dao.putMovement(command.toEntity(period.id, zoneId.id))
         val sourcePeriodId = listOfNotNull(existing?.periodId, period.id)
             .minBy { id -> periods.first { it.id == id }.startEpochDay }
@@ -285,6 +288,13 @@ class RoomPocketLedger(
             previous = createPeriodAfter(previous, preferredStartDay, needsReview = false)
             created += previous
         }
+        val periods = dao.periods()
+        val currentId = periods.firstOrNull {
+            todayEpochDay >= it.startEpochDay && todayEpochDay < it.endExclusiveEpochDay
+        }?.id
+        periods.filter { it.needsReview && it.id != currentId }.forEach { stale ->
+            dao.updatePeriod(stale.copy(needsReview = false))
+        }
         created.lastOrNull()?.let { current ->
             dao.updatePeriod(current.copy(needsReview = true))
         }
@@ -311,7 +321,7 @@ class RoomPocketLedger(
             val source = periods[index]
             val target = periods[index + 1]
             val sourceSnapshots = periodPockets.filter { it.periodId == source.id }.associateBy { it.pocketId }
-            val targetSnapshots = periodPockets.filter { it.periodId == target.id && !it.retired }
+            val targetSnapshots = periodPockets.filter { it.periodId == target.id }
             val sourceMovements = movements.filter { it.periodId == source.id }
 
             targetSnapshots.forEach { targetSnapshot ->
@@ -326,16 +336,24 @@ class RoomPocketLedger(
                     netSpendMinor = netSpend,
                     enabled = sourceSnapshot?.rolloverEligible == true && !sourceSnapshot.retired,
                 )
-                val targetKey = target.id to pocketId
-                val targetAllocation = allocations[targetKey]
-                val updated = AllocationEntity(
-                    periodId = target.id,
-                    pocketId = pocketId,
-                    budgetMinor = targetAllocation?.budgetMinor ?: 0,
-                    rolloverMinor = rollover,
-                )
-                dao.putAllocation(updated)
-                allocations[targetKey] = updated
+                if (targetSnapshot.retired) {
+                    if (rollover > 0) {
+                        dao.putRolloverRelease(RolloverReleaseEntity(target.id, pocketId, rollover))
+                    } else {
+                        dao.deleteRolloverRelease(target.id, pocketId)
+                    }
+                } else {
+                    val targetKey = target.id to pocketId
+                    val targetAllocation = allocations[targetKey]
+                    val updated = AllocationEntity(
+                        periodId = target.id,
+                        pocketId = pocketId,
+                        budgetMinor = targetAllocation?.budgetMinor ?: 0,
+                        rolloverMinor = rollover,
+                    )
+                    dao.putAllocation(updated)
+                    allocations[targetKey] = updated
+                }
             }
         }
     }
@@ -474,6 +492,8 @@ class RoomPocketLedger(
                     rolloverEligible = snapshot.rolloverEligible,
                     retiredThisPeriod = snapshot.retired,
                     rolloverReleasedMinor = periodReleases[pocketEntity.id]?.amountMinor ?: 0,
+                    expenseMinor = expenses,
+                    refundMinor = refunds,
                     netSpendMinor = math.netSpendMinor,
                     availabilityMinor = math.availabilityMinor,
                     consumedPercent = math.consumedPercent,

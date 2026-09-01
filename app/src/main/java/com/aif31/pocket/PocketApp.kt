@@ -147,10 +147,26 @@ fun PocketApp(
                         when (val result = ledger.restoreBackup(restoreCandidate)) {
                             LedgerResult.Success -> {
                                 val restored = ledger.state.first { !it.needsOnboarding }
-                                restored.periods.maxByOrNull { it.start }?.let { preferences?.setFuturePeriodStartDay(it.configuredStartDay) }
-                                onRestoreCandidateHandled()
-                                backupPreview = null
-                                restoreError = null
+                                val latest = restored.periods.maxByOrNull { it.start }
+                                val preferredStartDay = latest?.configuredStartDay ?: preferenceState.futurePeriodStartDay
+                                preferences?.setFuturePeriodStartDay(preferredStartDay)
+                                val today = ledger.movementDefaults().localDate
+                                if (restored.periods.none { today >= it.start && today < it.endExclusive } &&
+                                    today < restored.periods.minOf { it.start }
+                                ) {
+                                    restoreError = "El backup empieza después de la fecha actual"
+                                } else {
+                                    when (val catchUp = ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay))) {
+                                        LedgerResult.Success -> {
+                                            ledger.state.first { it.currentPeriod != null }
+                                            onRestoreCandidateHandled()
+                                            backupPreview = null
+                                            restoreError = null
+                                        }
+                                        is LedgerResult.Rejected -> restoreError = catchUp.message
+                                        is LedgerResult.Deleted -> Unit
+                                    }
+                                }
                             }
                             is LedgerResult.Rejected -> restoreError = result.message
                             is LedgerResult.Deleted -> Unit

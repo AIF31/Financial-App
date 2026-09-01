@@ -310,10 +310,12 @@ Through one compact Gradle workflow under JDK 17, run:
 
 Also run `git diff --check`, verify no `Thread.sleep` in `app/src/test`, inspect the version-4 schema, and compare every M1 acceptance item against concrete tests.
 
-- [ ] **Step 5: Request code review and address findings**
+- [x] **Step 5: Request code review and address findings**
 
 Dispatch the required read-only reviewer against base `68ae616` and the feature head. Fix every Critical/Important finding with a new red/green cycle and rerun the owning verification.
 
-- [ ] **Step 6: Record evidence and commit**
+- [x] **Step 6: Record evidence and commit**
 
 Check completed plan boxes, comment bounded verification summaries on the owning GitHub issue once external publication is explicitly approved, and commit as `test: verify M1 financial-period integrity`.
+
+Post-review evidence: separate Standards and Spec reviews covered `68ae616...d56f5ab`. Validated findings were addressed with red/green coverage for retired rollover-release recalculation, successive catch-up review flags, current-period restoration of archived Pockets, backup relationship validation, catch-up after restore, and historical retired-Pocket visibility with expense/refund values. Backup export capture was made transactional as a behavior-preserving refactor. The suggestion to add rollover releases to Pocket-budget capacity was rejected because it conflicts with the Task 5 literal `unallocatedMinor == 30_000` acceptance value and the domain rule that Pocket budgets are portions of new funds. Compact Gradle workflow `105ce974a0b71fdb70f0dbee90ffb909` run `0021` passed the full unit, lint, debug/release assembly, and 12-test managed-device gate with no warning fingerprints. Schema v4 parsed, `git diff --check` passed, and `app/src/test` contains no `Thread.sleep`. No GitHub issue was created or commented because external publication has not been explicitly approved.

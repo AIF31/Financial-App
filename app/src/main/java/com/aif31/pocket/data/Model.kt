@@ -95,6 +95,8 @@ data class PocketPeriodSummary(
     val rolloverEligible: Boolean = false,
     val retiredThisPeriod: Boolean = false,
     val rolloverReleasedMinor: Long = 0,
+    val expenseMinor: Long = 0,
+    val refundMinor: Long = 0,
     val netSpendMinor: Long,
     val availabilityMinor: Long,
     val consumedPercent: Int,

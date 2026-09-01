@@ -231,6 +231,62 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
+    fun historical_edits_recalculate_a_later_retired_Pockets_rollover_release() = runTest {
+        val firstLedger = RoomPocketLedger(database, clock, zone)
+        firstLedger.execute(LedgerCommand.Initialize(30_000))
+        val firstState = firstLedger.state.first { !it.needsOnboarding }
+        val pocket = firstState.pockets.first { it.pocket.name == "Viajes" }.pocket
+        val first = firstState.currentPeriod!!
+        firstLedger.execute(LedgerCommand.UpsertPocket(pocket.id, pocket.name, rolloverEnabled = true))
+        firstLedger.execute(LedgerCommand.SetAllocation(first.id, pocket.id, 10_000))
+        assertEquals(
+            LedgerResult.Success,
+            firstLedger.execute(
+                LedgerCommand.AddMovement(
+                    "release-source",
+                    pocket.id,
+                    MovementType.EXPENSE,
+                    5_000,
+                    clock.millis(),
+                    LocalDate.of(2026, 2, 26),
+                )
+            ),
+        )
+        firstLedger.execute(LedgerCommand.CreateNextPeriod())
+
+        val secondLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone),
+            zone,
+        )
+        val second = secondLedger.state.first { it.currentPeriod?.start == LocalDate.of(2026, 3, 25) }.currentPeriod!!
+        secondLedger.execute(LedgerCommand.ArchivePocket(pocket.id))
+        assertEquals(5_000L, database.financeDao().rolloverReleases().single { it.periodId == second.id }.amountMinor)
+
+        assertEquals(
+            LedgerResult.Success,
+            firstLedger.execute(
+                LedgerCommand.AddMovement(
+                    "release-source",
+                    pocket.id,
+                    MovementType.EXPENSE,
+                    8_000,
+                    clock.millis(),
+                    LocalDate.of(2026, 2, 26),
+                )
+            ),
+        )
+
+        assertEquals(
+            2_000L,
+            database.financeDao().rolloverReleases().single { it.periodId == second.id }.amountMinor,
+        )
+        val retired = secondLedger.state.first().pockets.single { it.pocket.id == pocket.id }
+        assertTrue(retired.retiredThisPeriod)
+        assertEquals(2_000L, retired.rolloverReleasedMinor)
+    }
+
+    @Test
     fun archiving_removes_pre_materialized_future_snapshots_and_releases_their_budget() = runTest {
         val mutableClock = MutableClock(Instant.parse("2026-02-26T09:00:00Z"), zone)
         val ledger = RoomPocketLedger(database, mutableClock, zone)
@@ -266,6 +322,28 @@ class PocketLedgerHostBehaviorTest {
         mutableClock.value = Instant.parse("2026-03-26T09:00:00Z")
         val nextCurrent = ledger.state.first { it.currentPeriod?.id == futurePeriods.first().id }
         assertEquals(30_000L, nextCurrent.unallocatedMinor)
+    }
+
+    @Test
+    fun restoring_an_archived_Pocket_materializes_it_in_the_current_period() = runTest {
+        val mutableClock = MutableClock(Instant.parse("2026-02-26T09:00:00Z"), zone)
+        val ledger = RoomPocketLedger(database, mutableClock, zone)
+        val dao = database.financeDao()
+        ledger.execute(LedgerCommand.Initialize(30_000))
+        val initial = ledger.state.first { !it.needsOnboarding }
+        val pocket = initial.pockets.first { it.pocket.name == "Viajes" }.pocket
+        ledger.execute(LedgerCommand.CreateNextPeriod())
+        val next = ledger.state.first { it.periods.size == 2 }.periods.last()
+        ledger.execute(LedgerCommand.ArchivePocket(pocket.id))
+        assertTrue(dao.periodPockets().none { it.periodId == next.id && it.pocketId == pocket.id })
+
+        mutableClock.value = Instant.parse("2026-03-26T09:00:00Z")
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePocket(pocket.id, archived = false)))
+
+        assertTrue(dao.periodPockets().any { it.periodId == next.id && it.pocketId == pocket.id && !it.retired })
+        val restored = ledger.state.first().pockets.single { it.pocket.id == pocket.id }
+        assertFalse(restored.pocket.archived)
+        assertFalse(restored.retiredThisPeriod)
     }
 
     @Test
@@ -338,6 +416,25 @@ class PocketLedgerHostBehaviorTest {
         val repeated = ledger.state.first { it.periods.size == 5 }.periods
         assertEquals(firstCatchUp.map { it.id }, repeated.map { it.id })
         assertEquals(firstCatchUp, repeated)
+    }
+
+    @Test
+    fun a_later_catch_up_clears_an_older_unreviewed_period() = runTest {
+        val mutableClock = MutableClock(Instant.parse("2026-02-26T09:00:00Z"), zone)
+        val ledger = RoomPocketLedger(database, mutableClock, zone)
+        ledger.execute(LedgerCommand.Initialize(100_000))
+
+        mutableClock.value = Instant.parse("2026-03-26T09:00:00Z")
+        ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay = 25))
+        assertEquals(listOf(false, true), ledger.state.first { it.periods.size == 2 }.periods.map { it.needsReview })
+
+        mutableClock.value = Instant.parse("2026-04-26T09:00:00Z")
+        ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay = 25))
+
+        assertEquals(
+            listOf(false, false, true),
+            ledger.state.first { it.periods.size == 3 }.periods.map { it.needsReview },
+        )
     }
 
     @Test
@@ -428,6 +525,70 @@ class PocketLedgerHostBehaviorTest {
             )
             .encodeToByteArray()
         assertTrue(ledger.previewBackup(legacyVersionTwo).valid)
+    }
+
+    @Test
+    fun backup_version_three_rejects_an_allocation_without_period_Pocket_state() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(50_000))
+        val state = ledger.state.first { !it.needsOnboarding }
+        ledger.execute(
+            LedgerCommand.SetAllocation(
+                state.currentPeriod!!.id,
+                state.pockets.first().pocket.id,
+                25_000,
+            )
+        )
+        val incomplete = ledger.exportBackup().decodeToString()
+            .replace(
+                Regex("\\s*\"periodPockets\": \\[.*?],", RegexOption.DOT_MATCHES_ALL),
+                "\n    \"periodPockets\": [],",
+            )
+            .encodeToByteArray()
+
+        assertFalse(ledger.previewBackup(incomplete).valid)
+    }
+
+    @Test
+    fun backup_version_three_rejects_a_movement_without_period_Pocket_state() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(50_000))
+        val state = ledger.state.first { !it.needsOnboarding }
+        ledger.execute(
+            LedgerCommand.AddMovement(
+                "backup-movement",
+                state.pockets.first().pocket.id,
+                MovementType.EXPENSE,
+                1_000,
+                clock.millis(),
+                LocalDate.of(2026, 2, 26),
+            )
+        )
+        val incomplete = ledger.exportBackup().decodeToString()
+            .replace(
+                Regex("\\s*\"periodPockets\": \\[.*?],", RegexOption.DOT_MATCHES_ALL),
+                "\n    \"periodPockets\": [],",
+            )
+            .encodeToByteArray()
+
+        assertFalse(ledger.previewBackup(incomplete).valid)
+    }
+
+    @Test
+    fun backup_version_three_rejects_a_rollover_release_for_a_nonretired_Pocket() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(50_000))
+        val state = ledger.state.first { !it.needsOnboarding }
+        val periodId = state.currentPeriod!!.id
+        val pocketId = state.pockets.first().pocket.id
+        val dao = database.financeDao()
+        dao.putPeriodPocket(PeriodPocketEntity(periodId, pocketId, rolloverEligible = true, retired = true))
+        dao.putRolloverRelease(RolloverReleaseEntity(periodId, pocketId, 5_000))
+        val inconsistent = ledger.exportBackup().decodeToString()
+            .replaceFirst("\"retired\": true", "\"retired\": false")
+            .encodeToByteArray()
+
+        assertFalse(ledger.previewBackup(inconsistent).valid)
     }
 
     @Test

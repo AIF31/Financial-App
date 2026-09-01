@@ -405,6 +405,55 @@ class PocketAppHostFlowTest {
     }
 
     @Test
+    fun restoring_an_expired_backup_catches_up_before_returning_to_the_app() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val sourceDatabase = FinanceDatabase.inMemory(ApplicationProvider.getApplicationContext<Context>())
+        val backup = try {
+            val source = RoomPocketLedger(
+                sourceDatabase,
+                Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone),
+                zone,
+            )
+            runBlocking {
+                source.execute(LedgerCommand.Initialize(75_000))
+                source.exportBackup()
+            }
+        } finally {
+            sourceDatabase.close()
+        }
+        val target = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-05-01T09:00:00Z"), zone),
+            zone,
+        )
+        runBlocking { target.execute(LedgerCommand.Initialize(10_000)) }
+        val preferences = FakePreferences()
+        var restoreHandled = false
+        compose.setContent {
+            PocketApp(
+                ledger = target,
+                preferences = preferences,
+                restoreCandidate = backup,
+                onRestoreCandidateHandled = { restoreHandled = true },
+            )
+        }
+
+        compose.waitUntilExactlyOneExists(hasText("Restaurar y reemplazar"), 5_000)
+        compose.onNodeWithText("Restaurar y reemplazar").performClick()
+
+        compose.waitUntil(10_000) { restoreHandled }
+        compose.waitUntil(10_000) {
+            runBlocking {
+                target.state.first().let { state -> state.currentPeriod != null && state.periods.size == 3 }
+            }
+        }
+        compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        val restored = runBlocking { target.state.first() }
+        assertEquals(LocalDate.of(2026, 4, 25), restored.currentPeriod!!.start)
+        assertEquals(listOf(false, false, true), restored.periods.map { it.needsReview })
+    }
+
+    @Test
     fun document_failures_are_reported_through_the_public_UI() {
         val zone = ZoneId.of("Asia/Riyadh")
         val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
@@ -466,6 +515,60 @@ class PocketAppHostFlowTest {
         compose.onNodeWithText("Pocket retirado").assertIsDisplayed()
         compose.onAllNodesWithText("Editar Pocket").assertCountEquals(0)
         compose.onAllNodesWithText("Guardar presupuesto").assertCountEquals(0)
+    }
+
+    @Test
+    fun a_retired_Pocket_remains_visible_with_spending_and_refunds_in_history() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val firstLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone),
+            zone,
+        )
+        runBlocking {
+            firstLedger.execute(LedgerCommand.Initialize(100_000))
+            val state = firstLedger.state.first { !it.needsOnboarding }
+            val pocket = state.pockets.first { it.pocket.name == "Viajes" }.pocket
+            firstLedger.execute(
+                LedgerCommand.AddMovement(
+                    "retired-expense",
+                    pocket.id,
+                    MovementType.EXPENSE,
+                    2_000,
+                    Instant.parse("2026-02-26T09:00:00Z").toEpochMilli(),
+                    LocalDate.of(2026, 2, 26),
+                )
+            )
+            firstLedger.execute(
+                LedgerCommand.AddMovement(
+                    "retired-refund",
+                    pocket.id,
+                    MovementType.REFUND,
+                    500,
+                    Instant.parse("2026-02-26T09:01:00Z").toEpochMilli(),
+                    LocalDate.of(2026, 2, 26),
+                )
+            )
+            firstLedger.execute(LedgerCommand.ArchivePocket(pocket.id))
+            firstLedger.execute(LedgerCommand.CreateNextPeriod())
+        }
+        val currentLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone),
+            zone,
+        )
+        compose.setContent { PocketApp(currentLedger) }
+
+        compose.waitUntilExactlyOneExists(hasText("Pockets"), 5_000)
+        compose.onNodeWithText("Pockets").performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag("pockets_list"), 5_000)
+        compose.onNodeWithText("25 feb – 24 mar").performClick()
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Retirado este periodo"))
+
+        compose.onNodeWithText("Retirado este periodo").assertIsDisplayed()
+        compose.onNodeWithText("Gastos SAR 20.00").assertIsDisplayed()
+        compose.onNodeWithText("Reembolsos SAR 5.00").assertIsDisplayed()
+        compose.onAllNodesWithText("Restaurar").assertCountEquals(0)
     }
 
     @Test

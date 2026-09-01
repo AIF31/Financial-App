@@ -11,40 +11,42 @@ internal object BackupCodec {
     private val json = Json { ignoreUnknownKeys = false; encodeDefaults = true; prettyPrint = true }
 
     suspend fun encode(database: FinanceDatabase): ByteArray {
-        val dao = database.financeDao()
-        val payload = BackupPayload(
-            version = VERSION,
-            periods = dao.periods().map {
-                PeriodDto(
-                    it.id,
-                    it.startEpochDay,
-                    it.endExclusiveEpochDay,
-                    it.newFundsMinor,
-                    it.configuredStartDay,
-                    it.isTransition,
-                    it.needsReview,
-                )
-            },
-            pockets = dao.pockets().map { PocketDto(it.id, it.name, it.sortOrder, it.archived, it.rolloverEnabled, it.iconKey) },
-            allocations = dao.allocations().map { AllocationDto(it.periodId, it.pocketId, it.budgetMinor, it.rolloverMinor) },
-            periodPockets = dao.periodPockets().map {
-                PeriodPocketDto(it.periodId, it.pocketId, it.rolloverEligible, it.retired)
-            },
-            rolloverReleases = dao.rolloverReleases().map {
-                RolloverReleaseDto(it.periodId, it.pocketId, it.amountMinor)
-            },
-            paymentMethods = dao.paymentMethods().map { PaymentMethodDto(it.id, it.name, it.archived) },
-            movements = dao.movements().map {
-                MovementDto(
-                    it.id, it.periodId, it.pocketId, it.type, it.sarAmountMinor, it.occurredAtUtcMillis,
-                    it.localEpochDay, it.zoneId, it.merchant, it.note, it.paymentMethodId,
-                    it.originalAmountMinor, it.originalCurrencyCode, it.conversionStatus, it.rate,
-                )
-            },
-            templates = dao.templates().map {
-                TemplateDto(it.id, it.name, it.amountMinor, it.pocketId, it.paymentMethodId, it.archived)
-            },
-        )
+        val payload = database.withTransaction {
+            val dao = database.financeDao()
+            BackupPayload(
+                version = VERSION,
+                periods = dao.periods().map {
+                    PeriodDto(
+                        it.id,
+                        it.startEpochDay,
+                        it.endExclusiveEpochDay,
+                        it.newFundsMinor,
+                        it.configuredStartDay,
+                        it.isTransition,
+                        it.needsReview,
+                    )
+                },
+                pockets = dao.pockets().map { PocketDto(it.id, it.name, it.sortOrder, it.archived, it.rolloverEnabled, it.iconKey) },
+                allocations = dao.allocations().map { AllocationDto(it.periodId, it.pocketId, it.budgetMinor, it.rolloverMinor) },
+                periodPockets = dao.periodPockets().map {
+                    PeriodPocketDto(it.periodId, it.pocketId, it.rolloverEligible, it.retired)
+                },
+                rolloverReleases = dao.rolloverReleases().map {
+                    RolloverReleaseDto(it.periodId, it.pocketId, it.amountMinor)
+                },
+                paymentMethods = dao.paymentMethods().map { PaymentMethodDto(it.id, it.name, it.archived) },
+                movements = dao.movements().map {
+                    MovementDto(
+                        it.id, it.periodId, it.pocketId, it.type, it.sarAmountMinor, it.occurredAtUtcMillis,
+                        it.localEpochDay, it.zoneId, it.merchant, it.note, it.paymentMethodId,
+                        it.originalAmountMinor, it.originalCurrencyCode, it.conversionStatus, it.rate,
+                    )
+                },
+                templates = dao.templates().map {
+                    TemplateDto(it.id, it.name, it.amountMinor, it.pocketId, it.paymentMethodId, it.archived)
+                },
+            )
+        }
         return json.encodeToString(BackupPayload.serializer(), payload).toByteArray(StandardCharsets.UTF_8)
     }
 
@@ -166,10 +168,23 @@ internal object BackupCodec {
         require(payload.periodPockets.all { it.periodId in periodIds && it.pocketId in pocketIds }) {
             "Relación de Pocket por periodo inválida"
         }
+        val periodPocketKeys = payload.periodPockets.map { it.periodId to it.pocketId }.toSet()
+        require(payload.version < 3 || payload.allocations.all { (it.periodId to it.pocketId) in periodPocketKeys }) {
+            "Presupuesto sin estado de Pocket por periodo"
+        }
+        require(payload.version < 3 || payload.movements.all { (it.periodId to it.pocketId) in periodPocketKeys }) {
+            "Movimiento sin estado de Pocket por periodo"
+        }
         require(payload.rolloverReleases.all {
             it.periodId in periodIds && it.pocketId in pocketIds && it.amountMinor >= 0
         }) {
             "Liberación de rollover inválida"
+        }
+        val periodPocketsByKey = payload.periodPockets.associateBy { it.periodId to it.pocketId }
+        require(payload.version < 3 || payload.rolloverReleases.all {
+            periodPocketsByKey[it.periodId to it.pocketId]?.retired == true
+        }) {
+            "Liberación de rollover sin Pocket retirado"
         }
         require(payload.allocations.all { it.periodId in periodIds && it.pocketId in pocketIds && it.budgetMinor >= 0 && it.rolloverMinor >= 0 }) { "Relación de presupuesto inválida" }
         val periodsById = payload.periods.associateBy { it.id }

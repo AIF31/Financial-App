@@ -183,6 +183,8 @@ interface FinanceDao {
     suspend fun deleteAllocations(pocketId: String, periodIds: List<String>)
     @Query("DELETE FROM period_pockets WHERE pocket_id = :pocketId AND period_id IN (:periodIds)")
     suspend fun deletePeriodPockets(pocketId: String, periodIds: List<String>)
+    @Query("DELETE FROM rollover_releases WHERE period_id = :periodId AND pocket_id = :pocketId")
+    suspend fun deleteRolloverRelease(periodId: String, pocketId: String)
     @Query("DELETE FROM recurring_templates") suspend fun clearTemplates()
     @Query("DELETE FROM movements") suspend fun clearMovements()
     @Query("DELETE FROM rollover_releases") suspend fun clearRolloverReleases()
