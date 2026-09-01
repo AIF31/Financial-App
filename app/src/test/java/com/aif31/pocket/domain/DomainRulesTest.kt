@@ -6,6 +6,7 @@ import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class DomainRulesTest {
@@ -35,6 +36,83 @@ class DomainRulesTest {
     }
 
     @Test
+    fun `unchanged start day creates the next ordinary period`() {
+        val calendar = BudgetCalendar(startDay = 25, zoneId = ZoneId.of("Asia/Riyadh"))
+        val previous = PeriodSchedule(
+            start = LocalDate.of(2026, 4, 25),
+            endExclusive = LocalDate.of(2026, 5, 25),
+            configuredStartDay = 25,
+            isTransition = false,
+        )
+
+        assertEquals(
+            PeriodSchedule(
+                start = LocalDate.of(2026, 5, 25),
+                endExclusive = LocalDate.of(2026, 6, 25),
+                configuredStartDay = 25,
+                isTransition = false,
+            ),
+            calendar.nextPeriodAfter(previous, preferredStartDay = 25),
+        )
+    }
+
+    @Test
+    fun `changed start day creates one long transition past the old next expected end`() {
+        val calendar = BudgetCalendar(startDay = 25, zoneId = ZoneId.of("Asia/Riyadh"))
+        val previous = PeriodSchedule(
+            start = LocalDate.of(2026, 4, 25),
+            endExclusive = LocalDate.of(2026, 5, 25),
+            configuredStartDay = 25,
+            isTransition = false,
+        )
+
+        assertEquals(
+            PeriodSchedule(
+                start = LocalDate.of(2026, 5, 25),
+                endExclusive = LocalDate.of(2026, 7, 10),
+                configuredStartDay = 10,
+                isTransition = true,
+            ),
+            calendar.nextPeriodAfter(previous, preferredStartDay = 10),
+        )
+        assertEquals(
+            PeriodSchedule(
+                start = LocalDate.of(2026, 5, 25),
+                endExclusive = LocalDate.of(2026, 6, 30),
+                configuredStartDay = 30,
+                isTransition = true,
+            ),
+            calendar.nextPeriodAfter(previous, preferredStartDay = 30),
+        )
+    }
+
+    @Test
+    fun `long transition crosses a year boundary and respects clamped old boundaries`() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val decemberBoundary = PeriodSchedule(
+            start = LocalDate.of(2026, 11, 25),
+            endExclusive = LocalDate.of(2026, 12, 25),
+            configuredStartDay = 25,
+            isTransition = false,
+        )
+        val clampedBoundary = PeriodSchedule(
+            start = LocalDate.of(2028, 1, 31),
+            endExclusive = LocalDate.of(2028, 2, 29),
+            configuredStartDay = 31,
+            isTransition = false,
+        )
+
+        assertEquals(
+            PeriodSchedule(LocalDate.of(2026, 12, 25), LocalDate.of(2027, 2, 10), 10, true),
+            BudgetCalendar(25, zone).nextPeriodAfter(decemberBoundary, preferredStartDay = 10),
+        )
+        assertEquals(
+            PeriodSchedule(LocalDate.of(2028, 2, 29), LocalDate.of(2028, 4, 30), 30, true),
+            BudgetCalendar(31, zone).nextPeriodAfter(clampedBoundary, preferredStartDay = 30),
+        )
+    }
+
+    @Test
     fun `Pocket availability permits overspending and refunds restore it`() {
         val summary = PocketMath.summary(
             budgetMinor = 10_000,
@@ -54,6 +132,13 @@ class DomainRulesTest {
         assertEquals(3_000, PocketMath.rollover(allocatedMinor = 10_000, netSpendMinor = 7_000, enabled = true))
         assertEquals(0, PocketMath.rollover(allocatedMinor = 10_000, netSpendMinor = 7_000, enabled = false))
         assertEquals(0, PocketMath.rollover(allocatedMinor = 10_000, netSpendMinor = 12_000, enabled = true))
+    }
+
+    @Test
+    fun `rollover rejects values whose availability exceeds supported money range`() {
+        assertThrows(ArithmeticException::class.java) {
+            PocketMath.rollover(allocatedMinor = Long.MAX_VALUE, netSpendMinor = -1, enabled = true)
+        }
     }
 
     @Test

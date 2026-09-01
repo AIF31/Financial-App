@@ -8,7 +8,11 @@ data class Period(
     val endExclusive: LocalDate,
     val newFundsMinor: Long,
     val configuredStartDay: Int,
+    val isTransition: Boolean = false,
+    val needsReview: Boolean = false,
 )
+
+enum class ComparisonMode { TOTAL_SPEND, DAILY_PACE }
 
 enum class PocketIconKey {
     SUPERMARKET,
@@ -88,6 +92,11 @@ data class PocketPeriodSummary(
     val pocket: Pocket,
     val budgetMinor: Long,
     val rolloverMinor: Long,
+    val rolloverEligible: Boolean = false,
+    val retiredThisPeriod: Boolean = false,
+    val rolloverReleasedMinor: Long = 0,
+    val expenseMinor: Long = 0,
+    val refundMinor: Long = 0,
     val netSpendMinor: Long,
     val availabilityMinor: Long,
     val consumedPercent: Int,
@@ -109,6 +118,8 @@ data class LedgerState(
     val netSpendMinor: Long = 0,
     val trackedAvailabilityMinor: Long = 0,
     val previousPeriodNetSpendMinor: Long? = null,
+    val comparisonMode: ComparisonMode = ComparisonMode.TOTAL_SPEND,
+    val previousPeriodComparisonMinor: Long? = null,
     val elapsedDays: Int = 0,
     val totalDays: Int = 0,
     val projectionMinor: Long = 0,
@@ -148,6 +159,8 @@ sealed interface LedgerCommand {
     data class DeleteMovement(val movementId: String) : LedgerCommand
     data class RestoreMovement(val movement: Movement) : LedgerCommand
     data class CreateNextPeriod(val startDay: Int? = null) : LedgerCommand
+    data class CatchUpPeriods(val preferredStartDay: Int) : LedgerCommand
+    data class MarkPeriodReviewed(val periodId: String) : LedgerCommand
     data class UpsertPaymentMethod(val id: String? = null, val name: String) : LedgerCommand
     data class ArchivePaymentMethod(val id: String, val archived: Boolean = true) : LedgerCommand
     data class UpsertTemplate(
@@ -168,12 +181,18 @@ sealed interface LedgerResult {
 
 interface PocketLedger {
     val state: kotlinx.coroutines.flow.Flow<LedgerState>
+    fun movementDefaults(): MovementDefaults
     suspend fun execute(command: LedgerCommand): LedgerResult
     suspend fun exportBackup(): ByteArray
     suspend fun previewBackup(bytes: ByteArray): BackupPreview
     suspend fun restoreBackup(bytes: ByteArray): LedgerResult
     suspend fun exportCsv(): ByteArray
 }
+
+data class MovementDefaults(
+    val localDate: LocalDate,
+    val instantMillis: Long,
+)
 
 data class BackupPreview(
     val version: Int,

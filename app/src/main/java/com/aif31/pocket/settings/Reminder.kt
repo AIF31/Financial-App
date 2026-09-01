@@ -40,7 +40,7 @@ class WorkReminderScheduler(private val context: Context) : ReminderScheduler {
         val request = PeriodicWorkRequestBuilder<ReminderWorker>(24, TimeUnit.HOURS)
             .setInitialDelay(Duration.between(now, next))
             .build()
-        manager.enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
+        manager.enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE, request)
     }
 
     private companion object { const val WORK_NAME = "daily-spending-review" }

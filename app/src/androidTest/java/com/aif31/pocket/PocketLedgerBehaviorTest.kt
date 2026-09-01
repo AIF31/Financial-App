@@ -111,7 +111,7 @@ class PocketLedgerBehaviorTest {
         val backup = source.exportBackup()
         assertTrue(source.previewBackup(backup).valid)
         assertFalse(source.previewBackup(backup.copyOf(backup.size / 2)).valid)
-        assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"version\": 2", "\"version\": 99").encodeToByteArray()).valid)
+        assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"version\": 3", "\"version\": 99").encodeToByteArray()).valid)
         assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"budgetMinor\": 25000", "\"budgetMinor\": 60000").encodeToByteArray()).valid)
         assertEquals(LedgerResult.Success, source.restoreBackup(backup))
 

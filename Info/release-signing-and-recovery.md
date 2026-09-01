@@ -73,10 +73,10 @@ Recommended transition procedure:
 3. Copy the backup off-device if the phone itself is being reset or replaced.
 4. Uninstall the old package only after backup verification.
 5. Install the APK with the intended signing identity.
-6. Restore only into an empty installation and verify dashboard and movement totals.
+6. Review the replacement warning, restore the backup, and verify dashboard and movement totals.
 7. Cold-start the app again to confirm persistence.
 
-Restore intentionally rejects non-empty targets and applies valid backups transactionally. CSV is analytical export only and cannot restore the app.
+Restore can replace a non-empty ledger after preview and explicit confirmation. Valid backups are applied transactionally, so a failed replacement leaves the prior ledger intact. Export a fresh safety backup before replacing data. CSV is analytical export only and cannot restore the app.
 
 ## Security findings retained for future releases
 

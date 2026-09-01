@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -47,11 +48,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.R
+import com.aif31.pocket.data.ComparisonMode
 import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.PocketPeriodSummary
-import java.math.BigDecimal
-import java.text.DecimalFormat
-import java.text.DecimalFormatSymbols
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -64,7 +63,7 @@ internal fun ActionableDashboardContent(
 ) {
     var supportingMetricsExpanded by rememberSaveable { mutableStateOf(false) }
     val activePockets = state.pockets
-        .filterNot { it.pocket.archived }
+        .filterNot { it.pocket.archived || it.retiredThisPeriod }
         .sortedBy { summary ->
             when {
                 summary.exhausted -> 0
@@ -118,12 +117,33 @@ internal fun ActionableDashboardContent(
                             )
                         }
                     }
+                    if (period?.isTransition == true) {
+                        Text(
+                            "Periodo de transición",
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
                 }
                 Image(
                     painter = painterResource(R.drawable.pocket_kaust_logo),
                     contentDescription = null,
                     modifier = Modifier.size(56.dp).clip(CircleShape),
                 )
+            }
+        }
+        if (period?.needsReview == true) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                ) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Revisa el presupuesto de este periodo", style = MaterialTheme.typography.titleMedium)
+                        Text("Se crearon periodos pendientes mientras la app estaba cerrada. Confirma que los importes siguen siendo correctos.")
+                        Button(onClick = onManagePockets) { Text("Revisar Pockets") }
+                    }
+                }
             }
         }
         item {
@@ -221,8 +241,12 @@ internal fun ActionableDashboardContent(
             item {
                 Column(modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp)) {
                     SupportingMetric(
-                        "Periodo anterior",
-                        state.previousPeriodNetSpendMinor?.let(::formatSar)
+                        if (state.comparisonMode == ComparisonMode.DAILY_PACE) {
+                            "Ritmo diario del periodo anterior"
+                        } else {
+                            "Periodo anterior"
+                        },
+                        state.previousPeriodComparisonMinor?.let(::formatSar)
                             ?: "Aún no existe un periodo anterior",
                     )
                 }
@@ -353,10 +377,8 @@ private fun SupportingMetric(label: String, value: String) {
     }
 }
 
-private val sarFormat = DecimalFormat("#,##0.00", DecimalFormatSymbols(Locale.US))
-
 private fun formatSar(minor: Long): String =
-    "SAR " + sarFormat.format(BigDecimal.valueOf(minor).movePointLeft(2))
+    MoneyText.sar(minor)
 
 private fun formatPeriod(start: java.time.LocalDate, end: java.time.LocalDate): String {
     val formatter = DateTimeFormatter.ofPattern("d MMM", Locale.forLanguageTag("es"))
