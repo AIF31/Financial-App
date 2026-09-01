@@ -328,7 +328,7 @@ class RoomPocketLedger(
                 val pocketId = targetSnapshot.pocketId
                 val sourceAllocation = allocations[source.id to pocketId]
                 val netSpend = sourceMovements.filter { it.pocketId == pocketId }.sumOf {
-                    if (it.type == MovementType.EXPENSE.name) it.sarAmountMinor else -it.sarAmountMinor
+                    if (it.type == MovementType.EXPENSE.name) it.accountingAmountMinor else -it.accountingAmountMinor
                 }
                 val sourceSnapshot = sourceSnapshots[pocketId]
                 val rollover = PocketMath.rollover(
@@ -397,7 +397,7 @@ class RoomPocketLedger(
         val nextAllocations = activePockets.map { pocket ->
             val previousAllocation = previousAllocations[pocket.id]
             val spent = previousMovements.filter { it.pocketId == pocket.id }.sumOf {
-                if (it.type == MovementType.EXPENSE.name) it.sarAmountMinor else -it.sarAmountMinor
+                if (it.type == MovementType.EXPENSE.name) it.accountingAmountMinor else -it.accountingAmountMinor
             }
             val rollover = PocketMath.rollover(
                 allocatedMinor = (previousAllocation?.budgetMinor ?: 0) + (previousAllocation?.rolloverMinor ?: 0),
@@ -599,7 +599,7 @@ private fun MovementEntity.toModel(
     pocketName = pockets[pocketId]?.name ?: "Pocket archivado",
     periodId = periodId,
     type = MovementType.valueOf(type),
-    sarAmountMinor = sarAmountMinor,
+    sarAmountMinor = accountingAmountMinor,
     occurredAtUtcMillis = occurredAtUtcMillis,
     localDate = LocalDate.ofEpochDay(localEpochDay),
     zoneId = zoneId,
@@ -618,7 +618,7 @@ private fun LedgerCommand.AddMovement.toEntity(periodId: String, zoneId: String)
     periodId = periodId,
     pocketId = pocketId,
     type = type.name,
-    sarAmountMinor = sarAmountMinor,
+    accountingAmountMinor = sarAmountMinor,
     occurredAtUtcMillis = occurredAtUtcMillis,
     localEpochDay = localDate.toEpochDay(),
     zoneId = zoneId,

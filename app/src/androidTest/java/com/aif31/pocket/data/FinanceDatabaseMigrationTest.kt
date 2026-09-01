@@ -125,8 +125,84 @@ class FinanceDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migration_4_to_5_preserves_manual_fx_and_adds_currency_and_payment_defaults() {
+        helper.createDatabase(TEST_DATABASE_4_5, 4).apply {
+            execSQL(
+                "INSERT INTO periods (id, start_epoch_day, end_exclusive_epoch_day, new_funds_minor, " +
+                    "configured_start_day, is_transition, needs_review) " +
+                    "VALUES ('period-1', 20478, 20506, 100000, 25, 0, 0)"
+            )
+            execSQL(
+                "INSERT INTO pockets (id, name, icon_key, sort_order, archived, rollover_enabled) " +
+                    "VALUES ('pocket-1', 'Viajes', 'TRAVEL', 0, 0, 1)"
+            )
+            execSQL(
+                "INSERT INTO payment_methods (id, name, archived) " +
+                    "VALUES ('card-1', 'Tarjeta', 0)"
+            )
+            execSQL(
+                "INSERT INTO movements (id, period_id, pocket_id, type, sar_amount_minor, " +
+                    "occurred_at_utc_millis, local_epoch_day, zone_id, merchant, note, " +
+                    "payment_method_id, original_amount_minor, original_currency_code, conversion_status, rate) " +
+                    "VALUES ('movement-1', 'period-1', 'pocket-1', 'EXPENSE', 12345, 1, 20479, " +
+                    "'Asia/Riyadh', 'Merchant', 'Legacy manual FX', 'card-1', 10000, 'USD', " +
+                    "'CONFIRMED', '1.2345')"
+            )
+            execSQL(
+                "INSERT INTO recurring_templates (id, name, amount_minor, pocket_id, payment_method_id, archived) " +
+                    "VALUES ('template-1', 'Viaje', 5000, 'pocket-1', 'card-1', 0)"
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DATABASE_4_5,
+            5,
+            true,
+            FinanceDatabase.MIGRATION_4_5,
+        ).use { database ->
+            database.query(
+                "SELECT accounting_currency_code, prior_boundary_from_currency_code, " +
+                    "prior_boundary_rate, prior_boundary_effective_epoch_day, prior_boundary_source " +
+                    "FROM periods WHERE id = 'period-1'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("SAR", cursor.getString(0))
+                assertTrue(cursor.isNull(1))
+                assertTrue(cursor.isNull(2))
+                assertTrue(cursor.isNull(3))
+                assertTrue(cursor.isNull(4))
+            }
+            database.query(
+                "SELECT accounting_amount_minor, original_amount_minor, original_currency_code, " +
+                    "conversion_status, rate FROM movements WHERE id = 'movement-1'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(12_345L, cursor.getLong(0))
+                assertEquals(10_000L, cursor.getLong(1))
+                assertEquals("USD", cursor.getString(2))
+                assertEquals("CONFIRMED", cursor.getString(3))
+                assertEquals("1.2345", cursor.getString(4))
+            }
+            database.query("SELECT input_currency_code FROM recurring_templates WHERE id = 'template-1'").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("SAR", cursor.getString(0))
+            }
+            database.query("SELECT default_payment_method_id FROM ledger_preferences WHERE id = 1").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("card-1", cursor.getString(0))
+            }
+            database.query("SELECT COUNT(*) FROM pending_currency_change").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(0, cursor.getInt(0))
+            }
+        }
+    }
+
     private companion object {
         const val TEST_DATABASE = "migration-2-3-test"
         const val TEST_DATABASE_3_4 = "migration-3-4-test"
+        const val TEST_DATABASE_4_5 = "migration-4-5-test"
     }
 }

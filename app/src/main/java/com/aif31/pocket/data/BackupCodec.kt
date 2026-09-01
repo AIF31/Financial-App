@@ -37,7 +37,7 @@ internal object BackupCodec {
                 paymentMethods = dao.paymentMethods().map { PaymentMethodDto(it.id, it.name, it.archived) },
                 movements = dao.movements().map {
                     MovementDto(
-                        it.id, it.periodId, it.pocketId, it.type, it.sarAmountMinor, it.occurredAtUtcMillis,
+                        it.id, it.periodId, it.pocketId, it.type, it.accountingAmountMinor, it.occurredAtUtcMillis,
                         it.localEpochDay, it.zoneId, it.merchant, it.note, it.paymentMethodId,
                         it.originalAmountMinor, it.originalCurrencyCode, it.conversionStatus, it.rate,
                     )
@@ -103,7 +103,7 @@ internal object BackupCodec {
                         java.time.LocalDate.ofEpochDay(movement.localEpochDay).toString(),
                         movement.zoneId,
                         pockets[movement.pocketId]?.name.orEmpty(),
-                        minorString(movement.sarAmountMinor),
+                        minorString(movement.accountingAmountMinor),
                         movement.originalCurrencyCode,
                         movement.originalAmountMinor?.let(::minorString).orEmpty(),
                         movement.conversionStatus,
