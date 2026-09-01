@@ -757,6 +757,97 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
+    fun historical_edit_recalculates_rollover_and_comparison_through_each_frozen_currency_boundary() = runTest {
+        val firstLedger = RoomPocketLedger(database, clock, zone)
+        val dao = database.financeDao()
+        firstLedger.execute(LedgerCommand.Initialize(100_000))
+        var state = firstLedger.state.first { !it.needsOnboarding }
+        val first = state.currentPeriod!!
+        val pocket = state.pockets.first { it.pocket.name == "Viajes" }.pocket
+        firstLedger.execute(LedgerCommand.UpsertPocket(pocket.id, pocket.name, rolloverEnabled = true))
+        firstLedger.execute(LedgerCommand.SetAllocation(first.id, pocket.id, 20_000))
+        firstLedger.execute(
+            LedgerCommand.AddMovement(
+                "historical-cross-currency",
+                pocket.id,
+                MovementType.EXPENSE,
+                5_000,
+                clock.millis(),
+                LocalDate.of(2026, 2, 26),
+            )
+        )
+        firstLedger.execute(
+            LedgerCommand.ScheduleCurrencyChange(
+                SupportedCurrency.MXN,
+                "2",
+                first.endExclusive,
+                "TEST-SAR-MXN",
+            )
+        )
+        firstLedger.execute(LedgerCommand.CreateNextPeriod())
+
+        state = firstLedger.state.first { it.periods.size == 2 }
+        val second = state.periods[1]
+        firstLedger.execute(
+            LedgerCommand.AddMovement(
+                "middle-spend",
+                pocket.id,
+                MovementType.EXPENSE,
+                10_000,
+                clock.millis() + 1,
+                LocalDate.of(2026, 3, 26),
+            )
+        )
+        firstLedger.execute(
+            LedgerCommand.ScheduleCurrencyChange(
+                SupportedCurrency.USD,
+                "0.1",
+                second.endExclusive,
+                "TEST-MXN-USD",
+            )
+        )
+        firstLedger.execute(LedgerCommand.CreateNextPeriod())
+
+        val laterPeriodIds = dao.periods().drop(1).map { it.id }.toSet()
+        val laterFundsBefore = dao.periods().filter { it.id in laterPeriodIds }.map { it.id to it.newFundsMinor }
+        val laterBudgetsBefore = dao.allocations().filter { it.periodId in laterPeriodIds }
+            .map { Triple(it.periodId, it.pocketId, it.budgetMinor) }
+        val laterMovementsBefore = dao.movements().filter { it.periodId in laterPeriodIds }
+
+        firstLedger.execute(
+            LedgerCommand.AddMovement(
+                "historical-cross-currency",
+                pocket.id,
+                MovementType.EXPENSE,
+                10_000,
+                clock.millis(),
+                LocalDate.of(2026, 2, 26),
+            )
+        )
+
+        val periods = dao.periods().sortedBy { it.startEpochDay }
+        val allocations = dao.allocations().associateBy { it.periodId to it.pocketId }
+        assertEquals(20_000L, allocations.getValue(periods[1].id to pocket.id).rolloverMinor)
+        assertEquals(5_000L, allocations.getValue(periods[2].id to pocket.id).rolloverMinor)
+        assertEquals(laterFundsBefore, dao.periods().filter { it.id in laterPeriodIds }.map { it.id to it.newFundsMinor })
+        assertEquals(
+            laterBudgetsBefore,
+            dao.allocations().filter { it.periodId in laterPeriodIds }.map { Triple(it.periodId, it.pocketId, it.budgetMinor) },
+        )
+        assertEquals(laterMovementsBefore, dao.movements().filter { it.periodId in laterPeriodIds })
+
+        val currentLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-04-26T09:00:00Z"), zone),
+            zone,
+        )
+        val current = currentLedger.state.first { it.currentPeriod?.id == periods[2].id }
+        assertEquals(SupportedCurrency.USD, current.currentPeriod!!.accountingCurrency)
+        assertEquals(1_000L, current.previousPeriodNetSpendMinor)
+        assertEquals(1_000L, current.previousPeriodComparisonMinor)
+    }
+
+    @Test
     fun ordinary_period_compares_the_previous_period_total_spend() = runTest {
         val firstPeriodLedger = RoomPocketLedger(database, clock, zone)
         firstPeriodLedger.execute(LedgerCommand.Initialize(20_000))

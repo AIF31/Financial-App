@@ -373,9 +373,18 @@ class RoomPocketLedger(
                     netSpendMinor = netSpend,
                     enabled = sourceSnapshot?.rolloverEligible == true && !sourceSnapshot.retired,
                 )
+                val sourceCurrency = SupportedCurrency.fromCode(source.accountingCurrencyCode)
+                val targetCurrency = SupportedCurrency.fromCode(target.accountingCurrencyCode)
+                val targetRollover = if (sourceCurrency == targetCurrency) {
+                    rollover
+                } else {
+                    requireNotNull(target.frozenRateFrom(sourceCurrency)) {
+                        "Falta el tipo de cambio congelado entre periodos"
+                    }.convertMinor(rollover)
+                }
                 if (targetSnapshot.retired) {
-                    if (rollover > 0) {
-                        dao.putRolloverRelease(RolloverReleaseEntity(target.id, pocketId, rollover))
+                    if (targetRollover > 0) {
+                        dao.putRolloverRelease(RolloverReleaseEntity(target.id, pocketId, targetRollover))
                     } else {
                         dao.deleteRolloverRelease(target.id, pocketId)
                     }
@@ -386,7 +395,7 @@ class RoomPocketLedger(
                         periodId = target.id,
                         pocketId = pocketId,
                         budgetMinor = targetAllocation?.budgetMinor ?: 0,
-                        rolloverMinor = rollover,
+                        rolloverMinor = targetRollover,
                     )
                     dao.putAllocation(updated)
                     allocations[targetKey] = updated
@@ -566,9 +575,19 @@ class RoomPocketLedger(
         val allSummaries = periods.associate { it.id to summariesFor(it.id) }
         val summaries = allSummaries.getValue(current.id)
         val previous = periods.filter { it.start < current.start }.maxByOrNull { it.start }
-        val previousSpend = previous?.let { period ->
+        val previousSpendInPreviousCurrency = previous?.let { period ->
             movements.filter { it.periodId == period.id }.sumOf {
                 if (it.type == MovementType.EXPENSE) it.sarAmountMinor else -it.sarAmountMinor
+            }
+        }
+        val currentEntity = periodEntities.first { it.id == current.id }
+        val previousSpend = previous?.let { previousPeriod ->
+            previousSpendInPreviousCurrency?.let { amount ->
+                if (previousPeriod.accountingCurrency == current.accountingCurrency) {
+                    amount
+                } else {
+                    currentEntity.frozenRateFrom(previousPeriod.accountingCurrency)?.convertMinor(amount)
+                }
             }
         }
         val comparisonMode = if (current.isTransition) ComparisonMode.DAILY_PACE else ComparisonMode.TOTAL_SPEND
@@ -669,6 +688,18 @@ private fun PendingCurrencyChangeEntity.toModel() = PendingCurrencyChange(
         source = source,
     )
 )
+
+private fun PeriodEntity.frozenRateFrom(source: SupportedCurrency): FrozenRate? {
+    val storedRate = priorBoundaryRate ?: return null
+    val storedFrom = priorBoundaryFromCurrencyCode ?: return null
+    return runCatching {
+        FrozenRate(
+            from = SupportedCurrency.fromCode(storedFrom),
+            to = SupportedCurrency.fromCode(accountingCurrencyCode),
+            value = storedRate,
+        ).takeIf { it.from == source }
+    }.getOrNull()
+}
 
 private fun PocketEntity.toModel() = Pocket(id, name, PocketIconKey.fromStored(iconKey, name), sortOrder, archived, rolloverEnabled)
 
