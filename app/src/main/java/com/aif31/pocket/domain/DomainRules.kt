@@ -7,6 +7,18 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 
+enum class SupportedCurrency {
+    SAR,
+    USD,
+    MXN;
+
+    companion object {
+        fun fromCode(value: String): SupportedCurrency =
+            entries.firstOrNull { it.name == value.trim().uppercase() }
+                ?: throw IllegalArgumentException("Moneda no compatible")
+    }
+}
+
 data class Money(val minor: Long, val currencyCode: String) {
     init {
         require(currencyCode.matches(Regex("[A-Z]{3}"))) { "Currency must be an ISO 4217 code" }
@@ -31,6 +43,29 @@ data class Money(val minor: Long, val currencyCode: String) {
                 .longValueExact()
             return Money(minor, currencyCode.uppercase())
         }
+    }
+}
+
+data class FrozenRate(
+    val from: SupportedCurrency,
+    val to: SupportedCurrency,
+    val value: String,
+) {
+    private val decimal: BigDecimal = runCatching { BigDecimal(value) }
+        .getOrElse { throw IllegalArgumentException("Tipo de cambio inválido") }
+
+    init {
+        require(decimal > BigDecimal.ZERO) { "El tipo de cambio debe ser positivo" }
+    }
+
+    fun convertMinor(minor: Long): Long = BigDecimal.valueOf(minor)
+        .multiply(decimal)
+        .setScale(0, RoundingMode.HALF_UP)
+        .longValueExact()
+
+    fun convert(money: Money): Money {
+        require(money.currencyCode == from.name) { "La moneda de origen no coincide con el tipo de cambio" }
+        return Money(convertMinor(money.minor), to.name)
     }
 }
 

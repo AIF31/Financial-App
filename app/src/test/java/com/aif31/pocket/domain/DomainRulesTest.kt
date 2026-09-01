@@ -18,6 +18,40 @@ class DomainRulesTest {
     }
 
     @Test
+    fun `supported currencies normalize known codes and reject unsupported codes`() {
+        assertEquals(SupportedCurrency.SAR, SupportedCurrency.fromCode("SAR"))
+        assertEquals(SupportedCurrency.MXN, SupportedCurrency.fromCode("mxn"))
+
+        assertThrows(IllegalArgumentException::class.java) {
+            SupportedCurrency.fromCode("EUR")
+        }
+    }
+
+    @Test
+    fun `frozen rate converts in its declared direction with half up rounding`() {
+        val rate = FrozenRate(
+            from = SupportedCurrency.SAR,
+            to = SupportedCurrency.MXN,
+            value = "4.525",
+        )
+
+        assertEquals(453L, rate.convertMinor(100L))
+        assertEquals(Money(453L, "MXN"), rate.convert(Money(100L, "SAR")))
+        assertThrows(IllegalArgumentException::class.java) {
+            rate.convert(Money(100L, "USD"))
+        }
+    }
+
+    @Test
+    fun `frozen rate rejects zero negative and malformed values`() {
+        listOf("0", "-1", "not-a-rate").forEach { value ->
+            assertThrows(IllegalArgumentException::class.java) {
+                FrozenRate(SupportedCurrency.SAR, SupportedCurrency.USD, value)
+            }
+        }
+    }
+
+    @Test
     fun `period beginning on 25 includes the 24th only in the previous period`() {
         val calendar = BudgetCalendar(startDay = 25, zoneId = ZoneId.of("Asia/Riyadh"))
 
