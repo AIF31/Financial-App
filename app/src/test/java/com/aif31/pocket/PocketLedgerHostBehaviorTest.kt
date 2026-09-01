@@ -13,6 +13,7 @@ import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.data.PeriodPocketEntity
 import com.aif31.pocket.data.RolloverReleaseEntity
 import com.aif31.pocket.data.RoomPocketLedger
+import com.aif31.pocket.domain.SupportedCurrency
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -416,6 +417,109 @@ class PocketLedgerHostBehaviorTest {
         val repeated = ledger.state.first { it.periods.size == 5 }.periods
         assertEquals(firstCatchUp.map { it.id }, repeated.map { it.id })
         assertEquals(firstCatchUp, repeated)
+    }
+
+    @Test
+    fun pending_currency_transition_applies_once_then_catch_up_continues_offline_in_target_currency() = runTest {
+        val mutableClock = MutableClock(Instant.parse("2026-02-26T09:00:00Z"), zone)
+        val ledger = RoomPocketLedger(database, mutableClock, zone)
+        val dao = database.financeDao()
+        ledger.execute(LedgerCommand.Initialize(100_000))
+        val initial = ledger.state.first { !it.needsOnboarding }
+        val sourcePeriod = initial.currentPeriod!!
+        val pocket = initial.pockets.first { it.pocket.name == "Viajes" }.pocket
+        ledger.execute(LedgerCommand.UpsertPocket(pocket.id, pocket.name, rolloverEnabled = true))
+        ledger.execute(LedgerCommand.SetAllocation(sourcePeriod.id, pocket.id, 20_000))
+        ledger.execute(
+            LedgerCommand.AddMovement(
+                id = "source-spend",
+                pocketId = pocket.id,
+                type = MovementType.EXPENSE,
+                sarAmountMinor = 5_000,
+                occurredAtUtcMillis = mutableClock.millis(),
+                localDate = LocalDate.of(2026, 2, 26),
+            )
+        )
+
+        assertEquals(
+            LedgerResult.Success,
+            ledger.execute(
+                LedgerCommand.ScheduleCurrencyChange(
+                    targetCurrency = SupportedCurrency.MXN,
+                    rate = "4.5",
+                    effectiveDate = LocalDate.of(2026, 3, 25),
+                    source = "TEST",
+                )
+            ),
+        )
+        mutableClock.value = Instant.parse("2026-04-26T09:00:00Z")
+
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay = 25)))
+
+        val periods = dao.periods().sortedBy { it.startEpochDay }
+        assertEquals(3, periods.size)
+        assertEquals(listOf("SAR", "MXN", "MXN"), periods.map { it.accountingCurrencyCode })
+        assertEquals("SAR", periods[1].priorBoundaryFromCurrencyCode)
+        assertEquals("4.5", periods[1].priorBoundaryRate)
+        assertEquals(LocalDate.of(2026, 3, 25).toEpochDay(), periods[1].priorBoundaryEffectiveEpochDay)
+        assertEquals("TEST", periods[1].priorBoundarySource)
+        assertNull(periods[2].priorBoundaryRate)
+        assertEquals(listOf(100_000L, 450_000L, 450_000L), periods.map { it.newFundsMinor })
+
+        val allocations = dao.allocations().associateBy { it.periodId to it.pocketId }
+        assertEquals(90_000L, allocations.getValue(periods[1].id to pocket.id).budgetMinor)
+        assertEquals(67_500L, allocations.getValue(periods[1].id to pocket.id).rolloverMinor)
+        assertEquals(90_000L, allocations.getValue(periods[2].id to pocket.id).budgetMinor)
+        assertEquals(157_500L, allocations.getValue(periods[2].id to pocket.id).rolloverMinor)
+        assertNull(dao.pendingCurrencyChange())
+
+        val beforeRepeatedCatchUp = dao.periods() to dao.allocations()
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay = 25)))
+        assertEquals(beforeRepeatedCatchUp, dao.periods() to dao.allocations())
+    }
+
+    @Test
+    fun pending_currency_transition_can_be_cancelled_without_changing_the_current_period() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(100_000))
+        val before = ledger.state.first { !it.needsOnboarding }.currentPeriod
+        ledger.execute(
+            LedgerCommand.ScheduleCurrencyChange(
+                SupportedCurrency.USD,
+                rate = "0.2666666667",
+                effectiveDate = before!!.endExclusive,
+                source = "TEST",
+            )
+        )
+
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.CancelCurrencyChange))
+
+        assertNull(database.financeDao().pendingCurrencyChange())
+        assertEquals(before, ledger.state.first().currentPeriod)
+    }
+
+    @Test
+    fun scheduling_currency_transition_rejects_same_currency_wrong_boundary_and_blank_source() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(100_000))
+        val nextBoundary = ledger.state.first { !it.needsOnboarding }.currentPeriod!!.endExclusive
+
+        assertTrue(
+            ledger.execute(
+                LedgerCommand.ScheduleCurrencyChange(SupportedCurrency.SAR, "1", nextBoundary, "TEST")
+            ) is LedgerResult.Rejected
+        )
+        assertTrue(
+            ledger.execute(
+                LedgerCommand.ScheduleCurrencyChange(SupportedCurrency.USD, "0.2666666667", nextBoundary.plusDays(1), "TEST")
+            ) is LedgerResult.Rejected
+        )
+        assertTrue(
+            ledger.execute(
+                LedgerCommand.ScheduleCurrencyChange(SupportedCurrency.USD, "0.2666666667", nextBoundary, "   ")
+            ) is LedgerResult.Rejected
+        )
+        assertNull(database.financeDao().pendingCurrencyChange())
     }
 
     @Test

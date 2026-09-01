@@ -1,6 +1,19 @@
 package com.aif31.pocket.data
 
+import com.aif31.pocket.domain.SupportedCurrency
 import java.time.LocalDate
+
+data class CurrencyBoundary(
+    val from: SupportedCurrency,
+    val to: SupportedCurrency,
+    val rate: String,
+    val effectiveDate: LocalDate,
+    val source: String,
+)
+
+data class PendingCurrencyChange(
+    val boundary: CurrencyBoundary,
+)
 
 data class Period(
     val id: String,
@@ -10,6 +23,8 @@ data class Period(
     val configuredStartDay: Int,
     val isTransition: Boolean = false,
     val needsReview: Boolean = false,
+    val accountingCurrency: SupportedCurrency = SupportedCurrency.SAR,
+    val priorCurrencyBoundary: CurrencyBoundary? = null,
 )
 
 enum class ComparisonMode { TOTAL_SPEND, DAILY_PACE }
@@ -125,6 +140,7 @@ data class LedgerState(
     val projectionMinor: Long = 0,
     val currentLocalDate: LocalDate = LocalDate.of(1970, 1, 1),
     val currentInstantMillis: Long = 0,
+    val pendingCurrencyChange: PendingCurrencyChange? = null,
 ) {
     val needsOnboarding: Boolean get() = periods.isEmpty()
 }
@@ -161,6 +177,13 @@ sealed interface LedgerCommand {
     data class CreateNextPeriod(val startDay: Int? = null) : LedgerCommand
     data class CatchUpPeriods(val preferredStartDay: Int) : LedgerCommand
     data class MarkPeriodReviewed(val periodId: String) : LedgerCommand
+    data class ScheduleCurrencyChange(
+        val targetCurrency: SupportedCurrency,
+        val rate: String,
+        val effectiveDate: LocalDate,
+        val source: String,
+    ) : LedgerCommand
+    data object CancelCurrencyChange : LedgerCommand
     data class UpsertPaymentMethod(val id: String? = null, val name: String) : LedgerCommand
     data class ArchivePaymentMethod(val id: String, val archived: Boolean = true) : LedgerCommand
     data class UpsertTemplate(
