@@ -367,6 +367,53 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
+    fun fresh_ledger_defaults_to_active_card_and_archiving_or_none_clears_the_default() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(30_000))
+        var state = ledger.state.first { !it.needsOnboarding }
+        val card = state.paymentMethods.single { it.name == "Tarjeta" }
+        val cash = state.paymentMethods.single { it.name == "Efectivo" }
+        assertEquals(card.id, state.defaultPaymentMethodId)
+
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.SetDefaultPaymentMethod(cash.id)))
+        state = ledger.state.first { it.defaultPaymentMethodId == cash.id }
+        assertEquals(cash.id, state.defaultPaymentMethodId)
+
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.SetDefaultPaymentMethod(null)))
+        assertNull(ledger.state.first { it.defaultPaymentMethodId == null }.defaultPaymentMethodId)
+
+        ledger.execute(LedgerCommand.SetDefaultPaymentMethod(card.id))
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePaymentMethod(card.id)))
+        assertNull(ledger.state.first { it.paymentMethods.single { method -> method.id == card.id }.archived }.defaultPaymentMethodId)
+        assertTrue(ledger.execute(LedgerCommand.SetDefaultPaymentMethod(card.id)) is LedgerResult.Rejected)
+    }
+
+    @Test
+    fun recurring_template_persists_its_input_currency() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(30_000))
+        val pocketId = ledger.state.first { !it.needsOnboarding }.pockets.first().pocket.id
+
+        assertEquals(
+            LedgerResult.Success,
+            ledger.execute(
+                LedgerCommand.UpsertTemplate(
+                    id = "mxn-template",
+                    name = "Viaje",
+                    amountMinor = 2_500,
+                    pocketId = pocketId,
+                    inputCurrency = SupportedCurrency.MXN,
+                )
+            ),
+        )
+
+        assertEquals(
+            SupportedCurrency.MXN,
+            ledger.state.first { it.templates.isNotEmpty() }.templates.single().inputCurrency,
+        )
+    }
+
+    @Test
     fun catch_up_with_no_missing_periods_keeps_the_existing_period_unchanged() = runTest {
         val ledger = RoomPocketLedger(database, clock, zone)
         ledger.execute(LedgerCommand.Initialize(100_000))
@@ -657,7 +704,10 @@ class PocketLedgerHostBehaviorTest {
                 )
                 .replace(Regex(",\\s*\"inputCurrencyCode\": \"SAR\""), "")
                 .replace(
-                    Regex(",\\s*\"pendingCurrencyChange\": null,\\s*\"ledgerPreferences\": null\\s*}"),
+                    Regex(
+                        ",\\s*\"pendingCurrencyChange\": null,\\s*" +
+                            "\"ledgerPreferences\": \\{\\s*\"defaultPaymentMethodId\": \"[^\"]+\"\\s*}\\s*}",
+                    ),
                     "\n}",
                 )
             if (version < 3) {

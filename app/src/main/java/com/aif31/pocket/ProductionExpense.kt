@@ -88,7 +88,9 @@ internal fun ProductionMovementScreen(
     var refund by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.type == MovementType.REFUND) }
     var merchant by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.merchant.orEmpty()) }
     var note by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.note.orEmpty()) }
-    var paymentMethod by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.paymentMethodId) }
+    var paymentMethod by rememberSaveable(stateKey) {
+        mutableStateOf(if (initialMovement != null) initialMovement.paymentMethodId else state.defaultPaymentMethodId)
+    }
     var currency by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.originalCurrencyCode ?: "SAR") }
     var originalAmount by rememberSaveable(stateKey) {
         mutableStateOf(initialMovement?.originalAmountMinor?.let(::minorNumberForForm).orEmpty())

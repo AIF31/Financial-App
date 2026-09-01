@@ -101,6 +101,7 @@ data class RecurringTemplate(
     val pocketId: String,
     val paymentMethodId: String?,
     val archived: Boolean,
+    val inputCurrency: SupportedCurrency = SupportedCurrency.SAR,
 )
 
 data class PocketPeriodSummary(
@@ -141,6 +142,7 @@ data class LedgerState(
     val currentLocalDate: LocalDate = LocalDate.of(1970, 1, 1),
     val currentInstantMillis: Long = 0,
     val pendingCurrencyChange: PendingCurrencyChange? = null,
+    val defaultPaymentMethodId: String? = null,
 ) {
     val needsOnboarding: Boolean get() = periods.isEmpty()
 }
@@ -186,12 +188,14 @@ sealed interface LedgerCommand {
     data object CancelCurrencyChange : LedgerCommand
     data class UpsertPaymentMethod(val id: String? = null, val name: String) : LedgerCommand
     data class ArchivePaymentMethod(val id: String, val archived: Boolean = true) : LedgerCommand
+    data class SetDefaultPaymentMethod(val id: String?) : LedgerCommand
     data class UpsertTemplate(
         val id: String? = null,
         val name: String,
         val amountMinor: Long,
         val pocketId: String,
         val paymentMethodId: String? = null,
+        val inputCurrency: SupportedCurrency = SupportedCurrency.SAR,
     ) : LedgerCommand
     data class ArchiveTemplate(val id: String, val archived: Boolean = true) : LedgerCommand
 }

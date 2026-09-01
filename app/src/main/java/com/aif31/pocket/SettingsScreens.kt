@@ -221,6 +221,25 @@ private fun SettingsDetailScreen(
         if (section == SettingsSection.PAYMENT_METHODS) {
             item {
                 Text("Métodos de pago", style = MaterialTheme.typography.titleLarge)
+            Text("Método predeterminado", style = MaterialTheme.typography.titleMedium)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    OutlinedButton(
+                        onClick = { scope.launch { ledger.execute(LedgerCommand.SetDefaultPaymentMethod(null)) } },
+                        modifier = Modifier.testTag("default_payment_none"),
+                    ) {
+                        Text(if (state.defaultPaymentMethodId == null) "✓ Ninguno" else "Ninguno")
+                    }
+                }
+                items(state.paymentMethods.filterNot { it.archived }, key = { "default_${it.id}" }) { method ->
+                    OutlinedButton(
+                        onClick = { scope.launch { ledger.execute(LedgerCommand.SetDefaultPaymentMethod(method.id)) } },
+                        modifier = Modifier.testTag("default_payment_${method.name}"),
+                    ) {
+                        Text(if (state.defaultPaymentMethodId == method.id) "✓ ${method.name}" else method.name)
+                    }
+                }
+            }
             OutlinedTextField(methodName, { methodName = it }, label = { Text("Nombre") })
             Button(onClick = {
                 scope.launch {

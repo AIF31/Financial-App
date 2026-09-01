@@ -1,6 +1,8 @@
 package com.aif31.pocket
 
 import android.content.Context
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -39,6 +41,7 @@ import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.settings.AppPreferences
 import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
+import com.aif31.pocket.ui.SettingsSection
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -106,6 +109,77 @@ class PocketAppHostFlowTest {
         compose.onNodeWithTag("rollover_Supermercado").assertIsDisplayed()
         compose.onNodeWithText("Movimientos").performClick()
         compose.onNodeWithText("- SAR 100.00").assertIsDisplayed()
+    }
+
+    @Test
+    fun new_expense_uses_default_payment_and_template_method_overrides_it() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking {
+            ledger.execute(LedgerCommand.Initialize(100_000))
+            val state = ledger.state.first { !it.needsOnboarding }
+            val cashId = state.paymentMethods.single { it.name == "Efectivo" }.id
+            ledger.execute(
+                LedgerCommand.UpsertTemplate(
+                    id = "cash-template",
+                    name = "Plantilla efectivo",
+                    amountMinor = 2_500,
+                    pocketId = state.pockets.first().pocket.id,
+                    paymentMethodId = cashId,
+                )
+            )
+        }
+        compose.setContent { PocketApp(ledger) }
+
+        compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        compose.onNodeWithTag("contextual_add").performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag("movement_form"), 5_000)
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("✓ Tarjeta"))
+        compose.onNodeWithText("✓ Tarjeta").assertIsDisplayed()
+
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("Plantilla efectivo"))
+        compose.onNodeWithText("Plantilla efectivo").performClick()
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("✓ Efectivo"))
+        compose.onNodeWithText("✓ Efectivo").assertIsDisplayed()
+    }
+
+    @Test
+    fun settings_selects_an_active_default_payment_or_none() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000)) }
+        compose.setContent {
+            val state = ledger.state.collectAsState(initial = null).value
+            state?.let {
+                SettingsScreen(
+                    state = it,
+                    ledger = ledger,
+                    preferences = AppPreferences(),
+                    preferencesStore = null,
+                    reminderScheduler = null,
+                    onCreateBackup = {},
+                    onCreateCsv = {},
+                    onPickBackup = {},
+                    onRequestNotificationPermission = {},
+                    padding = PaddingValues(),
+                    section = SettingsSection.PAYMENT_METHODS,
+                    onSectionChange = {},
+                )
+            }
+        }
+
+        compose.waitUntilExactlyOneExists(hasTestTag("settings_list"), 5_000)
+        compose.onNodeWithTag("settings_list").performScrollToNode(hasTestTag("default_payment_Tarjeta"))
+        compose.onNodeWithTag("default_payment_Tarjeta").assertTextContains("✓ Tarjeta")
+
+        compose.onNodeWithTag("default_payment_none").performClick()
+        compose.waitUntil(5_000) { runBlocking { ledger.state.first().defaultPaymentMethodId == null } }
+        compose.onNodeWithTag("default_payment_none").assertTextContains("✓ Ninguno")
+
+        compose.onNodeWithTag("default_payment_Efectivo").performClick()
+        val cashId = runBlocking { ledger.state.first().paymentMethods.single { it.name == "Efectivo" }.id }
+        compose.waitUntil(5_000) { runBlocking { ledger.state.first().defaultPaymentMethodId == cashId } }
+        compose.onNodeWithTag("default_payment_Efectivo").assertTextContains("✓ Efectivo")
     }
 
     @Test

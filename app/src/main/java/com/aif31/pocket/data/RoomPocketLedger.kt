@@ -46,7 +46,8 @@ class RoomPocketLedger(
         budgetData,
         activityData,
         dao.observePendingCurrencyChange(),
-    ) { budget, activity, pendingCurrencyChange ->
+        dao.observeLedgerPreferences(),
+    ) { budget, activity, pendingCurrencyChange, ledgerPreferences ->
         buildState(
             periodEntities = budget.periods,
             pocketEntities = budget.pockets,
@@ -57,6 +58,7 @@ class RoomPocketLedger(
             movementEntities = activity.second,
             templateEntities = activity.third,
             pendingCurrencyChangeEntity = pendingCurrencyChange,
+            ledgerPreferencesEntity = ledgerPreferences,
         )
     }
 
@@ -86,6 +88,7 @@ class RoomPocketLedger(
             LedgerCommand.CancelCurrencyChange -> cancelCurrencyChange()
             is LedgerCommand.UpsertPaymentMethod -> upsertPaymentMethod(command)
             is LedgerCommand.ArchivePaymentMethod -> archivePaymentMethod(command)
+            is LedgerCommand.SetDefaultPaymentMethod -> setDefaultPaymentMethod(command)
             is LedgerCommand.UpsertTemplate -> upsertTemplate(command)
             is LedgerCommand.ArchiveTemplate -> archiveTemplate(command)
         }
@@ -118,8 +121,11 @@ class RoomPocketLedger(
                 PeriodPocketEntity(periodId, pocket.id, rolloverEligible = pocket.rolloverEnabled, retired = false)
             }
         )
-        dao.putPaymentMethods(
-            listOf("Efectivo", "Tarjeta").map { PaymentMethodEntity(UUID.randomUUID().toString(), it, archived = false) }
+        val paymentMethods = listOf("Efectivo", "Tarjeta")
+            .map { PaymentMethodEntity(UUID.randomUUID().toString(), it, archived = false) }
+        dao.putPaymentMethods(paymentMethods)
+        dao.putLedgerPreferences(
+            LedgerPreferencesEntity(defaultPaymentMethodId = paymentMethods.single { it.name == "Tarjeta" }.id)
         )
         LedgerResult.Success
     }
@@ -494,8 +500,22 @@ class RoomPocketLedger(
     private suspend fun archivePaymentMethod(command: LedgerCommand.ArchivePaymentMethod): LedgerResult = database.withTransaction {
         val existing = requireNotNull(dao.paymentMethods().firstOrNull { it.id == command.id }) { "Método inexistente" }
         dao.putPaymentMethod(existing.copy(archived = command.archived))
+        val preferences = dao.ledgerPreferences()
+        if (command.archived && preferences?.defaultPaymentMethodId == command.id) {
+            dao.putLedgerPreferences(preferences.copy(defaultPaymentMethodId = null))
+        }
         LedgerResult.Success
     }
+
+    private suspend fun setDefaultPaymentMethod(command: LedgerCommand.SetDefaultPaymentMethod): LedgerResult =
+        database.withTransaction {
+            command.id?.let { id ->
+                val method = requireNotNull(dao.paymentMethods().firstOrNull { it.id == id }) { "Método inexistente" }
+                require(!method.archived) { "El método está archivado" }
+            }
+            dao.putLedgerPreferences(LedgerPreferencesEntity(defaultPaymentMethodId = command.id))
+            LedgerResult.Success
+        }
 
     private suspend fun upsertTemplate(command: LedgerCommand.UpsertTemplate): LedgerResult = database.withTransaction {
         require(command.name.isNotBlank() && command.amountMinor > 0) { "Completa la plantilla" }
@@ -510,6 +530,7 @@ class RoomPocketLedger(
                 command.pocketId,
                 command.paymentMethodId,
                 existing?.archived ?: false,
+                command.inputCurrency.name,
             )
         )
         LedgerResult.Success
@@ -535,6 +556,7 @@ class RoomPocketLedger(
         movementEntities: List<MovementEntity>,
         templateEntities: List<RecurringTemplateEntity>,
         pendingCurrencyChangeEntity: PendingCurrencyChangeEntity?,
+        ledgerPreferencesEntity: LedgerPreferencesEntity?,
     ): LedgerState {
         val periods = periodEntities.map { it.toModel() }
         val today = today()
@@ -610,7 +632,17 @@ class RoomPocketLedger(
             pocketSummariesByPeriod = allSummaries,
             movements = movements,
             paymentMethods = methodEntities.map { PaymentMethod(it.id, it.name, it.archived) },
-            templates = templateEntities.map { RecurringTemplate(it.id, it.name, it.amountMinor, it.pocketId, it.paymentMethodId, it.archived) },
+            templates = templateEntities.map {
+                RecurringTemplate(
+                    it.id,
+                    it.name,
+                    it.amountMinor,
+                    it.pocketId,
+                    it.paymentMethodId,
+                    it.archived,
+                    SupportedCurrency.fromCode(it.inputCurrencyCode),
+                )
+            },
             unallocatedMinor = current.newFundsMinor - summaries.sumOf { it.budgetMinor },
             newFundsMinor = current.newFundsMinor,
             rolloverTotalMinor = summaries.sumOf { it.rolloverMinor },
@@ -625,6 +657,7 @@ class RoomPocketLedger(
             currentLocalDate = today,
             currentInstantMillis = clock.instant().toEpochMilli(),
             pendingCurrencyChange = pendingCurrencyChangeEntity?.toModel(),
+            defaultPaymentMethodId = ledgerPreferencesEntity?.defaultPaymentMethodId,
         )
     }
 
