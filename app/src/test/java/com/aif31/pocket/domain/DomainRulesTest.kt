@@ -184,14 +184,14 @@ class DomainRulesTest {
     }
 
     @Test
-    fun `manual FX freezes confirmed SAR and can distinguish an estimate`() {
-        val estimate = ManualFx.estimate(originalMinor = 2_000, originalFractionDigits = 2, sarPerOriginal = "3.75")
-        val confirmed = estimate.confirm(sarMinor = 7_612)
+    fun `manual FX freezes confirmed accounting amount and can distinguish an estimate`() {
+        val estimate = ManualFx.estimate(originalMinor = 2_000, originalFractionDigits = 2, accountingPerOriginal = "3.75")
+        val confirmed = estimate.confirm(accountingMinor = 7_612)
 
-        assertEquals(7_500, estimate.sarMinor)
+        assertEquals(7_500, estimate.accountingMinor)
         assertFalse(estimate.confirmed)
-        assertEquals(7_612, confirmed.sarMinor)
+        assertEquals(7_612, confirmed.accountingMinor)
         assertTrue(confirmed.confirmed)
-        assertEquals(7_612, confirmed.confirm(sarMinor = 7_612).sarMinor)
+        assertEquals(7_612, confirmed.confirm(accountingMinor = 7_612).accountingMinor)
     }
 }

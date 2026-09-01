@@ -50,6 +50,7 @@ import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.Movement
 import com.aif31.pocket.data.MovementType
+import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.data.PocketLedger
 import com.aif31.pocket.ui.MoneyText
@@ -71,6 +72,11 @@ internal fun MovementsScreen(
     onRecordExpense: () -> Unit,
     onEditMovement: (Movement) -> Unit,
 ) {
+    fun money(movement: Movement): String {
+        val currency = state.periods.firstOrNull { it.id == movement.periodId }?.accountingCurrency
+            ?: SupportedCurrency.SAR
+        return MoneyText.format(movement.accountingAmountMinor, currency)
+    }
     var query by rememberSaveable { mutableStateOf("") }
     var periodIndex by rememberSaveable { mutableStateOf(0) }
     var pocketIndex by rememberSaveable { mutableStateOf(0) }
@@ -162,6 +168,8 @@ internal fun MovementsScreen(
             items(movements, key = { it.id }) { movement ->
                 MovementCard(
                     movement = movement,
+                    accountingCurrency = state.periods.firstOrNull { it.id == movement.periodId }?.accountingCurrency
+                        ?: SupportedCurrency.SAR,
                     iconKey = state.pockets.firstOrNull { it.pocket.id == movement.pocketId }?.pocket?.iconKey
                         ?: PocketIconKey.forName(movement.pocketName),
                     onClick = { selectedId = movement.id },
@@ -173,7 +181,7 @@ internal fun MovementsScreen(
         AlertDialog(
             onDismissRequest = { selectedId = null },
             title = { Text(movement.pocketName) },
-            text = { Text("${if (movement.type == MovementType.EXPENSE) "Gasto" else "Devolución"} ${money(movement.sarAmountMinor)}\n${movement.localDate}") },
+            text = { Text("${if (movement.type == MovementType.EXPENSE) "Gasto" else "Devolución"} ${money(movement)}\n${movement.localDate}") },
             confirmButton = {
                 TextButton(onClick = { onEditMovement(movement); selectedId = null }) { Text("Editar") }
             },
@@ -201,7 +209,12 @@ internal fun MovementsScreen(
 }
 
 @Composable
-private fun MovementCard(movement: Movement, iconKey: PocketIconKey, onClick: () -> Unit) {
+private fun MovementCard(
+    movement: Movement,
+    accountingCurrency: SupportedCurrency,
+    iconKey: PocketIconKey,
+    onClick: () -> Unit,
+) {
     val isRefund = movement.type == MovementType.REFUND
     val amountColor = if (isRefund) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
     val time = Instant.ofEpochMilli(movement.occurredAtUtcMillis)
@@ -245,7 +258,7 @@ private fun MovementCard(movement: Movement, iconKey: PocketIconKey, onClick: ()
             }
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    (if (isRefund) "+ " else "- ") + money(movement.sarAmountMinor),
+                    (if (isRefund) "+ " else "- ") + MoneyText.format(movement.accountingAmountMinor, accountingCurrency),
                     style = MaterialTheme.typography.titleMedium,
                     fontFamily = FontFamily.Monospace,
                     color = amountColor,
@@ -314,6 +327,5 @@ private fun formatMovementDate(date: LocalDate, today: LocalDate): String {
     return if (date == today) "Hoy, $formatted" else formatted
 }
 
-private fun money(minor: Long): String = MoneyText.sar(minor)
 
 private fun minorNumber(minor: Long): String = MoneyText.grouped(minor)

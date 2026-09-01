@@ -17,8 +17,16 @@ A contiguous date range used for funds, Pocket budgets, movements, and reporting
 _Avoid_: Calendar month, billing cycle
 
 **New funds**:
-The SAR amount declared for one budget period. It limits that period's total Pocket budgets but is not income and does not create a movement.
+The accounting-currency amount declared for one budget period. It limits that period's total Pocket budgets but is not income and does not create a movement.
 _Avoid_: Income, deposit, account balance
+
+**Accounting currency**:
+The single currency that owns every budget, rollover, availability, and movement accounting amount within one budget period.
+_Avoid_: Display currency, preferred input currency
+
+**Currency boundary quote**:
+A frozen, directed conversion rate from the prior period's accounting currency into its successor's accounting currency. It is used for rollover and historical comparison across that boundary.
+_Avoid_: Live rate, reversible rate, unlabeled conversion
 
 **Pocket budget**:
 The portion of a period's new funds assigned to a Pocket. Pocket budgets across a period cannot exceed its new funds.
@@ -37,7 +45,7 @@ Optional descriptive metadata on a movement, such as cash or card. It does not r
 _Avoid_: Account, wallet
 
 **Conversion status**:
-Whether a USD or MXN movement's manually entered SAR value is estimated or confirmed. The SAR value is frozen until the user edits it.
+Whether a foreign-currency movement's manually entered accounting amount is estimated or confirmed. The accounting amount is frozen until the user edits it.
 _Avoid_: Live exchange rate, automatic conversion
 
 **Automatic period catch-up**:

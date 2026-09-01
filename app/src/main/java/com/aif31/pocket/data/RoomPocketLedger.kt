@@ -254,7 +254,7 @@ class RoomPocketLedger(
     }
 
     private suspend fun addMovement(command: LedgerCommand.AddMovement): LedgerResult = database.withTransaction {
-        require(command.sarAmountMinor > 0) { "El importe debe ser mayor que cero" }
+        require(command.accountingAmountMinor > 0) { "El importe debe ser mayor que cero" }
         require(command.originalCurrencyCode.matches(Regex("[A-Z]{3}"))) { "Moneda inválida" }
         val periods = dao.periods()
         val period = requireNotNull(periods.firstOrNull {
@@ -574,8 +574,8 @@ class RoomPocketLedger(
                 val pocketEntity = pocketsById[snapshot.pocketId] ?: return@mapNotNull null
                 val allocation = periodAllocations[pocketEntity.id]
                 val pocketMovements = periodMovements.filter { it.pocketId == pocketEntity.id }
-                val expenses = pocketMovements.filter { it.type == MovementType.EXPENSE }.sumOf { it.sarAmountMinor }
-                val refunds = pocketMovements.filter { it.type == MovementType.REFUND }.sumOf { it.sarAmountMinor }
+                val expenses = pocketMovements.filter { it.type == MovementType.EXPENSE }.sumOf { it.accountingAmountMinor }
+                val refunds = pocketMovements.filter { it.type == MovementType.REFUND }.sumOf { it.accountingAmountMinor }
                 val math = PocketMath.summary(allocation?.budgetMinor ?: 0, allocation?.rolloverMinor ?: 0, expenses, refunds)
                 PocketPeriodSummary(
                     pocket = pocketEntity.toModel(),
@@ -599,7 +599,7 @@ class RoomPocketLedger(
         val previous = periods.filter { it.start < current.start }.maxByOrNull { it.start }
         val previousSpendInPreviousCurrency = previous?.let { period ->
             movements.filter { it.periodId == period.id }.sumOf {
-                if (it.type == MovementType.EXPENSE) it.sarAmountMinor else -it.sarAmountMinor
+                if (it.type == MovementType.EXPENSE) it.accountingAmountMinor else -it.accountingAmountMinor
             }
         }
         val currentEntity = periodEntities.first { it.id == current.id }
@@ -745,7 +745,7 @@ private fun MovementEntity.toModel(
     pocketName = pockets[pocketId]?.name ?: "Pocket archivado",
     periodId = periodId,
     type = MovementType.valueOf(type),
-    sarAmountMinor = accountingAmountMinor,
+    accountingAmountMinor = accountingAmountMinor,
     occurredAtUtcMillis = occurredAtUtcMillis,
     localDate = LocalDate.ofEpochDay(localEpochDay),
     zoneId = zoneId,
@@ -764,7 +764,7 @@ private fun LedgerCommand.AddMovement.toEntity(periodId: String, zoneId: String)
     periodId = periodId,
     pocketId = pocketId,
     type = type.name,
-    accountingAmountMinor = sarAmountMinor,
+    accountingAmountMinor = accountingAmountMinor,
     occurredAtUtcMillis = occurredAtUtcMillis,
     localEpochDay = localDate.toEpochDay(),
     zoneId = zoneId,
@@ -778,6 +778,6 @@ private fun LedgerCommand.AddMovement.toEntity(periodId: String, zoneId: String)
 )
 
 private fun Movement.toEntity() = MovementEntity(
-    id, periodId, pocketId, type.name, sarAmountMinor, occurredAtUtcMillis, localDate.toEpochDay(), zoneId,
+    id, periodId, pocketId, type.name, accountingAmountMinor, occurredAtUtcMillis, localDate.toEpochDay(), zoneId,
     merchant, note, paymentMethodId, originalAmountMinor, originalCurrencyCode, conversionStatus.name, rate,
 )

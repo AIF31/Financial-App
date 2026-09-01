@@ -51,6 +51,7 @@ import com.aif31.pocket.R
 import com.aif31.pocket.data.ComparisonMode
 import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.PocketPeriodSummary
+import com.aif31.pocket.domain.SupportedCurrency
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -72,6 +73,8 @@ internal fun ActionableDashboardContent(
             }
         }
     val period = state.currentPeriod
+    val accountingCurrency = period?.accountingCurrency ?: SupportedCurrency.SAR
+    fun money(minor: Long): String = MoneyText.format(minor, accountingCurrency)
     val daysRemaining = (state.totalDays - state.elapsedDays).coerceAtLeast(0)
     val spendingStatus = when {
         state.newFundsMinor <= 0L -> "Asigna fondos para orientar el periodo"
@@ -149,6 +152,7 @@ internal fun ActionableDashboardContent(
         item {
             AvailabilityHero(
                 availabilityMinor = state.trackedAvailabilityMinor,
+                accountingCurrency = accountingCurrency,
                 daysRemaining = daysRemaining,
                 status = spendingStatus,
                 modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
@@ -161,12 +165,12 @@ internal fun ActionableDashboardContent(
             ) {
                 CompactMetric(
                     label = "Sin asignar",
-                    value = formatSar(state.unallocatedMinor),
+                    value = money(state.unallocatedMinor),
                     modifier = Modifier.weight(1f),
                 )
                 CompactMetric(
                     label = "Gastado",
-                    value = formatSar(state.netSpendMinor),
+                    value = money(state.netSpendMinor),
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -199,6 +203,7 @@ internal fun ActionableDashboardContent(
             items(activePockets, key = { it.pocket.id }) { summary ->
                 PocketProgressRow(
                     summary = summary,
+                    accountingCurrency = accountingCurrency,
                     modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
                 )
             }
@@ -229,13 +234,13 @@ internal fun ActionableDashboardContent(
                 Column(modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp)) {
                     SupportingMetric(
                         "Gasto diario promedio",
-                        formatSar(state.netSpendMinor / state.elapsedDays.coerceAtLeast(1)),
+                        money(state.netSpendMinor / state.elapsedDays.coerceAtLeast(1)),
                     )
                 }
             }
             item {
                 Column(modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp)) {
-                    SupportingMetric("Proyección estimada", formatSar(state.projectionMinor))
+                    SupportingMetric("Proyección estimada", money(state.projectionMinor))
                 }
             }
             item {
@@ -246,7 +251,7 @@ internal fun ActionableDashboardContent(
                         } else {
                             "Periodo anterior"
                         },
-                        state.previousPeriodComparisonMinor?.let(::formatSar)
+                        state.previousPeriodComparisonMinor?.let(::money)
                             ?: "Aún no existe un periodo anterior",
                     )
                 }
@@ -258,6 +263,7 @@ internal fun ActionableDashboardContent(
 @Composable
 private fun AvailabilityHero(
     availabilityMinor: Long,
+    accountingCurrency: SupportedCurrency,
     daysRemaining: Int,
     status: String,
     modifier: Modifier = Modifier,
@@ -270,7 +276,7 @@ private fun AvailabilityHero(
     ) {
         Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Disponible", style = MaterialTheme.typography.titleMedium)
-            Text(formatSar(availabilityMinor), style = MaterialTheme.typography.displaySmall)
+            Text(MoneyText.format(availabilityMinor, accountingCurrency), style = MaterialTheme.typography.displaySmall)
             Text("Quedan $daysRemaining días", style = MaterialTheme.typography.titleMedium)
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -298,7 +304,11 @@ private fun CompactMetric(label: String, value: String, modifier: Modifier = Mod
 }
 
 @Composable
-private fun PocketProgressRow(summary: PocketPeriodSummary, modifier: Modifier = Modifier) {
+private fun PocketProgressRow(
+    summary: PocketPeriodSummary,
+    accountingCurrency: SupportedCurrency,
+    modifier: Modifier = Modifier,
+) {
     val status = pocketStatus(summary)
     Card(
         modifier = modifier,
@@ -325,12 +335,12 @@ private fun PocketProgressRow(summary: PocketPeriodSummary, modifier: Modifier =
                 Column(modifier = Modifier.weight(1f)) {
                     Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "${formatSar(summary.availabilityMinor)} disponibles",
+                        "${MoneyText.format(summary.availabilityMinor, accountingCurrency)} disponibles",
                         fontFamily = FontFamily.Monospace,
                         color = status.color,
                     )
                     Text(
-                        "Rollover: ${formatSar(summary.rolloverMinor)}",
+                        "Rollover: ${MoneyText.format(summary.rolloverMinor, accountingCurrency)}",
                         modifier = Modifier.testTag("rollover_${summary.pocket.name}"),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
@@ -349,7 +359,7 @@ private fun PocketProgressRow(summary: PocketPeriodSummary, modifier: Modifier =
                 trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
             )
             Text(
-                "${summary.consumedPercent}% consumido · Presupuesto ${formatSar(summary.budgetMinor)}",
+                "${summary.consumedPercent}% consumido · Presupuesto ${MoneyText.format(summary.budgetMinor, accountingCurrency)}",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -376,9 +386,6 @@ private fun SupportingMetric(label: String, value: String) {
         Text(value, fontFamily = FontFamily.Monospace)
     }
 }
-
-private fun formatSar(minor: Long): String =
-    MoneyText.sar(minor)
 
 private fun formatPeriod(start: java.time.LocalDate, end: java.time.LocalDate): String {
     val formatter = DateTimeFormatter.ofPattern("d MMM", Locale.forLanguageTag("es"))

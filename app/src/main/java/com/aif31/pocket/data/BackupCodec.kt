@@ -139,9 +139,10 @@ internal object BackupCodec {
     suspend fun csv(database: FinanceDatabase): ByteArray {
         val dao = database.financeDao()
         val pockets = dao.pockets().associateBy { it.id }
+        val periods = dao.periods().associateBy { it.id }
         val methods = dao.paymentMethods().associateBy { it.id }
         val rows = buildString {
-            appendLine("id,tipo,fecha,zona,pocket,importe_sar,moneda_original,importe_original,conversion,metodo,comercio,nota")
+            appendLine("id,tipo,fecha,zona,pocket,importe_contable,moneda_contable,moneda_original,importe_original,conversion,metodo,comercio,nota")
             dao.movements().sortedBy { it.occurredAtUtcMillis }.forEach { movement ->
                 appendLine(
                     listOf(
@@ -151,6 +152,7 @@ internal object BackupCodec {
                         movement.zoneId,
                         pockets[movement.pocketId]?.name.orEmpty(),
                         minorString(movement.accountingAmountMinor),
+                        periods[movement.periodId]?.accountingCurrencyCode.orEmpty(),
                         movement.originalCurrencyCode,
                         movement.originalAmountMinor?.let(::minorString).orEmpty(),
                         movement.conversionStatus,

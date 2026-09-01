@@ -21,6 +21,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.*
 import com.aif31.pocket.domain.Money
+import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.settings.*
 import com.aif31.pocket.ui.*
 import java.time.LocalTime
@@ -94,10 +95,12 @@ private fun SettingsDetailScreen(
     var templateAmount by rememberSaveable { mutableStateOf("") }
     var templatePocketId by rememberSaveable { mutableStateOf<String?>(null) }
     var templateMethodId by rememberSaveable { mutableStateOf<String?>(null) }
+    var templateInputCurrency by rememberSaveable { mutableStateOf(SupportedCurrency.SAR) }
     var editingTemplate by rememberSaveable { mutableStateOf<String?>(null) }
     var message by rememberSaveable { mutableStateOf<String?>(null) }
     var reminderPermissionRationaleVisible by rememberSaveable { mutableStateOf(false) }
     val selectedFundsPeriod = state.periods.firstOrNull { it.id == selectedFundsPeriodId }
+    val selectedFundsCurrency = selectedFundsPeriod?.accountingCurrency ?: SupportedCurrency.SAR
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding).testTag("settings_list"),
@@ -125,10 +128,10 @@ private fun SettingsDetailScreen(
                     }) { Text(if (period.id == selectedFundsPeriodId) "✓ ${period.start}" else period.start.toString()) }
                 }
             }
-            OutlinedTextField(funds, { funds = it }, label = { Text("Fondos nuevos SAR") })
+            OutlinedTextField(funds, { funds = it }, label = { Text("Fondos nuevos ${selectedFundsCurrency.name}") })
             Button(onClick = {
                 scope.launch {
-                    val value = runCatching { Money.parse(funds, "SAR").minor }.getOrNull() ?: run {
+                    val value = runCatching { Money.parse(funds, selectedFundsCurrency.name).minor }.getOrNull() ?: run {
                         message = "Escribe fondos válidos"
                         return@launch
                     }
@@ -273,7 +276,11 @@ private fun SettingsDetailScreen(
                 Text("Plantillas recurrentes", style = MaterialTheme.typography.titleLarge)
             Text("Solo precargan el formulario; nunca crean gastos automáticamente.")
             OutlinedTextField(templateName, { templateName = it }, label = { Text("Nombre de plantilla") })
-            OutlinedTextField(templateAmount, { templateAmount = it }, label = { Text("Importe SAR") })
+            OutlinedTextField(
+                templateAmount,
+                { templateAmount = it },
+                label = { Text("Importe ${templateInputCurrency.name}") },
+            )
             Text("Pocket")
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(state.pockets.filterNot { it.pocket.archived || it.retiredThisPeriod }, key = { it.pocket.id }) { pocket ->
@@ -300,11 +307,21 @@ private fun SettingsDetailScreen(
             Button(onClick = {
                 scope.launch {
                     val pocketId = templatePocketId ?: run { message = "Selecciona un Pocket"; return@launch }
-                    val amount = runCatching { Money.parse(templateAmount, "SAR").minor }.getOrNull()
+                    val amount = runCatching { Money.parse(templateAmount, templateInputCurrency.name).minor }.getOrNull()
                         ?: run { message = "Escribe un importe válido"; return@launch }
-                    when (val result = ledger.execute(LedgerCommand.UpsertTemplate(editingTemplate, templateName, amount, pocketId, templateMethodId))) {
+                    when (val result = ledger.execute(
+                        LedgerCommand.UpsertTemplate(
+                            id = editingTemplate,
+                            name = templateName,
+                            amountMinor = amount,
+                            pocketId = pocketId,
+                            paymentMethodId = templateMethodId,
+                            inputCurrency = templateInputCurrency,
+                        )
+                    )) {
                         LedgerResult.Success -> {
                             templateName = ""; templateAmount = ""; templatePocketId = null; templateMethodId = null
+                            templateInputCurrency = SupportedCurrency.SAR
                             editingTemplate = null; message = "Plantilla guardada"
                         }
                         is LedgerResult.Rejected -> message = result.message
@@ -321,9 +338,10 @@ private fun SettingsDetailScreen(
                 templateAmount = minorNumber(template.amountMinor)
                 templatePocketId = template.pocketId
                 templateMethodId = template.paymentMethodId
+                templateInputCurrency = template.inputCurrency
             }) {
                 Row(Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("${template.name}: ${money(template.amountMinor)}${if (template.archived) " (archivada)" else ""}")
+                    Text("${template.name}: ${MoneyText.format(template.amountMinor, template.inputCurrency)}${if (template.archived) " (archivada)" else ""}")
                     TextButton(onClick = { scope.launch { ledger.execute(LedgerCommand.ArchiveTemplate(template.id, !template.archived)) } }) {
                         Text(if (template.archived) "Restaurar" else "Archivar")
                     }
@@ -343,5 +361,4 @@ private fun SettingsDetailScreen(
     }
 }
 
-private fun money(minor: Long): String = MoneyText.sar(minor)
 private fun minorNumber(minor: Long): String = MoneyText.grouped(minor)

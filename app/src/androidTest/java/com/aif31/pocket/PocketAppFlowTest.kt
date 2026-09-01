@@ -155,7 +155,7 @@ class PocketAppFlowTest {
                     id = "device-historical-expense",
                     pocketId = pocket.id,
                     type = MovementType.EXPENSE,
-                    sarAmountMinor = 2_000,
+                    accountingAmountMinor = 2_000,
                     occurredAtUtcMillis = Instant.parse("2026-03-26T09:00:00Z").toEpochMilli(),
                     localDate = java.time.LocalDate.of(2026, 3, 26),
                 )
@@ -165,7 +165,7 @@ class PocketAppFlowTest {
                     id = "device-historical-refund",
                     pocketId = pocket.id,
                     type = MovementType.REFUND,
-                    sarAmountMinor = 500,
+                    accountingAmountMinor = 500,
                     occurredAtUtcMillis = Instant.parse("2026-03-26T09:01:00Z").toEpochMilli(),
                     localDate = java.time.LocalDate.of(2026, 3, 26),
                 )
@@ -240,15 +240,15 @@ class PocketAppFlowTest {
             val cash = state.paymentMethods.first { it.name == "Efectivo" }
             val card = state.paymentMethods.first { it.name == "Tarjeta" }
             ledger.execute(LedgerCommand.AddMovement(id = "market", pocketId = supermarket.pocket.id, type = MovementType.EXPENSE,
-                sarAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(), localDate = java.time.LocalDate.of(2026, 2, 26),
+                accountingAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(), localDate = java.time.LocalDate.of(2026, 2, 26),
                 merchant = "Mercado", note = "fruta fresca", paymentMethodId = cash.id))
             ledger.execute(LedgerCommand.AddMovement(id = "hotel", pocketId = travel.pocket.id, type = MovementType.EXPENSE,
-                sarAmountMinor = 2_000, occurredAtUtcMillis = clock.millis() + 1, localDate = java.time.LocalDate.of(2026, 2, 26),
+                accountingAmountMinor = 2_000, occurredAtUtcMillis = clock.millis() + 1, localDate = java.time.LocalDate.of(2026, 2, 26),
                 merchant = "Hotel", paymentMethodId = card.id, originalAmountMinor = 500, originalCurrencyCode = "USD"))
             ledger.execute(LedgerCommand.CreateNextPeriod())
             val nextPeriod = ledger.state.first { it.periods.size == 2 }.periods.last()
             ledger.execute(LedgerCommand.AddMovement(id = "taxi", pocketId = travel.pocket.id, type = MovementType.EXPENSE,
-                sarAmountMinor = 3_000, occurredAtUtcMillis = clock.millis() + 2, localDate = nextPeriod.start,
+                accountingAmountMinor = 3_000, occurredAtUtcMillis = clock.millis() + 2, localDate = nextPeriod.start,
                 merchant = "Taxi", paymentMethodId = card.id))
         }
         runBlocking { ledger.state.first { it.movements.size == 3 } }
@@ -297,7 +297,7 @@ class PocketAppFlowTest {
             ledger.execute(LedgerCommand.Initialize(100_000))
             val pocket = ledger.state.first { !it.needsOnboarding }.pockets.first()
             ledger.execute(LedgerCommand.AddMovement(id = "undo", pocketId = pocket.pocket.id, type = MovementType.EXPENSE,
-                sarAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(), localDate = java.time.LocalDate.of(2026, 2, 26)))
+                accountingAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(), localDate = java.time.LocalDate.of(2026, 2, 26)))
         }
         compose.setContent { PocketApp(ledger, undoWindowMillis = 1_000) }
         compose.waitUntilExactlyOneExists(hasText("Inicio"), 5_000)
@@ -335,7 +335,7 @@ class PocketAppFlowTest {
                 val saved = runBlocking {
                     application.ledger.state.first { it.movements.size == 1 }.movements.single()
                 }
-                assertEquals(1_234L, saved.sarAmountMinor)
+                assertEquals(1_234L, saved.accountingAmountMinor)
                 assertEquals("Supermercado", saved.pocketName)
             }
         } finally {

@@ -126,6 +126,7 @@ class PocketAppHostFlowTest {
                     amountMinor = 2_500,
                     pocketId = state.pockets.first().pocket.id,
                     paymentMethodId = cashId,
+                    inputCurrency = com.aif31.pocket.domain.SupportedCurrency.USD,
                 )
             )
         }
@@ -141,6 +142,10 @@ class PocketAppHostFlowTest {
         compose.onNodeWithText("Plantilla efectivo").performClick()
         compose.onNodeWithTag("movement_form").performScrollToNode(hasText("✓ Efectivo"))
         compose.onNodeWithText("✓ Efectivo").assertIsDisplayed()
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("Más detalles"))
+        compose.onNodeWithText("Más detalles").performClick()
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("✓ USD"))
+        compose.onNodeWithText("✓ USD").assertIsDisplayed()
     }
 
     @Test
@@ -208,7 +213,7 @@ class PocketAppHostFlowTest {
         val saved = runBlocking {
             ledger.state.first { it.movements.size == 1 }.movements.single()
         }
-        assertEquals(1_234L, saved.sarAmountMinor)
+        assertEquals(1_234L, saved.accountingAmountMinor)
     }
 
     @Test
@@ -289,15 +294,15 @@ class PocketAppHostFlowTest {
             val cash = state.paymentMethods.first { it.name == "Efectivo" }
             val card = state.paymentMethods.first { it.name == "Tarjeta" }
             ledger.execute(LedgerCommand.AddMovement(id = "market", pocketId = supermarket.pocket.id, type = MovementType.EXPENSE,
-                sarAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(), localDate = java.time.LocalDate.of(2026, 2, 26),
+                accountingAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(), localDate = java.time.LocalDate.of(2026, 2, 26),
                 merchant = "Mercado", note = "fruta fresca", paymentMethodId = cash.id))
             ledger.execute(LedgerCommand.AddMovement(id = "hotel", pocketId = travel.pocket.id, type = MovementType.EXPENSE,
-                sarAmountMinor = 2_000, occurredAtUtcMillis = clock.millis() + 1, localDate = java.time.LocalDate.of(2026, 2, 26),
+                accountingAmountMinor = 2_000, occurredAtUtcMillis = clock.millis() + 1, localDate = java.time.LocalDate.of(2026, 2, 26),
                 merchant = "Hotel", paymentMethodId = card.id, originalAmountMinor = 500, originalCurrencyCode = "USD"))
             ledger.execute(LedgerCommand.CreateNextPeriod())
             val nextPeriod = ledger.state.first { it.periods.size == 2 }.periods.last()
             ledger.execute(LedgerCommand.AddMovement(id = "taxi", pocketId = travel.pocket.id, type = MovementType.EXPENSE,
-                sarAmountMinor = 3_000, occurredAtUtcMillis = clock.millis() + 2, localDate = nextPeriod.start,
+                accountingAmountMinor = 3_000, occurredAtUtcMillis = clock.millis() + 2, localDate = nextPeriod.start,
                 merchant = "Taxi", paymentMethodId = card.id))
         }
         runBlocking { ledger.state.first { it.movements.size == 3 } }
@@ -349,7 +354,7 @@ class PocketAppHostFlowTest {
                     id = "market",
                     pocketId = pocket.pocket.id,
                     type = MovementType.EXPENSE,
-                    sarAmountMinor = 1_000,
+                    accountingAmountMinor = 1_000,
                     occurredAtUtcMillis = clock.millis(),
                     localDate = LocalDate.of(2026, 2, 26),
                     merchant = "Mercado",
@@ -379,7 +384,7 @@ class PocketAppHostFlowTest {
             ledger.execute(LedgerCommand.Initialize(100_000))
             val pocket = ledger.state.first { !it.needsOnboarding }.pockets.first()
             ledger.execute(LedgerCommand.AddMovement(id = "undo", pocketId = pocket.pocket.id, type = MovementType.EXPENSE,
-                sarAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(), localDate = java.time.LocalDate.of(2026, 2, 26)))
+                accountingAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(), localDate = java.time.LocalDate.of(2026, 2, 26)))
         }
         compose.setContent { PocketApp(ledger, undoWindowMillis = 1_000) }
         compose.waitUntilExactlyOneExists(hasText("Inicio"), 5_000)
@@ -409,7 +414,7 @@ class PocketAppHostFlowTest {
         compose.onNodeWithText("Guardar gasto", substring = true).performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
         val saved = runBlocking { ledger.state.first { it.movements.size == 1 }.movements.single() }
-        assertEquals(1_234L, saved.sarAmountMinor)
+        assertEquals(1_234L, saved.accountingAmountMinor)
         assertEquals("Supermercado", saved.pocketName)
     }
 
@@ -698,7 +703,7 @@ class PocketAppHostFlowTest {
                     id = "historical-expense",
                     pocketId = pocket.id,
                     type = MovementType.EXPENSE,
-                    sarAmountMinor = 2_000,
+                    accountingAmountMinor = 2_000,
                     occurredAtUtcMillis = Instant.parse("2026-03-26T09:00:00Z").toEpochMilli(),
                     localDate = LocalDate.of(2026, 3, 26),
                 )
@@ -708,7 +713,7 @@ class PocketAppHostFlowTest {
                     id = "historical-refund",
                     pocketId = pocket.id,
                     type = MovementType.REFUND,
-                    sarAmountMinor = 500,
+                    accountingAmountMinor = 500,
                     occurredAtUtcMillis = Instant.parse("2026-03-26T09:01:00Z").toEpochMilli(),
                     localDate = LocalDate.of(2026, 3, 26),
                 )
@@ -763,6 +768,70 @@ class PocketAppHostFlowTest {
         compose.onNodeWithTag("retired_Ocio").performClick()
         compose.onNodeWithText("Rollover liberado: SAR 50.00").assertIsDisplayed()
         compose.onNodeWithText("Disponibilidad final: SAR 0.00").assertIsDisplayed()
+    }
+
+    @Test
+    fun period_owned_amounts_use_their_accounting_currency_without_exposing_currency_controls() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val firstLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone),
+            zone,
+        )
+        runBlocking {
+            firstLedger.execute(LedgerCommand.Initialize(100_000))
+            val firstState = firstLedger.state.first { !it.needsOnboarding }
+            val first = firstState.currentPeriod!!
+            val pocket = firstState.pockets.first { it.pocket.name == "Viajes" }.pocket
+            firstLedger.execute(LedgerCommand.SetAllocation(first.id, pocket.id, 10_000))
+            firstLedger.execute(
+                LedgerCommand.ScheduleCurrencyChange(
+                    com.aif31.pocket.domain.SupportedCurrency.MXN,
+                    "2",
+                    first.endExclusive,
+                    "TEST",
+                )
+            )
+            firstLedger.execute(LedgerCommand.CreateNextPeriod())
+            firstLedger.execute(
+                LedgerCommand.AddMovement(
+                    id = "mxn-movement",
+                    pocketId = pocket.id,
+                    type = MovementType.EXPENSE,
+                    accountingAmountMinor = 2_000,
+                    occurredAtUtcMillis = Instant.parse("2026-03-26T09:00:00Z").toEpochMilli(),
+                    localDate = LocalDate.of(2026, 3, 26),
+                    originalAmountMinor = 2_000,
+                    originalCurrencyCode = "MXN",
+                )
+            )
+        }
+        val currentLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone),
+            zone,
+        )
+        compose.setContent { PocketApp(currentLedger) }
+
+        compose.waitUntilExactlyOneExists(hasText("MXN 180.00"), 5_000)
+        compose.onNodeWithText("MXN 180.00").assertIsDisplayed()
+        compose.waitUntilExactlyOneExists(hasText("Pockets"), 5_000)
+        compose.onNodeWithText("Pockets").performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag("pockets_list"), 5_000)
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Presupuesto MXN 200.00"))
+        compose.onNodeWithText("Presupuesto MXN 200.00").assertIsDisplayed()
+        compose.onAllNodesWithText("Cambiar moneda", substring = true).assertCountEquals(0)
+
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("period_selector"))
+        compose.onNodeWithTag("period_selector").performScrollToNode(hasText("25 feb – 24 mar"))
+        compose.onNodeWithText("25 feb – 24 mar").performClick()
+        compose.onNodeWithText("Moneda del periodo · SAR").assertIsDisplayed()
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Presupuesto SAR 100.00"))
+        compose.onNodeWithText("Presupuesto SAR 100.00").assertIsDisplayed()
+
+        compose.onNodeWithText("Movimientos").performClick()
+        compose.waitUntilExactlyOneExists(hasText("- MXN 20.00"), 5_000)
+        compose.onNodeWithText("- MXN 20.00").assertIsDisplayed()
     }
 
     @Test
@@ -866,7 +935,7 @@ class PocketAppHostFlowTest {
                     id = "transition-ui-previous-spend",
                     pocketId = firstState.pockets.first().pocket.id,
                     type = MovementType.EXPENSE,
-                    sarAmountMinor = 1_000,
+                    accountingAmountMinor = 1_000,
                     occurredAtUtcMillis = Instant.parse("2026-02-26T09:00:00Z").toEpochMilli(),
                     localDate = LocalDate.of(2026, 2, 26),
                 ),

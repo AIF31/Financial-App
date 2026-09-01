@@ -82,7 +82,7 @@ internal fun ProductionMovementScreen(
 ) {
     val stateKey = initialMovement?.id
     var amount by rememberSaveable(stateKey) {
-        mutableStateOf(initialMovement?.let { minorNumberForForm(it.sarAmountMinor) }.orEmpty())
+        mutableStateOf(initialMovement?.let { minorNumberForForm(it.accountingAmountMinor) }.orEmpty())
     }
     var selectedPocket by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.pocketId) }
     var refund by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.type == MovementType.REFUND) }
@@ -155,7 +155,7 @@ internal fun ProductionMovementScreen(
                         pocketId = pocketId,
                         id = initialMovement?.id,
                         type = if (refund) MovementType.REFUND else MovementType.EXPENSE,
-                        sarAmountMinor = parsedAmount,
+                        accountingAmountMinor = parsedAmount,
                         occurredAtUtcMillis = parsedDate.atTime(parsedTime)
                             .atZone(movementZone)
                             .toInstant()
@@ -240,6 +240,7 @@ internal fun ProductionMovementScreen(
                                     amount = minorNumberForForm(template.amountMinor)
                                     selectedPocket = template.pocketId
                                     paymentMethod = template.paymentMethodId
+                                    currency = template.inputCurrency.name
                                 },
                             ) {
                                 Text(template.name)

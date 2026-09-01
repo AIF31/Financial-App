@@ -61,9 +61,9 @@ class PocketLedgerHostBehaviorTest {
         assertTrue(ledger.execute(LedgerCommand.SetAllocation(period.id, travel.pocket.id, 20_001)) is LedgerResult.Rejected)
         ledger.execute(LedgerCommand.SetAllocation(period.id, travel.pocket.id, 20_000))
         ledger.execute(LedgerCommand.UpsertPocket(travel.pocket.id, travel.pocket.name, rolloverEnabled = true))
-        ledger.execute(LedgerCommand.AddMovement(pocketId = supermarket.pocket.id, type = MovementType.EXPENSE, sarAmountMinor = 90_000, occurredAtUtcMillis = clock.millis(), localDate = LocalDate.of(2026, 2, 26)))
-        ledger.execute(LedgerCommand.AddMovement(pocketId = supermarket.pocket.id, type = MovementType.REFUND, sarAmountMinor = 5_000, occurredAtUtcMillis = clock.millis() + 1, localDate = LocalDate.of(2026, 2, 26)))
-        ledger.execute(LedgerCommand.AddMovement(pocketId = travel.pocket.id, type = MovementType.EXPENSE, sarAmountMinor = 5_000, occurredAtUtcMillis = clock.millis() + 2, localDate = LocalDate.of(2026, 2, 26)))
+        ledger.execute(LedgerCommand.AddMovement(pocketId = supermarket.pocket.id, type = MovementType.EXPENSE, accountingAmountMinor = 90_000, occurredAtUtcMillis = clock.millis(), localDate = LocalDate.of(2026, 2, 26)))
+        ledger.execute(LedgerCommand.AddMovement(pocketId = supermarket.pocket.id, type = MovementType.REFUND, accountingAmountMinor = 5_000, occurredAtUtcMillis = clock.millis() + 1, localDate = LocalDate.of(2026, 2, 26)))
+        ledger.execute(LedgerCommand.AddMovement(pocketId = travel.pocket.id, type = MovementType.EXPENSE, accountingAmountMinor = 5_000, occurredAtUtcMillis = clock.millis() + 2, localDate = LocalDate.of(2026, 2, 26)))
 
         state = ledger.state.first { it.movements.size == 3 }
         assertEquals(-5_000, state.pockets.first { it.pocket.id == supermarket.pocket.id }.availabilityMinor)
@@ -484,7 +484,7 @@ class PocketLedgerHostBehaviorTest {
                 id = "source-spend",
                 pocketId = pocket.id,
                 type = MovementType.EXPENSE,
-                sarAmountMinor = 5_000,
+                accountingAmountMinor = 5_000,
                 occurredAtUtcMillis = mutableClock.millis(),
                 localDate = LocalDate.of(2026, 2, 26),
             )
@@ -610,7 +610,7 @@ class PocketLedgerHostBehaviorTest {
                 id = "manual-fx",
                 pocketId = pocketId,
                 type = MovementType.EXPENSE,
-                sarAmountMinor = 1_234,
+                accountingAmountMinor = 1_234,
                 occurredAtUtcMillis = clock.millis(),
                 localDate = LocalDate.of(2026, 3, 26),
                 paymentMethodId = cardId,
@@ -680,7 +680,7 @@ class PocketLedgerHostBehaviorTest {
                 id = "legacy-movement",
                 pocketId = pocketId,
                 type = MovementType.EXPENSE,
-                sarAmountMinor = 1_250,
+                accountingAmountMinor = 1_250,
                 occurredAtUtcMillis = clock.millis(),
                 localDate = LocalDate.of(2026, 2, 26),
             )
@@ -746,7 +746,7 @@ class PocketLedgerHostBehaviorTest {
         val sourceState = source.state.first { !it.needsOnboarding }
         val pocket = sourceState.pockets.first()
         source.execute(LedgerCommand.SetAllocation(sourceState.currentPeriod!!.id, pocket.pocket.id, 25_000))
-        source.execute(LedgerCommand.AddMovement(pocketId = pocket.pocket.id, type = MovementType.EXPENSE, sarAmountMinor = 1_250, occurredAtUtcMillis = clock.millis(), localDate = LocalDate.of(2026, 2, 26), merchant = "KAUST Market", note = "fruta"))
+        source.execute(LedgerCommand.AddMovement(pocketId = pocket.pocket.id, type = MovementType.EXPENSE, accountingAmountMinor = 1_250, occurredAtUtcMillis = clock.millis(), localDate = LocalDate.of(2026, 2, 26), merchant = "KAUST Market", note = "fruta"))
         val backup = source.exportBackup()
 
         assertTrue(source.previewBackup(backup).valid)
@@ -783,7 +783,8 @@ class PocketLedgerHostBehaviorTest {
         }
 
         val csv = source.exportCsv().decodeToString()
-        assertTrue(csv.startsWith("id,tipo,fecha,zona,pocket,importe_sar"))
+        assertTrue(csv.startsWith("id,tipo,fecha,zona,pocket,importe_contable,moneda_contable"))
+        assertTrue(csv.contains("\"SAR\""))
         assertTrue(csv.contains("\"KAUST Market\""))
         assertTrue(csv.contains("\"12.50\""))
     }
@@ -903,29 +904,29 @@ class PocketLedgerHostBehaviorTest {
         ledger.execute(LedgerCommand.SetAllocation(periodId, pocket.pocket.id, 10_000))
 
         suspend fun saveAlert(amount: Long) = ledger.execute(
-            LedgerCommand.AddMovement(id = "alert", pocketId = pocket.pocket.id, type = MovementType.EXPENSE, sarAmountMinor = amount,
+            LedgerCommand.AddMovement(id = "alert", pocketId = pocket.pocket.id, type = MovementType.EXPENSE, accountingAmountMinor = amount,
                 occurredAtUtcMillis = clock.millis(), localDate = LocalDate.of(2026, 2, 26))
         )
         saveAlert(8_000)
-        state = ledger.state.first { it.movements.singleOrNull()?.sarAmountMinor == 8_000L }
+        state = ledger.state.first { it.movements.singleOrNull()?.accountingAmountMinor == 8_000L }
         assertTrue(state.pockets.first().atRisk)
         assertFalse(state.pockets.first().exhausted)
         saveAlert(10_000)
-        state = ledger.state.first { it.movements.singleOrNull()?.sarAmountMinor == 10_000L }
+        state = ledger.state.first { it.movements.singleOrNull()?.accountingAmountMinor == 10_000L }
         assertTrue(state.pockets.first().exhausted)
         saveAlert(7_900)
-        state = ledger.state.first { it.movements.singleOrNull()?.sarAmountMinor == 7_900L }
+        state = ledger.state.first { it.movements.singleOrNull()?.accountingAmountMinor == 7_900L }
         assertFalse(state.pockets.first().atRisk)
 
         ledger.execute(LedgerCommand.AddMovement(id = "fx", pocketId = pocket.pocket.id, type = MovementType.EXPENSE,
-            sarAmountMinor = 375, occurredAtUtcMillis = clock.millis() + 1, localDate = LocalDate.of(2026, 2, 26),
+            accountingAmountMinor = 375, occurredAtUtcMillis = clock.millis() + 1, localDate = LocalDate.of(2026, 2, 26),
             originalAmountMinor = 100, originalCurrencyCode = "USD", conversionStatus = ConversionStatus.ESTIMATED))
         state = ledger.state.first { it.movements.any { movement -> movement.id == "fx" } }
-        assertEquals(375, state.movements.first { it.id == "fx" }.sarAmountMinor)
+        assertEquals(375, state.movements.first { it.id == "fx" }.accountingAmountMinor)
         ledger.execute(LedgerCommand.AddMovement(id = "fx", pocketId = pocket.pocket.id, type = MovementType.EXPENSE,
-            sarAmountMinor = 400, occurredAtUtcMillis = clock.millis() + 1, localDate = LocalDate.of(2026, 2, 26),
+            accountingAmountMinor = 400, occurredAtUtcMillis = clock.millis() + 1, localDate = LocalDate.of(2026, 2, 26),
             originalAmountMinor = 100, originalCurrencyCode = "USD", conversionStatus = ConversionStatus.CONFIRMED))
-        state = ledger.state.first { it.movements.firstOrNull { movement -> movement.id == "fx" }?.sarAmountMinor == 400L }
+        state = ledger.state.first { it.movements.firstOrNull { movement -> movement.id == "fx" }?.accountingAmountMinor == 400L }
         val confirmed = state.movements.first { it.id == "fx" }
         assertEquals(100L, confirmed.originalAmountMinor)
         assertEquals(ConversionStatus.CONFIRMED, confirmed.conversionStatus)
@@ -943,14 +944,14 @@ class PocketLedgerHostBehaviorTest {
         val firstState = firstPeriodLedger.state.first { !it.needsOnboarding }
         val pocketId = firstState.pockets.first().pocket.id
         firstPeriodLedger.execute(LedgerCommand.AddMovement(id = "historical", pocketId = pocketId, type = MovementType.EXPENSE,
-            sarAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(), localDate = LocalDate.of(2026, 2, 26)))
+            accountingAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(), localDate = LocalDate.of(2026, 2, 26)))
         firstPeriodLedger.execute(LedgerCommand.CreateNextPeriod())
 
         val laterClock = Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone)
         val currentLedger = RoomPocketLedger(database, laterClock, zone)
         assertEquals(1_000L, currentLedger.state.first { it.currentPeriod?.start == LocalDate.of(2026, 3, 25) }.previousPeriodNetSpendMinor)
         currentLedger.execute(LedgerCommand.AddMovement(id = "historical", pocketId = pocketId, type = MovementType.EXPENSE,
-            sarAmountMinor = 500, occurredAtUtcMillis = clock.millis(), localDate = LocalDate.of(2026, 2, 26)))
+            accountingAmountMinor = 500, occurredAtUtcMillis = clock.millis(), localDate = LocalDate.of(2026, 2, 26)))
         assertEquals(500L, currentLedger.state.first { it.previousPeriodNetSpendMinor == 500L }.previousPeriodNetSpendMinor)
     }
 
@@ -1055,7 +1056,7 @@ class PocketLedgerHostBehaviorTest {
                 id = "ordinary-previous-spend",
                 pocketId = firstState.pockets.first().pocket.id,
                 type = MovementType.EXPENSE,
-                sarAmountMinor = 1_000,
+                accountingAmountMinor = 1_000,
                 occurredAtUtcMillis = clock.millis(),
                 localDate = LocalDate.of(2026, 2, 26),
             ),
@@ -1083,7 +1084,7 @@ class PocketLedgerHostBehaviorTest {
                 id = "transition-previous-spend",
                 pocketId = firstState.pockets.first().pocket.id,
                 type = MovementType.EXPENSE,
-                sarAmountMinor = 1_000,
+                accountingAmountMinor = 1_000,
                 occurredAtUtcMillis = clock.millis(),
                 localDate = LocalDate.of(2026, 2, 26),
             ),
@@ -1138,7 +1139,7 @@ class PocketLedgerHostBehaviorTest {
                 id = "csv-risk",
                 pocketId = pocket.pocket.id,
                 type = MovementType.EXPENSE,
-                sarAmountMinor = 1_250,
+                accountingAmountMinor = 1_250,
                 occurredAtUtcMillis = clock.millis(),
                 localDate = LocalDate.of(2026, 2, 26),
                 merchant = "=2+2",
