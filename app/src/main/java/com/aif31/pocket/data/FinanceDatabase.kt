@@ -176,6 +176,20 @@ data class LedgerPreferencesEntity(
     companion object { const val SINGLETON_ID = 1 }
 }
 
+@Entity(
+    tableName = "fx_rate_cache",
+    primaryKeys = ["base_currency_code", "quote_currency_code", "effective_epoch_day"],
+    indices = [Index(value = ["base_currency_code", "quote_currency_code", "effective_epoch_day"])],
+)
+data class FxRateCacheEntity(
+    @ColumnInfo(name = "base_currency_code") val baseCurrencyCode: String,
+    @ColumnInfo(name = "quote_currency_code") val quoteCurrencyCode: String,
+    @ColumnInfo(name = "effective_epoch_day") val effectiveEpochDay: Long,
+    val rate: String,
+    val source: String,
+    @ColumnInfo(name = "cached_at_utc_millis") val cachedAtUtcMillis: Long,
+)
+
 @Dao
 interface FinanceDao {
     @Query("SELECT * FROM periods ORDER BY start_epoch_day") fun observePeriods(): Flow<List<PeriodEntity>>
@@ -204,6 +218,17 @@ interface FinanceDao {
     @Query("SELECT * FROM movements WHERE id = :id") suspend fun movement(id: String): MovementEntity?
     @Query("SELECT * FROM allocations WHERE period_id = :periodId AND pocket_id = :pocketId") suspend fun allocation(periodId: String, pocketId: String): AllocationEntity?
     @Query("SELECT COALESCE(SUM(budget_minor), 0) FROM allocations WHERE period_id = :periodId") suspend fun allocated(periodId: String): Long
+    @Query(
+        "SELECT * FROM fx_rate_cache WHERE base_currency_code = :baseCurrencyCode " +
+            "AND quote_currency_code = :quoteCurrencyCode AND effective_epoch_day BETWEEN :minimumEpochDay AND :requestedEpochDay " +
+            "ORDER BY effective_epoch_day DESC LIMIT 1"
+    )
+    suspend fun latestFxRate(
+        baseCurrencyCode: String,
+        quoteCurrencyCode: String,
+        minimumEpochDay: Long,
+        requestedEpochDay: Long,
+    ): FxRateCacheEntity?
 
     @Upsert suspend fun putPeriod(value: PeriodEntity)
     @Upsert suspend fun putPockets(values: List<PocketEntity>)
@@ -222,6 +247,7 @@ interface FinanceDao {
     @Upsert suspend fun putTemplate(value: RecurringTemplateEntity)
     @Upsert suspend fun putPendingCurrencyChange(value: PendingCurrencyChangeEntity)
     @Upsert suspend fun putLedgerPreferences(value: LedgerPreferencesEntity)
+    @Upsert suspend fun putFxRate(value: FxRateCacheEntity)
 
     @Update suspend fun updatePeriod(value: PeriodEntity)
     @Query("DELETE FROM movements WHERE id = :id") suspend fun deleteMovement(id: String)
@@ -255,8 +281,9 @@ interface FinanceDao {
         RecurringTemplateEntity::class,
         PendingCurrencyChangeEntity::class,
         LedgerPreferencesEntity::class,
+        FxRateCacheEntity::class,
     ],
-    version = 5,
+    version = 6,
     autoMigrations = [AutoMigration(from = 1, to = 2)],
     exportSchema = true,
 )
@@ -266,7 +293,7 @@ abstract class FinanceDatabase : RoomDatabase() {
     companion object {
         fun open(context: Context): FinanceDatabase =
             Room.databaseBuilder(context.applicationContext, FinanceDatabase::class.java, "pocket.db")
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
 
         fun inMemory(context: Context): FinanceDatabase =
@@ -378,6 +405,22 @@ abstract class FinanceDatabase : RoomDatabase() {
                     "INSERT INTO ledger_preferences (id, default_payment_method_id) " +
                         "SELECT 1, (SELECT id FROM payment_methods WHERE archived = 0 " +
                         "AND name = 'Tarjeta' COLLATE NOCASE ORDER BY id LIMIT 1)"
+                )
+            }
+        }
+
+        internal val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS fx_rate_cache (" +
+                        "base_currency_code TEXT NOT NULL, quote_currency_code TEXT NOT NULL, " +
+                        "effective_epoch_day INTEGER NOT NULL, rate TEXT NOT NULL, source TEXT NOT NULL, " +
+                        "cached_at_utc_millis INTEGER NOT NULL, " +
+                        "PRIMARY KEY(base_currency_code, quote_currency_code, effective_epoch_day))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_fx_rate_cache_base_currency_code_quote_currency_code_effective_epoch_day " +
+                        "ON fx_rate_cache(base_currency_code, quote_currency_code, effective_epoch_day)"
                 )
             }
         }
