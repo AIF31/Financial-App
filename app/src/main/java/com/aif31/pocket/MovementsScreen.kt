@@ -263,7 +263,7 @@ private fun MovementCard(
                     fontFamily = FontFamily.Monospace,
                     color = amountColor,
                 )
-                if (movement.originalCurrencyCode != "SAR" && movement.originalAmountMinor != null) {
+                if (movement.originalCurrencyCode != accountingCurrency.name && movement.originalAmountMinor != null) {
                     Text(
                         "${movement.originalCurrencyCode} ${minorNumber(movement.originalAmountMinor)} · " +
                             if (movement.conversionStatus == ConversionStatus.CONFIRMED) "Confirmado" else "Estimado",

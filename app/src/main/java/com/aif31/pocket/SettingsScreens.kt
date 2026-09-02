@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -229,7 +230,9 @@ private fun SettingsDetailScreen(
                 item {
                     OutlinedButton(
                         onClick = { scope.launch { ledger.execute(LedgerCommand.SetDefaultPaymentMethod(null)) } },
-                        modifier = Modifier.testTag("default_payment_none"),
+                        modifier = Modifier
+                            .testTag("default_payment_none")
+                            .semantics { selected = state.defaultPaymentMethodId == null },
                     ) {
                         Text(if (state.defaultPaymentMethodId == null) "✓ Ninguno" else "Ninguno")
                     }
@@ -237,7 +240,9 @@ private fun SettingsDetailScreen(
                 items(state.paymentMethods.filterNot { it.archived }, key = { "default_${it.id}" }) { method ->
                     OutlinedButton(
                         onClick = { scope.launch { ledger.execute(LedgerCommand.SetDefaultPaymentMethod(method.id)) } },
-                        modifier = Modifier.testTag("default_payment_${method.name}"),
+                        modifier = Modifier
+                            .testTag("default_payment_${method.name}")
+                            .semantics { selected = state.defaultPaymentMethodId == method.id },
                     ) {
                         Text(if (state.defaultPaymentMethodId == method.id) "✓ ${method.name}" else method.name)
                     }

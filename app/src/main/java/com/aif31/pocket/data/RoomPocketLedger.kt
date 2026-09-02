@@ -255,18 +255,31 @@ class RoomPocketLedger(
 
     private suspend fun addMovement(command: LedgerCommand.AddMovement): LedgerResult = database.withTransaction {
         require(command.accountingAmountMinor > 0) { "El importe debe ser mayor que cero" }
-        require(command.originalCurrencyCode.matches(Regex("[A-Z]{3}"))) { "Moneda inválida" }
+        require(command.rate == null || (command.rate.toBigDecimalOrNull()?.signum() ?: 0) > 0) { "Tipo de cambio inválido" }
         val periods = dao.periods()
         val period = requireNotNull(periods.firstOrNull {
             command.localDate.toEpochDay() >= it.startEpochDay && command.localDate.toEpochDay() < it.endExclusiveEpochDay
         }) { "La fecha no pertenece a un periodo existente" }
+        val accountingCurrency = SupportedCurrency.fromCode(period.accountingCurrencyCode)
+        val originalCurrency = command.originalCurrencyCode?.let(SupportedCurrency::fromCode) ?: accountingCurrency
+        require(command.accountingCurrency == null || command.accountingCurrency == accountingCurrency) {
+            "La moneda contable no coincide con el periodo"
+        }
+        if (originalCurrency == accountingCurrency) {
+            require(
+                command.originalAmountMinor == null && command.conversionStatus == ConversionStatus.CONFIRMED &&
+                    command.rate == null
+            ) { "La conversión no corresponde a un movimiento en la moneda contable" }
+        } else {
+            require((command.originalAmountMinor ?: 0) > 0) { "Falta el importe en la moneda original" }
+        }
         val existing = command.id?.let { dao.movement(it) }
         val pocket = requireNotNull(dao.pockets().firstOrNull { it.id == command.pocketId }) { "Pocket inexistente" }
         val editsSamePocket = existing?.pocketId == pocket.id
         require(!pocket.archived || editsSamePocket) { "El Pocket está archivado" }
         val snapshot = dao.periodPockets().firstOrNull { it.periodId == period.id && it.pocketId == command.pocketId }
         require(snapshot != null && (!snapshot.retired || editsSamePocket)) { "El Pocket no está activo en este periodo" }
-        dao.putMovement(command.toEntity(period.id, zoneId.id))
+        dao.putMovement(command.toEntity(period.id, zoneId.id, originalCurrency.name))
         val sourcePeriodId = listOfNotNull(existing?.periodId, period.id)
             .minBy { id -> periods.first { it.id == id }.startEpochDay }
         recalculateRolloverFrom(sourcePeriodId)
@@ -451,6 +464,7 @@ class RoomPocketLedger(
         )
         dao.putPeriod(next)
         val activePockets = dao.pockets().filterNot { it.archived }
+            .sortedWith(compareBy<PocketEntity> { it.sortOrder }.thenBy { it.id })
         val previousPeriodPockets = dao.periodPockets()
             .filter { it.periodId == previous.id }
             .associateBy { it.pocketId }
@@ -463,6 +477,18 @@ class RoomPocketLedger(
                 PeriodPocketEntity(nextId, pocket.id, rolloverEligible = pocket.rolloverEnabled, retired = false)
             }
         )
+        val convertedBudgets = activePockets.associate { pocket ->
+            pocket.id to convertForTarget(previousAllocations[pocket.id]?.budgetMinor ?: 0)
+        }.toMutableMap()
+        var roundingExcess = convertedBudgets.values.fold(0L, Math::addExact) - next.newFundsMinor
+        // Preserve higher-priority Pockets and absorb any independent HALF_UP excess from the end of display order.
+        activePockets.asReversed().forEach { pocket ->
+            if (roundingExcess > 0) {
+                val reduction = minOf(convertedBudgets.getValue(pocket.id), roundingExcess)
+                convertedBudgets[pocket.id] = convertedBudgets.getValue(pocket.id) - reduction
+                roundingExcess -= reduction
+            }
+        }
         val nextAllocations = activePockets.map { pocket ->
             val previousAllocation = previousAllocations[pocket.id]
             val spent = previousMovements.filter { it.pocketId == pocket.id }.sumOf {
@@ -476,7 +502,7 @@ class RoomPocketLedger(
             AllocationEntity(
                 nextId,
                 pocket.id,
-                convertForTarget(previousAllocation?.budgetMinor ?: 0),
+                convertedBudgets.getValue(pocket.id),
                 convertForTarget(rollover),
             )
         }
@@ -759,7 +785,11 @@ private fun MovementEntity.toModel(
     rate = rate,
 )
 
-private fun LedgerCommand.AddMovement.toEntity(periodId: String, zoneId: String) = MovementEntity(
+private fun LedgerCommand.AddMovement.toEntity(
+    periodId: String,
+    zoneId: String,
+    resolvedOriginalCurrencyCode: String,
+) = MovementEntity(
     id = id ?: UUID.randomUUID().toString(),
     periodId = periodId,
     pocketId = pocketId,
@@ -772,7 +802,7 @@ private fun LedgerCommand.AddMovement.toEntity(periodId: String, zoneId: String)
     note = note?.trim()?.takeIf { it.isNotEmpty() },
     paymentMethodId = paymentMethodId,
     originalAmountMinor = originalAmountMinor,
-    originalCurrencyCode = originalCurrencyCode,
+    originalCurrencyCode = resolvedOriginalCurrencyCode,
     conversionStatus = conversionStatus.name,
     rate = rate,
 )

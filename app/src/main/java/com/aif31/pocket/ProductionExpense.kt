@@ -62,6 +62,7 @@ import com.aif31.pocket.data.MovementDefaults
 import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.PocketLedger
 import com.aif31.pocket.domain.Money
+import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.ui.PocketArtwork
 import com.aif31.pocket.ui.MoneyText
 import java.time.Instant
@@ -81,6 +82,15 @@ internal fun ProductionMovementScreen(
     initialMovement: Movement? = null,
 ) {
     val stateKey = initialMovement?.id
+    val initialAccountingCurrency = state.periods.firstOrNull { it.id == initialMovement?.periodId }?.accountingCurrency
+        ?: state.currentPeriod?.accountingCurrency
+        ?: SupportedCurrency.SAR
+    var localDate by rememberSaveable(stateKey) {
+        mutableStateOf((initialMovement?.localDate ?: movementDefaults.localDate).toString())
+    }
+    val accountingCurrency = runCatching { LocalDate.parse(localDate) }.getOrNull()?.let { enteredDate ->
+        state.periods.firstOrNull { enteredDate >= it.start && enteredDate < it.endExclusive }?.accountingCurrency
+    } ?: initialAccountingCurrency
     var amount by rememberSaveable(stateKey) {
         mutableStateOf(initialMovement?.let { minorNumberForForm(it.accountingAmountMinor) }.orEmpty())
     }
@@ -91,15 +101,14 @@ internal fun ProductionMovementScreen(
     var paymentMethod by rememberSaveable(stateKey) {
         mutableStateOf(if (initialMovement != null) initialMovement.paymentMethodId else state.defaultPaymentMethodId)
     }
-    var currency by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.originalCurrencyCode ?: "SAR") }
+    var currency by rememberSaveable(stateKey) {
+        mutableStateOf(initialMovement?.originalCurrencyCode ?: initialAccountingCurrency.name)
+    }
     var originalAmount by rememberSaveable(stateKey) {
         mutableStateOf(initialMovement?.originalAmountMinor?.let(::minorNumberForForm).orEmpty())
     }
     var confirmed by rememberSaveable(stateKey) {
         mutableStateOf(initialMovement?.conversionStatus != ConversionStatus.ESTIMATED)
-    }
-    var localDate by rememberSaveable(stateKey) {
-        mutableStateOf((initialMovement?.localDate ?: movementDefaults.localDate).toString())
     }
     var localTime by rememberSaveable(stateKey) {
         val instant = initialMovement?.occurredAtUtcMillis ?: movementDefaults.instantMillis
@@ -124,7 +133,17 @@ internal fun ProductionMovementScreen(
 
     fun saveMovement() {
         scope.launch {
-            val parsedAmount = runCatching { Money.parse(amount, "SAR").minor }.getOrNull() ?: run {
+            val parsedDate = runCatching { LocalDate.parse(localDate) }.getOrNull() ?: run {
+                error = "Escribe una fecha válida"
+                return@launch
+            }
+            val savingAccountingCurrency = state.periods.firstOrNull {
+                parsedDate >= it.start && parsedDate < it.endExclusive
+            }?.accountingCurrency ?: run {
+                error = "La fecha no pertenece a un periodo existente"
+                return@launch
+            }
+            val parsedAmount = runCatching { Money.parse(amount, savingAccountingCurrency.name).minor }.getOrNull() ?: run {
                 error = "Escribe un importe válido"
                 return@launch
             }
@@ -132,15 +151,11 @@ internal fun ProductionMovementScreen(
                 error = "Selecciona un Pocket"
                 return@launch
             }
-            val parsedDate = runCatching { LocalDate.parse(localDate) }.getOrNull() ?: run {
-                error = "Escribe una fecha válida"
-                return@launch
-            }
             val parsedTime = runCatching { LocalTime.parse(localTime) }.getOrNull() ?: run {
                 error = "Escribe una hora válida"
                 return@launch
             }
-            val parsedOriginal = if (currency == "SAR") {
+            val parsedOriginal = if (currency == savingAccountingCurrency.name) {
                 null
             } else {
                 runCatching { Money.parse(originalAmount, currency).minor }.getOrNull() ?: run {
@@ -156,6 +171,7 @@ internal fun ProductionMovementScreen(
                         id = initialMovement?.id,
                         type = if (refund) MovementType.REFUND else MovementType.EXPENSE,
                         accountingAmountMinor = parsedAmount,
+                        accountingCurrency = savingAccountingCurrency,
                         occurredAtUtcMillis = parsedDate.atTime(parsedTime)
                             .atZone(movementZone)
                             .toInstant()
@@ -166,7 +182,7 @@ internal fun ProductionMovementScreen(
                         paymentMethodId = paymentMethod,
                         originalAmountMinor = parsedOriginal,
                         originalCurrencyCode = currency,
-                        conversionStatus = if (currency == "SAR" || confirmed) {
+                        conversionStatus = if (currency == savingAccountingCurrency.name || confirmed) {
                             ConversionStatus.CONFIRMED
                         } else {
                             ConversionStatus.ESTIMATED
@@ -214,7 +230,7 @@ internal fun ProductionMovementScreen(
                         when {
                             initialMovement != null -> "Guardar cambios"
                             refund -> "Guardar devolución"
-                            else -> "Guardar gasto · SAR ${amount.ifBlank { "0.00" }}"
+                            else -> "Guardar gasto · ${accountingCurrency.name} ${amount.ifBlank { "0.00" }}"
                         },
                     )
                 }
@@ -237,10 +253,16 @@ internal fun ProductionMovementScreen(
                         items(state.templates.filterNot { it.archived }, key = { it.id }) { template ->
                             OutlinedButton(
                                 onClick = {
-                                    amount = minorNumberForForm(template.amountMinor)
                                     selectedPocket = template.pocketId
                                     paymentMethod = template.paymentMethodId
                                     currency = template.inputCurrency.name
+                                    if (template.inputCurrency == accountingCurrency) {
+                                        amount = minorNumberForForm(template.amountMinor)
+                                        originalAmount = ""
+                                    } else {
+                                        amount = ""
+                                        originalAmount = minorNumberForForm(template.amountMinor)
+                                    }
                                 },
                             ) {
                                 Text(template.name)
@@ -257,7 +279,7 @@ internal fun ProductionMovementScreen(
                         amount = it.filter { character -> character.isDigit() || character == '.' }
                         if (error == "Escribe un importe válido") error = null
                     },
-                    prefix = { Text("SAR", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary) },
+                    prefix = { Text(accountingCurrency.name, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary) },
                     supportingText = if (error == "Escribe un importe válido") {
                         { Text(error.orEmpty()) }
                     } else {
@@ -395,13 +417,13 @@ internal fun ProductionMovementScreen(
                             }
                         }
                     }
-                    if (currency != "SAR") {
+                    if (currency != accountingCurrency.name) {
                         OutlinedTextField(
                             value = originalAmount,
                             onValueChange = { originalAmount = it },
                             label = { Text("Importe original $currency") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().testTag("movement_original_amount"),
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = { confirmed = false }) {

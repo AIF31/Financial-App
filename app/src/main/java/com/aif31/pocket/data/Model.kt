@@ -170,9 +170,10 @@ sealed interface LedgerCommand {
         val note: String? = null,
         val paymentMethodId: String? = null,
         val originalAmountMinor: Long? = null,
-        val originalCurrencyCode: String = "SAR",
+        val originalCurrencyCode: String? = null,
         val conversionStatus: ConversionStatus = ConversionStatus.CONFIRMED,
         val rate: String? = null,
+        val accountingCurrency: SupportedCurrency? = null,
     ) : LedgerCommand
     data class DeleteMovement(val movementId: String) : LedgerCommand
     data class RestoreMovement(val movement: Movement) : LedgerCommand

@@ -389,6 +389,52 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
+    fun movement_rejects_unsupported_currency_mismatched_accounting_currency_and_invalid_rate() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(30_000))
+        val state = ledger.state.first { !it.needsOnboarding }
+
+        val result = ledger.execute(
+            LedgerCommand.AddMovement(
+                pocketId = state.pockets.first().pocket.id,
+                type = MovementType.EXPENSE,
+                accountingAmountMinor = 1_000,
+                occurredAtUtcMillis = clock.millis(),
+                localDate = LocalDate.of(2026, 2, 26),
+                originalAmountMinor = 900,
+                originalCurrencyCode = "EUR",
+            )
+        )
+
+        assertTrue(result is LedgerResult.Rejected)
+        val mismatchedAccounting = ledger.execute(
+            LedgerCommand.AddMovement(
+                pocketId = state.pockets.first().pocket.id,
+                type = MovementType.EXPENSE,
+                accountingAmountMinor = 1_000,
+                occurredAtUtcMillis = clock.millis(),
+                localDate = LocalDate.of(2026, 2, 26),
+                accountingCurrency = SupportedCurrency.USD,
+            )
+        )
+        assertTrue(mismatchedAccounting is LedgerResult.Rejected)
+        val invalidRate = ledger.execute(
+            LedgerCommand.AddMovement(
+                pocketId = state.pockets.first().pocket.id,
+                type = MovementType.EXPENSE,
+                accountingAmountMinor = 1_000,
+                occurredAtUtcMillis = clock.millis(),
+                localDate = LocalDate.of(2026, 2, 26),
+                originalAmountMinor = 900,
+                originalCurrencyCode = "USD",
+                rate = "-1",
+            )
+        )
+        assertTrue(invalidRate is LedgerResult.Rejected)
+        assertTrue(ledger.state.first().movements.isEmpty())
+    }
+
+    @Test
     fun recurring_template_persists_its_input_currency() = runTest {
         val ledger = RoomPocketLedger(database, clock, zone)
         ledger.execute(LedgerCommand.Initialize(30_000))
@@ -525,6 +571,37 @@ class PocketLedgerHostBehaviorTest {
         val beforeRepeatedCatchUp = dao.periods() to dao.allocations()
         assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay = 25)))
         assertEquals(beforeRepeatedCatchUp, dao.periods() to dao.allocations())
+    }
+
+    @Test
+    fun currency_transition_reconciles_independent_budget_rounding_to_converted_funds() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        val dao = database.financeDao()
+        ledger.execute(LedgerCommand.Initialize(2))
+        val state = ledger.state.first { !it.needsOnboarding }
+        val period = state.currentPeriod!!
+        val sourcePocketIds = state.pockets.take(2).map { it.pocket.id }
+        state.pockets.take(2).forEach { pocket ->
+            ledger.execute(LedgerCommand.SetAllocation(period.id, pocket.pocket.id, 1))
+        }
+        ledger.execute(
+            LedgerCommand.ScheduleCurrencyChange(
+                targetCurrency = SupportedCurrency.USD,
+                rate = "0.5",
+                effectiveDate = period.endExclusive,
+                source = "ROUNDING-TEST",
+            )
+        )
+
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.CreateNextPeriod()))
+
+        val next = dao.periods().maxBy { it.startEpochDay }
+        val convertedBudgets = dao.allocations().filter { it.periodId == next.id }.associateBy { it.pocketId }
+        assertEquals(1L, next.newFundsMinor)
+        assertEquals(1L, convertedBudgets.values.sumOf { it.budgetMinor })
+        assertEquals(1L, convertedBudgets.getValue(sourcePocketIds[0]).budgetMinor)
+        assertEquals(0L, convertedBudgets.getValue(sourcePocketIds[1]).budgetMinor)
+        assertTrue(ledger.previewBackup(ledger.exportBackup()).valid)
     }
 
     @Test
@@ -772,6 +849,18 @@ class PocketLedgerHostBehaviorTest {
         }
 
         val text = backup.decodeToString()
+        val firstPeriodBoundary = text.replaceFirst("\"priorBoundaryRate\": null", "\"priorBoundaryRate\": \"2\"").encodeToByteArray()
+        assertFalse(source.previewBackup(firstPeriodBoundary).valid)
+        val unsupportedCurrency = text.replaceFirst("\"currency\": \"SAR\"", "\"currency\": \"EUR\"").encodeToByteArray()
+        assertFalse(source.previewBackup(unsupportedCurrency).valid)
+        val invalidRate = text.replaceFirst("\"rate\": null", "\"rate\": \"-1\"").encodeToByteArray()
+        assertFalse(source.previewBackup(invalidRate).valid)
+        val defaultMethodId = sourceState.defaultPaymentMethodId!!
+        val archivedDefault = text.replaceFirst(
+            Regex("(\"id\": \"${Regex.escape(defaultMethodId)}\"[\\s\\S]*?\"archived\": )false"),
+            "$1true",
+        ).encodeToByteArray()
+        assertFalse(source.previewBackup(archivedDefault).valid)
         val relation = "\"pocketId\": \"${pocket.pocket.id}\""
         val index = text.lastIndexOf(relation)
         assertTrue(index >= 0)

@@ -199,6 +199,10 @@ internal object BackupCodec {
         require(orderedPeriods.zipWithNext().all { (current, next) -> current.endExclusive == next.start }) {
             "Los periodos deben ser contiguos y no solaparse"
         }
+        require(orderedPeriods.first().let {
+            it.priorBoundaryRate == null && it.priorBoundaryFromCurrencyCode == null &&
+                it.priorBoundaryEffectiveEpochDay == null && it.priorBoundarySource == null
+        }) { "El primer periodo no puede tener conversión previa" }
         require(orderedPeriods.zipWithNext().all { (current, next) ->
             val currentCurrency = SupportedCurrency.fromCode(current.accountingCurrencyCode)
             val nextCurrency = SupportedCurrency.fromCode(next.accountingCurrencyCode)
@@ -258,12 +262,28 @@ internal object BackupCodec {
         require(payload.allocations.groupBy { it.periodId }.all { (periodId, values) ->
             values.fold(0L) { total, allocation -> Math.addExact(total, allocation.budgetMinor) } <= periodsById.getValue(periodId).newFundsMinor
         }) { "Los presupuestos superan los fondos del periodo" }
-        require(payload.movements.all {
-            it.periodId in periodIds && it.pocketId in pocketIds && (it.paymentMethodId == null || it.paymentMethodId in methodIds) &&
-                it.accountingAmountMinor > 0 && it.type in MovementType.entries.map { type -> type.name } &&
-                it.currency.matches(Regex("[A-Z]{3}")) && it.conversion in ConversionStatus.entries.map { status -> status.name } &&
-                it.localDate >= periodsById.getValue(it.periodId).start && it.localDate < periodsById.getValue(it.periodId).endExclusive &&
-                (it.currency == "SAR" || (it.originalAmountMinor ?: 0) > 0) && it.zoneId == "Asia/Riyadh"
+        require(payload.movements.all { movement ->
+            movement.periodId in periodIds && movement.pocketId in pocketIds &&
+                (movement.paymentMethodId == null || movement.paymentMethodId in methodIds) &&
+                movement.accountingAmountMinor > 0 && movement.type in MovementType.entries.map { type -> type.name } &&
+                movement.conversion in ConversionStatus.entries.map { status -> status.name } &&
+                movement.localDate >= periodsById.getValue(movement.periodId).start &&
+                movement.localDate < periodsById.getValue(movement.periodId).endExclusive &&
+                movement.zoneId == "Asia/Riyadh" && runCatching {
+                    val accountingCurrency = SupportedCurrency.fromCode(
+                        periodsById.getValue(movement.periodId).accountingCurrencyCode
+                    )
+                    val originalCurrency = SupportedCurrency.fromCode(movement.currency)
+                    val originalAmountIsValid = if (originalCurrency == accountingCurrency) {
+                        movement.originalAmountMinor == null &&
+                            movement.conversion == ConversionStatus.CONFIRMED.name && movement.rate == null
+                    } else {
+                        (movement.originalAmountMinor ?: 0) > 0
+                    }
+                    val rateIsValid = movement.rate == null ||
+                        (movement.rate.toBigDecimalOrNull()?.signum() ?: 0) > 0
+                    originalAmountIsValid && rateIsValid
+                }.getOrDefault(false)
         }) { "Relación de movimiento inválida" }
         require(payload.templates.all {
             it.name.isNotBlank() && it.amountMinor > 0 && it.pocketId in pocketIds &&
@@ -272,7 +292,8 @@ internal object BackupCodec {
         }) {
             "Relación de plantilla inválida"
         }
-        require(payload.ledgerPreferences?.defaultPaymentMethodId.let { it == null || it in methodIds }) {
+        val activeMethodIds = payload.paymentMethods.filterNot { it.archived }.mapTo(mutableSetOf()) { it.id }
+        require(payload.ledgerPreferences?.defaultPaymentMethodId.let { it == null || it in activeMethodIds }) {
             "Método predeterminado inválido"
         }
         payload.pendingCurrencyChange?.let { pending ->

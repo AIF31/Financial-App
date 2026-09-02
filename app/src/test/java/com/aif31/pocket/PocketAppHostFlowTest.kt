@@ -146,6 +146,12 @@ class PocketAppHostFlowTest {
         compose.onNodeWithText("Más detalles").performClick()
         compose.onNodeWithTag("movement_form").performScrollToNode(hasText("✓ USD"))
         compose.onNodeWithText("✓ USD").assertIsDisplayed()
+        compose.onNodeWithTag("movement_amount").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(""))
+        )
+        compose.onNodeWithTag("movement_original_amount").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("25.00"))
+        )
     }
 
     @Test
@@ -801,7 +807,6 @@ class PocketAppHostFlowTest {
                     accountingAmountMinor = 2_000,
                     occurredAtUtcMillis = Instant.parse("2026-03-26T09:00:00Z").toEpochMilli(),
                     localDate = LocalDate.of(2026, 3, 26),
-                    originalAmountMinor = 2_000,
                     originalCurrencyCode = "MXN",
                 )
             )
@@ -815,6 +820,14 @@ class PocketAppHostFlowTest {
 
         compose.waitUntilExactlyOneExists(hasText("MXN 180.00"), 5_000)
         compose.onNodeWithText("MXN 180.00").assertIsDisplayed()
+        compose.onNodeWithTag("contextual_add").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Guardar gasto · MXN 0.00"), 5_000)
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("Más detalles"))
+        compose.onNodeWithText("Más detalles").performClick()
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("Fecha (AAAA-MM-DD)"))
+        compose.onNodeWithText("Fecha (AAAA-MM-DD)").performTextReplacement("2026-02-26")
+        compose.waitUntilExactlyOneExists(hasText("Guardar gasto · SAR 0.00"), 5_000)
+        compose.onNodeWithContentDescription("Cerrar").performClick()
         compose.waitUntilExactlyOneExists(hasText("Pockets"), 5_000)
         compose.onNodeWithText("Pockets").performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("pockets_list"), 5_000)
