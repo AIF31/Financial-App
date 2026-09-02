@@ -1,7 +1,9 @@
 package com.aif31.pocket.fx
 
 import com.aif31.pocket.domain.SupportedCurrency
+import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.math.BigDecimal
 import java.net.URL
 import java.nio.charset.StandardCharsets
@@ -62,9 +64,7 @@ class UrlConnectionBanxicoTransport(
                 if (connection.responseCode != HttpsURLConnection.HTTP_OK) {
                     throw IOException("Proveedor no disponible")
                 }
-                val bytes = connection.inputStream.use { input -> input.readNBytes(MAX_RESPONSE_BYTES + 1) }
-                if (bytes.size > MAX_RESPONSE_BYTES) throw IOException("Respuesta demasiado grande")
-                String(bytes, StandardCharsets.UTF_8)
+                connection.inputStream.use { input -> readBounded(input, MAX_RESPONSE_BYTES) }
             } finally {
                 connection.disconnect()
             }
@@ -75,6 +75,21 @@ class UrlConnectionBanxicoTransport(
         const val MAX_RESPONSE_BYTES = 256 * 1024
         val ISO_DATE: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
     }
+}
+
+internal fun readBounded(input: InputStream, maximumBytes: Int): String {
+    require(maximumBytes >= 0)
+    val output = ByteArrayOutputStream(minOf(maximumBytes, DEFAULT_BUFFER_SIZE))
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var total = 0
+    while (total <= maximumBytes) {
+        val count = input.read(buffer, 0, minOf(buffer.size, maximumBytes + 1 - total))
+        if (count < 0) break
+        output.write(buffer, 0, count)
+        total += count
+    }
+    if (total > maximumBytes) throw IOException("Respuesta demasiado grande")
+    return output.toString(StandardCharsets.UTF_8.name())
 }
 
 internal fun parseBanxicoUsdToMxn(payload: String, requestedDate: LocalDate): FxQuote {

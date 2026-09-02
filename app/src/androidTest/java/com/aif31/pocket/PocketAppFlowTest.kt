@@ -349,6 +349,10 @@ class PocketAppFlowTest {
         val current: AppPreferences get() = values.value
         override suspend fun setFuturePeriodStartDay(day: Int) { values.value = values.value.copy(futurePeriodStartDay = day) }
         override suspend fun setReminder(enabled: Boolean, time: LocalTime) { values.value = values.value.copy(reminderEnabled = enabled, reminderTime = time) }
+        override suspend fun setOnlineFxEnabled(enabled: Boolean) { values.value = values.value.copy(onlineFxEnabled = enabled) }
+        override suspend fun setDefaultExpenseCurrency(currency: com.aif31.pocket.domain.SupportedCurrency) {
+            values.value = values.value.copy(defaultExpenseCurrency = currency)
+        }
     }
 
     private class FakeReminderScheduler : ReminderScheduler {

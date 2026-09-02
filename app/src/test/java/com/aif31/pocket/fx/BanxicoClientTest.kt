@@ -1,6 +1,8 @@
 package com.aif31.pocket.fx
 
 import com.aif31.pocket.domain.SupportedCurrency
+import java.io.ByteArrayInputStream
+import java.io.IOException
 import java.time.LocalDate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
@@ -60,6 +62,14 @@ class BanxicoClientTest {
 
         assertThrows(CancellationException::class.java) {
             runTest { client.fetchUsdToMxn(requested) }
+        }
+    }
+
+    @Test
+    fun `bounded response reader accepts the limit and rejects one extra byte`() {
+        assertEquals("1234", readBounded(ByteArrayInputStream("1234".encodeToByteArray()), 4))
+        assertThrows(IOException::class.java) {
+            readBounded(ByteArrayInputStream("12345".encodeToByteArray()), 4)
         }
     }
 

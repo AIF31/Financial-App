@@ -296,6 +296,12 @@ class PocketUiUxReviewTourTest {
         override suspend fun setReminder(enabled: Boolean, time: LocalTime) {
             values.value = values.value.copy(reminderEnabled = enabled, reminderTime = time)
         }
+        override suspend fun setOnlineFxEnabled(enabled: Boolean) {
+            values.value = values.value.copy(onlineFxEnabled = enabled)
+        }
+        override suspend fun setDefaultExpenseCurrency(currency: com.aif31.pocket.domain.SupportedCurrency) {
+            values.value = values.value.copy(defaultExpenseCurrency = currency)
+        }
     }
 
     private companion object {
