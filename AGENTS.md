@@ -7,6 +7,12 @@ The canonical development checkout is the Windows project at
 source edits there. Treat WSL copies as reference-only unless the user explicitly
 requests WSL development.
 
+### Physical-device testing
+
+Before any test or install on a physical Android device, read
+`docs/agents/physical-device-testing.md` and follow its personal-data
+preservation procedure.
+
 ### Issue tracker
 
 Issues and specs are tracked in GitHub Issues for AIF31/Financial-App. See `docs/agents/issue-tracker.md`.
