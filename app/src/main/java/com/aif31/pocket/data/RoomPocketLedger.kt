@@ -110,6 +110,7 @@ class RoomPocketLedger(
                 endExclusiveEpochDay = bounds.endExclusive.toEpochDay(),
                 newFundsMinor = command.newFundsMinor,
                 configuredStartDay = command.startDay,
+                accountingCurrencyCode = command.accountingCurrency.name,
             )
         )
         val pockets = INITIAL_POCKETS.mapIndexed { index, (name, iconKey) ->

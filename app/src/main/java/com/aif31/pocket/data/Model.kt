@@ -148,7 +148,11 @@ data class LedgerState(
 }
 
 sealed interface LedgerCommand {
-    data class Initialize(val newFundsMinor: Long, val startDay: Int = 25) : LedgerCommand
+    data class Initialize(
+        val newFundsMinor: Long,
+        val startDay: Int = 25,
+        val accountingCurrency: SupportedCurrency = SupportedCurrency.SAR,
+    ) : LedgerCommand
     data class UpdatePeriodFunds(val periodId: String, val newFundsMinor: Long) : LedgerCommand
     data class SetAllocation(val periodId: String, val pocketId: String, val amountMinor: Long) : LedgerCommand
     data class UpsertPocket(

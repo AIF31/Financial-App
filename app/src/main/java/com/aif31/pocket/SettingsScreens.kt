@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.*
 import com.aif31.pocket.domain.Money
 import com.aif31.pocket.domain.SupportedCurrency
+import com.aif31.pocket.fx.ExchangeRateRepository
+import com.aif31.pocket.fx.QuoteFailure
 import com.aif31.pocket.settings.*
 import com.aif31.pocket.ui.*
 import java.time.LocalTime
@@ -30,6 +32,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 @Composable
 internal fun SettingsScreen(
@@ -37,6 +40,7 @@ internal fun SettingsScreen(
     ledger: PocketLedger,
     preferences: AppPreferences,
     preferencesStore: PreferencesStore?,
+    exchangeRates: ExchangeRateRepository? = null,
     reminderScheduler: ReminderScheduler?,
     onCreateBackup: () -> Unit,
     onCreateCsv: () -> Unit,
@@ -54,6 +58,18 @@ internal fun SettingsScreen(
         )
         return
     }
+    if (selectedSection == SettingsSection.CURRENCY) {
+        CurrencySettingsRoute(
+            state = state,
+            ledger = ledger,
+            preferences = preferences,
+            preferencesStore = preferencesStore,
+            exchangeRates = exchangeRates,
+            padding = padding,
+            onBack = { onSectionChange(null) },
+        )
+        return
+    }
     SettingsDetailScreen(
         state = state,
         ledger = ledger,
@@ -68,6 +84,112 @@ internal fun SettingsScreen(
         section = selectedSection,
         onBack = { onSectionChange(null) },
     )
+}
+
+@Composable
+private fun CurrencySettingsRoute(
+    state: LedgerState,
+    ledger: PocketLedger,
+    preferences: AppPreferences,
+    preferencesStore: PreferencesStore?,
+    exchangeRates: ExchangeRateRepository?,
+    padding: PaddingValues,
+    onBack: () -> Unit,
+) {
+    val currentPeriod = state.currentPeriod ?: return
+    val currentCurrency = currentPeriod.accountingCurrency
+    val requestedDate = currentPeriod.endExclusive
+    val scope = rememberCoroutineScope()
+    var targetCurrency by rememberSaveable(currentCurrency) {
+        mutableStateOf(SupportedCurrency.entries.first { it != currentCurrency })
+    }
+    var quoteState by remember { mutableStateOf<CurrencyQuoteState>(CurrencyQuoteState.Idle) }
+    var refreshGeneration by rememberSaveable { mutableIntStateOf(0) }
+    var quoteCancelled by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(
+        currentCurrency,
+        targetCurrency,
+        requestedDate,
+        preferences.onlineFxEnabled,
+        state.pendingCurrencyChange,
+        exchangeRates,
+        refreshGeneration,
+        quoteCancelled,
+    ) {
+        if (!preferences.onlineFxEnabled || state.pendingCurrencyChange != null || quoteCancelled) {
+            quoteState = CurrencyQuoteState.Idle
+            return@LaunchedEffect
+        }
+        val repository = exchangeRates
+        if (repository == null) {
+            quoteState = CurrencyQuoteState.Error(QuoteFailure.ConfigurationUnavailable().message.orEmpty())
+            return@LaunchedEffect
+        }
+        quoteState = CurrencyQuoteState.Loading
+        quoteState = try {
+            CurrencyQuoteState.Ready(
+                repository.quote(
+                    requestedDate = requestedDate,
+                    base = currentCurrency,
+                    quote = targetCurrency,
+                    forceRefresh = refreshGeneration > 0,
+                )
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: QuoteFailure) {
+            CurrencyQuoteState.Error(error.message.orEmpty())
+        } catch (_: Exception) {
+            CurrencyQuoteState.Error(QuoteFailure.Unavailable().message.orEmpty())
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+        TextButton(onClick = onBack) { Text("Atrás") }
+        CurrencySettingsContent(
+            state = CurrencySettingsUiState(
+                currentCurrency = currentCurrency,
+                onlineFxEnabled = preferences.onlineFxEnabled,
+                defaultExpenseCurrency = preferences.defaultExpenseCurrency,
+                targetCurrency = targetCurrency,
+                quoteState = quoteState,
+                pendingChange = state.pendingCurrencyChange?.boundary,
+            ),
+            contentPadding = PaddingValues(16.dp),
+            onOnlineFxEnabledChange = { enabled ->
+                scope.launch { preferencesStore?.setOnlineFxEnabled(enabled) }
+            },
+            onDefaultExpenseCurrencyChange = { currency ->
+                scope.launch { preferencesStore?.setDefaultExpenseCurrency(currency) }
+            },
+            onTargetCurrencyChange = { currency ->
+                targetCurrency = currency
+                quoteCancelled = false
+            },
+            onRefreshQuote = {
+                quoteCancelled = false
+                refreshGeneration++
+            },
+            onCancelQuote = { quoteCancelled = true },
+            onConfirmTransition = {
+                val quote = (quoteState as? CurrencyQuoteState.Ready)?.quote ?: return@CurrencySettingsContent
+                scope.launch {
+                    ledger.execute(
+                        LedgerCommand.ScheduleCurrencyChange(
+                            targetCurrency = quote.quote,
+                            rate = quote.rate,
+                            effectiveDate = requestedDate,
+                            source = quote.source,
+                        )
+                    )
+                }
+            },
+            onCancelPendingTransition = {
+                scope.launch { ledger.execute(LedgerCommand.CancelCurrencyChange) }
+            },
+        )
+    }
 }
 
 @Composable

@@ -37,6 +37,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -66,6 +67,7 @@ import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.Movement
 import com.aif31.pocket.data.PocketLedger
 import com.aif31.pocket.domain.Money
+import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.settings.AppPreferences
 import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
@@ -75,6 +77,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
+import com.aif31.pocket.fx.ExchangeRateRepository
 
 @Serializable
 private enum class RootScreen(val label: String, val icon: ImageVector) {
@@ -99,6 +102,7 @@ private data class SettingsDetailRoute(val section: SettingsSection) : PocketRou
 fun PocketApp(
     ledger: PocketLedger,
     preferences: PreferencesStore? = null,
+    exchangeRates: ExchangeRateRepository? = null,
     reminderScheduler: ReminderScheduler? = null,
     openNewExpense: Boolean = false,
     restoreCandidate: ByteArray? = null,
@@ -320,6 +324,7 @@ fun PocketApp(
                         ledger = ledger,
                         preferences = preferenceState,
                         preferencesStore = preferences,
+                        exchangeRates = exchangeRates,
                         reminderScheduler = reminderScheduler,
                         onCreateBackup = onCreateBackup,
                         onCreateCsv = onCreateCsv,
@@ -345,6 +350,7 @@ fun PocketApp(
 private fun OnboardingScreen(ledger: PocketLedger, preferences: PreferencesStore?, onPickBackup: () -> Unit) {
     var funds by rememberSaveable { mutableStateOf("") }
     var startDay by rememberSaveable { mutableStateOf("25") }
+    var accountingCurrency by rememberSaveable { mutableStateOf(SupportedCurrency.SAR) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     LazyColumn(
@@ -376,10 +382,18 @@ private fun OnboardingScreen(ledger: PocketLedger, preferences: PreferencesStore
                         modifier = Modifier.padding(20.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
+                        Text("Moneda contable", style = MaterialTheme.typography.titleMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SupportedCurrency.entries.forEach { currency ->
+                                OutlinedButton(onClick = { accountingCurrency = currency }) {
+                                    Text(if (accountingCurrency == currency) "✓ ${currency.name}" else currency.name)
+                                }
+                            }
+                        }
                         OutlinedTextField(
                             value = funds,
                             onValueChange = { funds = it },
-                            label = { Text("Fondos nuevos (SAR)") },
+                            label = { Text("Fondos nuevos (${accountingCurrency.name})") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.fillMaxWidth().testTag("new_funds"),
                         )
@@ -400,12 +414,16 @@ private fun OnboardingScreen(ledger: PocketLedger, preferences: PreferencesStore
                         scope.launch {
                             runCatching {
                                 LedgerCommand.Initialize(
-                                    newFundsMinor = Money.parse(funds, "SAR").minor,
+                                    newFundsMinor = Money.parse(funds, accountingCurrency.name).minor,
                                     startDay = startDay.toInt(),
+                                    accountingCurrency = accountingCurrency,
                                 )
                             }.onSuccess {
                                 when (val result = ledger.execute(it)) {
-                                    LedgerResult.Success -> preferences?.setFuturePeriodStartDay(it.startDay)
+                                    LedgerResult.Success -> {
+                                        preferences?.setFuturePeriodStartDay(it.startDay)
+                                        preferences?.setDefaultExpenseCurrency(it.accountingCurrency)
+                                    }
                                     is LedgerResult.Rejected -> error = result.message
                                     is LedgerResult.Deleted -> Unit
                                 }

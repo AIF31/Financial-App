@@ -77,6 +77,25 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
+    fun onboarding_initializes_the_first_period_in_the_selected_accounting_currency() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+
+        assertEquals(
+            LedgerResult.Success,
+            ledger.execute(
+                LedgerCommand.Initialize(
+                    newFundsMinor = 100_000,
+                    accountingCurrency = SupportedCurrency.MXN,
+                )
+            ),
+        )
+
+        val state = ledger.state.first { !it.needsOnboarding }
+        assertEquals(SupportedCurrency.MXN, state.currentPeriod?.accountingCurrency)
+        assertEquals(100_000L, state.currentPeriod?.newFundsMinor)
+    }
+
+    @Test
     fun editing_historical_spend_cascades_rollover_without_mutating_later_period_data() = runTest {
         val ledger = RoomPocketLedger(database, clock, zone)
         val dao = database.financeDao()
