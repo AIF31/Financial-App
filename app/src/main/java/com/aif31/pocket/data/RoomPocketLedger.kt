@@ -269,10 +269,19 @@ class RoomPocketLedger(
         if (originalCurrency == accountingCurrency) {
             require(
                 command.originalAmountMinor == null && command.conversionStatus == ConversionStatus.CONFIRMED &&
-                    command.rate == null
+                    command.rate == null && command.conversionEffectiveDate == null && command.conversionSource == null
             ) { "La conversión no corresponde a un movimiento en la moneda contable" }
         } else {
             require((command.originalAmountMinor ?: 0) > 0) { "Falta el importe en la moneda original" }
+            // Legacy manual conversions have no provider provenance. Preserve them unchanged.
+            if (command.conversionEffectiveDate != null || command.conversionSource != null) {
+                require(command.rate != null) { "Falta el tipo de cambio confirmado" }
+                val effectiveDate = requireNotNull(command.conversionEffectiveDate) { "Falta la fecha efectiva del tipo de cambio" }
+                require(!effectiveDate.isAfter(command.localDate) && !effectiveDate.isBefore(command.localDate.minusDays(7))) {
+                    "Fecha efectiva del tipo de cambio inválida"
+                }
+                require(!command.conversionSource.isNullOrBlank()) { "Falta la fuente del tipo de cambio" }
+            }
         }
         val existing = command.id?.let { dao.movement(it) }
         val pocket = requireNotNull(dao.pockets().firstOrNull { it.id == command.pocketId }) { "Pocket inexistente" }
@@ -346,6 +355,12 @@ class RoomPocketLedger(
             }
             val source = command.source.trim()
             require(source.isNotEmpty()) { "Falta la fuente del tipo de cambio" }
+            command.quoteEffectiveDate?.let { observed ->
+                require(!observed.isAfter(today()) && !observed.isBefore(today().minusDays(7))) {
+                    "La cotización debe ser reciente y no futura"
+                }
+                require(!observed.isAfter(command.effectiveDate)) { "Cotización posterior al cambio" }
+            }
             FrozenRate(from, command.targetCurrency, command.rate)
             dao.putPendingCurrencyChange(
                 PendingCurrencyChangeEntity(
@@ -354,6 +369,7 @@ class RoomPocketLedger(
                     rate = command.rate,
                     effectiveEpochDay = command.effectiveDate.toEpochDay(),
                     source = source,
+                    quoteEffectiveEpochDay = command.quoteEffectiveDate?.toEpochDay(),
                 )
             )
             LedgerResult.Success
@@ -462,6 +478,7 @@ class RoomPocketLedger(
             priorBoundaryRate = pending?.rate,
             priorBoundaryEffectiveEpochDay = pending?.effectiveEpochDay,
             priorBoundarySource = pending?.source,
+            priorBoundaryQuoteEffectiveEpochDay = pending?.quoteEffectiveEpochDay,
         )
         dao.putPeriod(next)
         val activePockets = dao.pockets().filterNot { it.archived }
@@ -735,6 +752,7 @@ private fun PeriodEntity.toModel() = Period(
             rate = rate,
             effectiveDate = LocalDate.ofEpochDay(requireNotNull(priorBoundaryEffectiveEpochDay)),
             source = requireNotNull(priorBoundarySource),
+            quoteEffectiveDate = priorBoundaryQuoteEffectiveEpochDay?.let(LocalDate::ofEpochDay),
         )
     },
 )
@@ -746,6 +764,7 @@ private fun PendingCurrencyChangeEntity.toModel() = PendingCurrencyChange(
         rate = rate,
         effectiveDate = LocalDate.ofEpochDay(effectiveEpochDay),
         source = source,
+        quoteEffectiveDate = quoteEffectiveEpochDay?.let(LocalDate::ofEpochDay),
     )
 )
 
@@ -784,6 +803,8 @@ private fun MovementEntity.toModel(
     originalCurrencyCode = originalCurrencyCode,
     conversionStatus = ConversionStatus.valueOf(conversionStatus),
     rate = rate,
+    conversionEffectiveDate = conversionEffectiveEpochDay?.let(LocalDate::ofEpochDay),
+    conversionSource = conversionSource,
 )
 
 private fun LedgerCommand.AddMovement.toEntity(
@@ -806,9 +827,26 @@ private fun LedgerCommand.AddMovement.toEntity(
     originalCurrencyCode = resolvedOriginalCurrencyCode,
     conversionStatus = conversionStatus.name,
     rate = rate,
+    conversionEffectiveEpochDay = conversionEffectiveDate?.toEpochDay(),
+    conversionSource = conversionSource?.trim()?.takeIf { it.isNotEmpty() },
 )
 
 private fun Movement.toEntity() = MovementEntity(
-    id, periodId, pocketId, type.name, accountingAmountMinor, occurredAtUtcMillis, localDate.toEpochDay(), zoneId,
-    merchant, note, paymentMethodId, originalAmountMinor, originalCurrencyCode, conversionStatus.name, rate,
+    id = id,
+    periodId = periodId,
+    pocketId = pocketId,
+    type = type.name,
+    accountingAmountMinor = accountingAmountMinor,
+    occurredAtUtcMillis = occurredAtUtcMillis,
+    localEpochDay = localDate.toEpochDay(),
+    zoneId = zoneId,
+    merchant = merchant,
+    note = note,
+    paymentMethodId = paymentMethodId,
+    originalAmountMinor = originalAmountMinor,
+    originalCurrencyCode = originalCurrencyCode,
+    conversionStatus = conversionStatus.name,
+    rate = rate,
+    conversionEffectiveEpochDay = conversionEffectiveDate?.toEpochDay(),
+    conversionSource = conversionSource,
 )

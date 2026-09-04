@@ -9,6 +9,7 @@ data class CurrencyBoundary(
     val rate: String,
     val effectiveDate: LocalDate,
     val source: String,
+    val quoteEffectiveDate: LocalDate? = null,
 )
 
 data class PendingCurrencyChange(
@@ -90,6 +91,8 @@ data class Movement(
     val originalCurrencyCode: String,
     val conversionStatus: ConversionStatus,
     val rate: String?,
+    val conversionEffectiveDate: LocalDate?,
+    val conversionSource: String?,
 )
 
 data class PaymentMethod(val id: String, val name: String, val archived: Boolean)
@@ -177,6 +180,8 @@ sealed interface LedgerCommand {
         val originalCurrencyCode: String? = null,
         val conversionStatus: ConversionStatus = ConversionStatus.CONFIRMED,
         val rate: String? = null,
+        val conversionEffectiveDate: LocalDate? = null,
+        val conversionSource: String? = null,
         val accountingCurrency: SupportedCurrency? = null,
     ) : LedgerCommand
     data class DeleteMovement(val movementId: String) : LedgerCommand
@@ -189,6 +194,7 @@ sealed interface LedgerCommand {
         val rate: String,
         val effectiveDate: LocalDate,
         val source: String,
+        val quoteEffectiveDate: LocalDate? = null,
     ) : LedgerCommand
     data object CancelCurrencyChange : LedgerCommand
     data class UpsertPaymentMethod(val id: String? = null, val name: String) : LedgerCommand

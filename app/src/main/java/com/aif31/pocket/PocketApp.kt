@@ -227,6 +227,9 @@ fun PocketApp(
         MovementDialog(
             state = state,
             ledger = ledger,
+            defaultExpenseCurrency = preferenceState.defaultExpenseCurrency,
+            onlineFxEnabled = preferenceState.onlineFxEnabled,
+            exchangeRates = exchangeRates,
             onDismiss = { backStack.removeLastOrNull() },
             onSaved = {
                 navigateRoot(
@@ -464,6 +467,9 @@ private fun DashboardScreen(
 private fun MovementDialog(
     state: LedgerState,
     ledger: PocketLedger,
+    defaultExpenseCurrency: SupportedCurrency,
+    onlineFxEnabled: Boolean,
+    exchangeRates: ExchangeRateRepository?,
     onDismiss: () -> Unit,
     onSaved: () -> Unit,
     initialMovement: Movement? = null,
@@ -475,5 +481,8 @@ private fun MovementDialog(
         onSaved = onSaved,
         movementDefaults = ledger.movementDefaults(),
         initialMovement = initialMovement,
+        defaultExpenseCurrency = defaultExpenseCurrency,
+        onlineFxEnabled = onlineFxEnabled,
+        exchangeRates = exchangeRates,
     )
 }

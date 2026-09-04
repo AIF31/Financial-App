@@ -98,7 +98,8 @@ private fun CurrencySettingsRoute(
 ) {
     val currentPeriod = state.currentPeriod ?: return
     val currentCurrency = currentPeriod.accountingCurrency
-    val requestedDate = currentPeriod.endExclusive
+    val activationDate = currentPeriod.endExclusive
+    val requestedDate = state.currentLocalDate
     val scope = rememberCoroutineScope()
     var targetCurrency by rememberSaveable(currentCurrency) {
         mutableStateOf(SupportedCurrency.entries.first { it != currentCurrency })
@@ -179,8 +180,9 @@ private fun CurrencySettingsRoute(
                         LedgerCommand.ScheduleCurrencyChange(
                             targetCurrency = quote.quote,
                             rate = quote.rate,
-                            effectiveDate = requestedDate,
+                            effectiveDate = activationDate,
                             source = quote.source,
+                            quoteEffectiveDate = quote.effectiveDate,
                         )
                     )
                 }

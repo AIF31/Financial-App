@@ -98,6 +98,7 @@ internal fun CurrencySettingsContent(
                         Text("Se aplicará al próximo periodo desde ${pending.effectiveDate}")
                         Text("1 ${pending.from.name} = ${pending.rate} ${pending.to.name}")
                         Text("Fuente: ${pending.source}")
+                        Text("Cotización efectiva: ${pending.quoteEffectiveDate ?: "No registrada"}")
                         OutlinedButton(onClick = onCancelPendingTransition) { Text("Cancelar cambio pendiente") }
                     }
                 }

@@ -239,20 +239,27 @@ class FinanceDatabaseMigrationTest {
             true,
             FinanceDatabase.MIGRATION_5_6,
         ).use { database ->
-            database.query("SELECT accounting_amount_minor, original_currency_code, rate FROM movements").use { cursor ->
+            database.query("SELECT accounting_amount_minor, original_currency_code, rate, conversion_effective_epoch_day, conversion_source FROM movements").use { cursor ->
                 assertTrue(cursor.moveToFirst())
                 assertEquals(12_345L, cursor.getLong(0))
                 assertEquals("USD", cursor.getString(1))
                 assertEquals("1.2345", cursor.getString(2))
+                assertTrue(cursor.isNull(3))
+                assertTrue(cursor.isNull(4))
             }
             database.query("SELECT input_currency_code FROM recurring_templates").use { cursor ->
                 assertTrue(cursor.moveToFirst())
                 assertEquals("USD", cursor.getString(0))
             }
-            database.query("SELECT target_currency_code, rate FROM pending_currency_change").use { cursor ->
+            database.query("SELECT target_currency_code, rate, quote_effective_epoch_day FROM pending_currency_change").use { cursor ->
                 assertTrue(cursor.moveToFirst())
                 assertEquals("MXN", cursor.getString(0))
                 assertEquals("4.5", cursor.getString(1))
+                assertTrue(cursor.isNull(2))
+            }
+            database.query("SELECT prior_boundary_quote_effective_epoch_day FROM periods").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertTrue(cursor.isNull(0))
             }
             database.query("SELECT COUNT(*) FROM fx_rate_cache").use { cursor ->
                 assertTrue(cursor.moveToFirst())

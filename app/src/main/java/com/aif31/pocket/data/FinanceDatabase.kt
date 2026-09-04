@@ -33,6 +33,7 @@ data class PeriodEntity(
     @ColumnInfo(name = "prior_boundary_rate") val priorBoundaryRate: String? = null,
     @ColumnInfo(name = "prior_boundary_effective_epoch_day") val priorBoundaryEffectiveEpochDay: Long? = null,
     @ColumnInfo(name = "prior_boundary_source") val priorBoundarySource: String? = null,
+    @ColumnInfo(name = "prior_boundary_quote_effective_epoch_day") val priorBoundaryQuoteEffectiveEpochDay: Long? = null,
 )
 
 @Entity(tableName = "pockets", indices = [Index(value = ["name"], unique = true)])
@@ -124,6 +125,8 @@ data class MovementEntity(
     @ColumnInfo(name = "original_currency_code") val originalCurrencyCode: String,
     @ColumnInfo(name = "conversion_status") val conversionStatus: String,
     val rate: String?,
+    @ColumnInfo(name = "conversion_effective_epoch_day") val conversionEffectiveEpochDay: Long?,
+    @ColumnInfo(name = "conversion_source") val conversionSource: String?,
 )
 
 @Entity(
@@ -153,6 +156,7 @@ data class PendingCurrencyChangeEntity(
     val rate: String,
     @ColumnInfo(name = "effective_epoch_day") val effectiveEpochDay: Long,
     val source: String,
+    @ColumnInfo(name = "quote_effective_epoch_day") val quoteEffectiveEpochDay: Long? = null,
 ) {
     companion object { const val SINGLETON_ID = 1 }
 }
@@ -411,6 +415,10 @@ abstract class FinanceDatabase : RoomDatabase() {
 
         internal val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE periods ADD COLUMN prior_boundary_quote_effective_epoch_day INTEGER")
+                db.execSQL("ALTER TABLE pending_currency_change ADD COLUMN quote_effective_epoch_day INTEGER")
+                db.execSQL("ALTER TABLE movements ADD COLUMN conversion_effective_epoch_day INTEGER")
+                db.execSQL("ALTER TABLE movements ADD COLUMN conversion_source TEXT")
                 db.execSQL(
                     "CREATE TABLE IF NOT EXISTS fx_rate_cache (" +
                         "base_currency_code TEXT NOT NULL, quote_currency_code TEXT NOT NULL, " +

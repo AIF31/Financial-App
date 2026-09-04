@@ -10,6 +10,35 @@
 
 **Spec:** `C:\Users\alan1\AppData\Local\Temp\financial-app-historical-multicurrency-handoff.md` (locked decisions and PR 3 section)
 
+## Execution status (2026-09-04)
+
+Tasks 1–7 are implemented. The original step checklists below describe the
+test-first implementation sequence; this status records the final implementation
+choices and release evidence.
+
+- Quote resolution is a plain state holder; the screen owns saved draft fields
+  and request-keyed coroutine cancellation. Template application invalidates
+  frozen-edit reuse even when amount and currency match.
+- Same-currency arithmetic is exact rate 1. Persistence retains the existing
+  canonical null-rate/null-provenance representation rather than rewriting
+  legacy rows. Foreign metadata-only edits preserve all saved conversion fields.
+- A transition's activation date and quote observation date are distinct. The
+  Settings request uses today, and the optional observation survives pending
+  storage, activation, backup, and restore. Legacy observations remain unknown.
+- Spec and Standards rechecks cleared their findings. Malformed quote dates are
+  rejected before backup replacement; regression tests prove existing data is
+  unchanged.
+- Final combined JDK 17 gate: 121 host tests and 15/15 Pixel 6 API 35 tests passed;
+  lint, debug/release assembly, and test APK assembly passed through the compact
+  Gradle wrapper (run 0067), with no warning fingerprints. The visual tour now
+  covers consent-blocked foreign entry and offline recovery using stable currency
+  semantics instead of removed manual-conversion controls.
+- Local release gates are complete. Publish the stacked PR against
+  `codex/currency-ledger-foundation` and confirm its GitHub checks before handoff.
+- Physical-device scope: use the disposable Pixel 6 API 35 device for this
+  acceptance work. No Galaxy install, launch, instrumentation, or data mutation
+  is needed. The earlier Android 16 visual-tour finding is not claimed fixed.
+
 ## Global Constraints
 
 - Supported currencies are exactly SAR, USD, and MXN, each with two fractional digits.

@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 6,
-    "identityHash": "d74f63873f904d5ad9aedff34178ef4e",
+    "identityHash": "2b0dd7fb0c776c456f5f138837da5946",
     "entities": [
       {
         "tableName": "periods",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `start_epoch_day` INTEGER NOT NULL, `end_exclusive_epoch_day` INTEGER NOT NULL, `new_funds_minor` INTEGER NOT NULL, `configured_start_day` INTEGER NOT NULL, `is_transition` INTEGER NOT NULL DEFAULT 0, `needs_review` INTEGER NOT NULL DEFAULT 0, `accounting_currency_code` TEXT NOT NULL DEFAULT 'SAR', `prior_boundary_from_currency_code` TEXT, `prior_boundary_rate` TEXT, `prior_boundary_effective_epoch_day` INTEGER, `prior_boundary_source` TEXT, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `start_epoch_day` INTEGER NOT NULL, `end_exclusive_epoch_day` INTEGER NOT NULL, `new_funds_minor` INTEGER NOT NULL, `configured_start_day` INTEGER NOT NULL, `is_transition` INTEGER NOT NULL DEFAULT 0, `needs_review` INTEGER NOT NULL DEFAULT 0, `accounting_currency_code` TEXT NOT NULL DEFAULT 'SAR', `prior_boundary_from_currency_code` TEXT, `prior_boundary_rate` TEXT, `prior_boundary_effective_epoch_day` INTEGER, `prior_boundary_source` TEXT, `prior_boundary_quote_effective_epoch_day` INTEGER, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -78,6 +78,11 @@
             "fieldPath": "priorBoundarySource",
             "columnName": "prior_boundary_source",
             "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "priorBoundaryQuoteEffectiveEpochDay",
+            "columnName": "prior_boundary_quote_effective_epoch_day",
+            "affinity": "INTEGER"
           }
         ],
         "primaryKey": {
@@ -438,7 +443,7 @@
       },
       {
         "tableName": "movements",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `period_id` TEXT NOT NULL, `pocket_id` TEXT NOT NULL, `type` TEXT NOT NULL, `accounting_amount_minor` INTEGER NOT NULL, `occurred_at_utc_millis` INTEGER NOT NULL, `local_epoch_day` INTEGER NOT NULL, `zone_id` TEXT NOT NULL, `merchant` TEXT, `note` TEXT, `payment_method_id` TEXT, `original_amount_minor` INTEGER, `original_currency_code` TEXT NOT NULL, `conversion_status` TEXT NOT NULL, `rate` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`period_id`) REFERENCES `periods`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`pocket_id`) REFERENCES `pockets`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`payment_method_id`) REFERENCES `payment_methods`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `period_id` TEXT NOT NULL, `pocket_id` TEXT NOT NULL, `type` TEXT NOT NULL, `accounting_amount_minor` INTEGER NOT NULL, `occurred_at_utc_millis` INTEGER NOT NULL, `local_epoch_day` INTEGER NOT NULL, `zone_id` TEXT NOT NULL, `merchant` TEXT, `note` TEXT, `payment_method_id` TEXT, `original_amount_minor` INTEGER, `original_currency_code` TEXT NOT NULL, `conversion_status` TEXT NOT NULL, `rate` TEXT, `conversion_effective_epoch_day` INTEGER, `conversion_source` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`period_id`) REFERENCES `periods`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`pocket_id`) REFERENCES `pockets`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`payment_method_id`) REFERENCES `payment_methods`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
         "fields": [
           {
             "fieldPath": "id",
@@ -523,6 +528,16 @@
           {
             "fieldPath": "rate",
             "columnName": "rate",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "conversionEffectiveEpochDay",
+            "columnName": "conversion_effective_epoch_day",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "conversionSource",
+            "columnName": "conversion_source",
             "affinity": "TEXT"
           }
         ],
@@ -706,7 +721,7 @@
       },
       {
         "tableName": "pending_currency_change",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `from_currency_code` TEXT NOT NULL, `target_currency_code` TEXT NOT NULL, `rate` TEXT NOT NULL, `effective_epoch_day` INTEGER NOT NULL, `source` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `from_currency_code` TEXT NOT NULL, `target_currency_code` TEXT NOT NULL, `rate` TEXT NOT NULL, `effective_epoch_day` INTEGER NOT NULL, `source` TEXT NOT NULL, `quote_effective_epoch_day` INTEGER, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -743,6 +758,11 @@
             "columnName": "source",
             "affinity": "TEXT",
             "notNull": true
+          },
+          {
+            "fieldPath": "quoteEffectiveEpochDay",
+            "columnName": "quote_effective_epoch_day",
+            "affinity": "INTEGER"
           }
         ],
         "primaryKey": {
@@ -865,7 +885,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'd74f63873f904d5ad9aedff34178ef4e')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '2b0dd7fb0c776c456f5f138837da5946')"
     ]
   }
 }

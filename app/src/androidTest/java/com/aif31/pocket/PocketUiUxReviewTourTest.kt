@@ -3,6 +3,8 @@ package com.aif31.pocket
 import android.content.Context
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -117,7 +119,7 @@ class PocketUiUxReviewTourTest {
         reviewScrollTarget("dashboard_list", "Gasto diario promedio")
         reviewScrollTarget("dashboard_list", "Proyección estimada")
 
-        // New movement: cover Pocket choice, currencies, conversion status, type, payment,
+        // New movement: cover Pocket choice, currencies, consent/offline recovery, type, payment,
         // date/time, merchant, note, and both dialog actions without mutating review data.
         compose.onNodeWithTag("contextual_add").performClick()
         compose.waitUntilExactlyOneExists(hasText("Nuevo gasto"), TIMEOUT)
@@ -126,12 +128,15 @@ class PocketUiUxReviewTourTest {
         compose.onNodeWithTag("movement_pocket_Supermercado").performScrollTo().performClick()
         scrollMovementTo("Más detalles")
         compose.onNodeWithText("Más detalles").performClick()
-        scrollMovementTo("USD")
-        compose.onNodeWithText("USD").performClick()
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasTestTag("movement_currency_USD"))
+        compose.onNodeWithTag("movement_currency_USD").performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithTag("movement_currency_USD").assertTextContains("✓ USD")
+        scrollMovementTo("Activa la conversión en línea")
         pauseForReview()
-        scrollMovementTo("Estimado")
-        compose.onNodeWithText("Estimado").performClick()
-        compose.onNodeWithText("Confirmado").performClick()
+        compose.onNodeWithText("Activa la conversión en línea").assertIsDisplayed()
+        compose.onNodeWithTag("movement_save").assertIsNotEnabled()
+        compose.onNodeWithTag("movement_currency_SAR").performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitUntilExactlyOneExists(hasText("Guardar gasto · SAR 48.75"), TIMEOUT)
         scrollMovementTo("Devolución")
         compose.onNodeWithText("Devolución").performClick()
         pauseForReview()
@@ -170,8 +175,8 @@ class PocketUiUxReviewTourTest {
         compose.onNodeWithText("Editar").performClick()
         compose.waitUntilExactlyOneExists(hasText("Guardar cambios"), TIMEOUT)
         pauseForReview()
-        scrollMovementTo("MXN")
-        compose.onNodeWithText("MXN").performClick()
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasTestTag("movement_currency_MXN"))
+        compose.onNodeWithTag("movement_currency_MXN").performClick()
         pauseForReview()
         compose.onNodeWithContentDescription("Cerrar").performClick()
 
