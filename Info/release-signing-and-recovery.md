@@ -48,6 +48,17 @@ $buildTools = Get-ChildItem "$env:LOCALAPPDATA\Android\Sdk\build-tools" -Directo
 
 Confirm that v2 verification succeeds and the certificate SHA-256 matches the independently stored release fingerprint. A release install should reject `run-as com.aif31.pocket` because it is non-debuggable.
 
+## Publish the APK
+
+After completing the checks in [Release verification](verification/release-verification.md):
+
+1. Create a version tag and GitHub release, such as `v1.0.0`.
+2. Attach the verified APK as `Pocket-v<version>.apk`, such as `Pocket-v1.0.0.apk`, under the release's **Assets** section.
+3. Include the supported Android version, notable changes, and any migration or backup warning in the release notes.
+4. On a clean Android 8.0-or-newer device, download the asset from the public release page and confirm that it installs and launches.
+
+Do not distribute `app-release-unsigned.apk`, a debug APK, the keystore, or signing credentials. The public download location linked from the project README is <https://github.com/AIF31/Financial-App/releases>.
+
 ## Password and migration recovery
 
 DPAPI protects the credential for the current Windows account and machine. It is not a migration backup. Retrieve the password locally and place it in a trusted password manager; never paste it into chat, logs, an issue, or the repository:
@@ -80,7 +91,7 @@ Restore can replace a non-empty ledger after preview and explicit confirmation. 
 
 ## Security findings retained for future releases
 
-- The packaged manifest declares no `android.permission.INTERNET`.
+- The packaged manifest limits network use to HTTPS exchange-rate lookup after explicit user consent; cleartext traffic is disabled.
 - `android:allowBackup="false"`; the explicit document flow is the supported backup path.
 - MainActivity is the only app-owned exported component.
 - WorkManager/ProfileInstaller exported components are protected by system permissions.

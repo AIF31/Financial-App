@@ -4,6 +4,7 @@ This directory is the human-oriented operational knowledge base for Pocket. It s
 
 ## Start here
 
+- [Install Pocket on an Android device](installing-pocket.md): official downloads, sideloading, source builds, updates, and data-safety notes.
 - [Implementation reference](implementation-reference.md): product boundaries, architecture, durable decisions, and repository history.
 - [Windows, Android Studio, and physical-device testing](windows-android-studio-device-testing.md): working environment, build commands, ADB workflow, and device-test precautions.
 - [Release signing and recovery](release-signing-and-recovery.md): permanent key handling, signed builds, verification, backup, uninstall, and restore.

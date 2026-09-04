@@ -49,7 +49,7 @@ Use synthetic values and generic labels in all manual checks:
 
 ## Release security checks
 
-- Packaged manifest declares no `android.permission.INTERNET`.
+- Packaged manifest permits network access for opt-in exchange-rate lookup and disables cleartext traffic.
 - `android:allowBackup="false"`; backup and restore use the app's explicit document flow.
 - The launcher activity is the only app-owned exported component.
 - Exported WorkManager/ProfileInstaller components are guarded by system-only `BIND_JOB_SERVICE` or `DUMP` permissions.

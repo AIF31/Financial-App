@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-Pocket is a Spanish-first, single-user, local-first Android application for manually budgeting declared funds and recording expenses or refunds. It does not model bank accounts, import transactions, authenticate users, synchronize to a backend, or request Internet access.
+Pocket is a Spanish-first, single-user, local-first Android application for manually budgeting declared funds and recording expenses or refunds. It does not model bank accounts, import transactions, authenticate users, or synchronize to a backend. Internet access is limited to exchange-rate lookup after explicit user consent.
 
 The authoritative requirements are in GitHub Issue [AIF31/Financial-App#1](https://github.com/AIF31/Financial-App/issues/1). If an older research plan differs from that issue, the issue wins.
 
@@ -15,7 +15,7 @@ The authoritative requirements are in GitHub Issue [AIF31/Financial-App#1](https
 - Money is stored in integer minor units; `Float` and `Double` are not used for financial amounts.
 - Budget-period assignment uses `Asia/Riyadh`, with day 25 as the default future-period start.
 - SAR is the reporting currency. USD and MXN movements retain their original amount and a manually entered SAR equivalent with estimated or confirmed status.
-- The app has no backend, login, third-party analytics, advertising SDK, or Internet permission.
+- The app has no backend, login, third-party analytics, or advertising SDK. Its Internet permission supports opt-in HTTPS exchange-rate lookup.
 
 ## Canonical language
 
@@ -34,17 +34,18 @@ Use the glossary in `CONTEXT.md`. In particular:
 - Pocket budgets, unassigned funds, selective rollover, and period creation.
 - Manual expenses and refunds, including editing, delete/undo, negative availability, and 80%/100% warning states.
 - Manual SAR, USD, and MXN capture with estimated/confirmed SAR equivalents.
+- Opt-in online USD/MXN exchange-rate lookup with local caching; same-currency and SAR/USD conversion remain available offline.
 - Dashboard totals, daily pace, projection, Pocket availability, previous-period comparison, and historical recalculation.
 - History search and filters for period, Pocket, original currency, and payment method.
 - Manual recurring templates that prefill rather than automatically create movements.
 - Launcher shortcut for `Nuevo gasto`.
 - Optional daily reminder with user-selected time and no financial amount in lock-screen content.
 - Versioned full backup/restore and analytical CSV export through the Storage Access Framework.
-- Offline-only operation and app-private primary storage.
+- Offline core operation and app-private primary storage.
 
 ## Explicitly excluded from the MVP
 
-Bank integrations, notification ingestion, SMS reading, automatic exchange rates, cloud sync, authentication, receipt OCR, AI categorization, widgets, app-specific biometrics, automatic recurring expenses, backup merging, and Google Play publication are outside Issue #1.
+Bank integrations, notification ingestion, SMS reading, cloud sync, authentication, receipt OCR, AI categorization, widgets, app-specific biometrics, automatic recurring expenses, backup merging, and Google Play publication are outside Issue #1.
 
 ## Important implementation history
 
