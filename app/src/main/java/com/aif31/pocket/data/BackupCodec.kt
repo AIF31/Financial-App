@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import com.aif31.pocket.domain.FrozenRate
 import com.aif31.pocket.domain.SupportedCurrency
 import java.nio.charset.StandardCharsets
+import java.time.LocalDate
 import java.util.Locale
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -32,6 +33,7 @@ internal object BackupCodec {
                         it.priorBoundaryRate,
                         it.priorBoundaryEffectiveEpochDay,
                         it.priorBoundarySource,
+                        it.priorBoundaryQuoteEffectiveEpochDay,
                     )
                 },
                 pockets = dao.pockets().map { PocketDto(it.id, it.name, it.sortOrder, it.archived, it.rolloverEnabled, it.iconKey) },
@@ -60,6 +62,8 @@ internal object BackupCodec {
                         currency = it.originalCurrencyCode,
                         conversion = it.conversionStatus,
                         rate = it.rate,
+                        conversionEffectiveDate = it.conversionEffectiveEpochDay,
+                        conversionSource = it.conversionSource,
                     )
                 },
                 templates = dao.templates().map {
@@ -80,6 +84,7 @@ internal object BackupCodec {
                         it.rate,
                         it.effectiveEpochDay,
                         it.source,
+                        it.quoteEffectiveEpochDay,
                     )
                 },
                 ledgerPreferences = dao.ledgerPreferences()?.let { LedgerPreferencesDto(it.defaultPaymentMethodId) },
@@ -201,17 +206,20 @@ internal object BackupCodec {
         }
         require(orderedPeriods.first().let {
             it.priorBoundaryRate == null && it.priorBoundaryFromCurrencyCode == null &&
-                it.priorBoundaryEffectiveEpochDay == null && it.priorBoundarySource == null
+                it.priorBoundaryEffectiveEpochDay == null && it.priorBoundarySource == null &&
+                it.priorBoundaryQuoteEffectiveEpochDay == null
         }) { "El primer periodo no puede tener conversión previa" }
         require(orderedPeriods.zipWithNext().all { (current, next) ->
             val currentCurrency = SupportedCurrency.fromCode(current.accountingCurrencyCode)
             val nextCurrency = SupportedCurrency.fromCode(next.accountingCurrencyCode)
             if (currentCurrency == nextCurrency) {
                 next.priorBoundaryRate == null && next.priorBoundaryFromCurrencyCode == null &&
-                    next.priorBoundaryEffectiveEpochDay == null && next.priorBoundarySource == null
+                    next.priorBoundaryEffectiveEpochDay == null && next.priorBoundarySource == null &&
+                    next.priorBoundaryQuoteEffectiveEpochDay == null
             } else {
                 next.priorBoundaryFromCurrencyCode == currentCurrency.name &&
                     next.priorBoundaryEffectiveEpochDay == next.start &&
+                    validQuoteObservation(next.priorBoundaryQuoteEffectiveEpochDay, next.start) &&
                     !next.priorBoundarySource.isNullOrBlank() &&
                     next.priorBoundaryRate?.let { rate ->
                         runCatching { FrozenRate(currentCurrency, nextCurrency, rate) }.isSuccess
@@ -276,13 +284,20 @@ internal object BackupCodec {
                     val originalCurrency = SupportedCurrency.fromCode(movement.currency)
                     val originalAmountIsValid = if (originalCurrency == accountingCurrency) {
                         movement.originalAmountMinor == null &&
-                            movement.conversion == ConversionStatus.CONFIRMED.name && movement.rate == null
+                            movement.conversion == ConversionStatus.CONFIRMED.name && movement.rate == null &&
+                            movement.conversionEffectiveDate == null && movement.conversionSource == null
                     } else {
                         (movement.originalAmountMinor ?: 0) > 0
                     }
                     val rateIsValid = movement.rate == null ||
                         (movement.rate.toBigDecimalOrNull()?.signum() ?: 0) > 0
-                    originalAmountIsValid && rateIsValid
+                    val provenanceIsValid = if (movement.conversionEffectiveDate == null && movement.conversionSource == null) {
+                        true // Backups containing legacy manual conversions remain restorable.
+                    } else {
+                        movement.rate != null && !movement.conversionSource.isNullOrBlank() &&
+                            movement.conversionEffectiveDate?.let { it in (movement.localDate - 7)..movement.localDate } == true
+                    }
+                    originalAmountIsValid && rateIsValid && provenanceIsValid
                 }.getOrDefault(false)
         }) { "Relación de movimiento inválida" }
         require(payload.templates.all {
@@ -303,11 +318,15 @@ internal object BackupCodec {
             require(
                 from.name == latest.accountingCurrencyCode && from != target &&
                     pending.effectiveEpochDay == latest.endExclusive && pending.source.isNotBlank() &&
+                    validQuoteObservation(pending.quoteEffectiveEpochDay, pending.effectiveEpochDay) &&
                     runCatching { FrozenRate(from, target, pending.rate) }.isSuccess
             ) { "Cambio de moneda pendiente inválido" }
         }
         return payload
     }
+
+    private fun validQuoteObservation(epochDay: Long?, activationEpochDay: Long): Boolean =
+        epochDay == null || (epochDay <= activationEpochDay && runCatching { LocalDate.ofEpochDay(epochDay) }.isSuccess)
 
     private fun csvCell(value: String): String {
         val firstContent = value.firstOrNull { !it.isWhitespace() }
@@ -352,6 +371,7 @@ private data class PeriodDto(
     val priorBoundaryRate: String? = null,
     val priorBoundaryEffectiveEpochDay: Long? = null,
     val priorBoundarySource: String? = null,
+    val priorBoundaryQuoteEffectiveEpochDay: Long? = null,
 ) {
     fun toEntity() = PeriodEntity(
         id,
@@ -366,6 +386,7 @@ private data class PeriodDto(
         priorBoundaryRate,
         priorBoundaryEffectiveEpochDay,
         priorBoundarySource,
+        priorBoundaryQuoteEffectiveEpochDay,
     )
 }
 @Serializable private data class PocketDto(
@@ -419,10 +440,27 @@ private data class MovementDto(
     val currency: String,
     val conversion: String,
     val rate: String?,
+    val conversionEffectiveDate: Long? = null,
+    val conversionSource: String? = null,
 ) {
     fun toEntity() = MovementEntity(
-        id, periodId, pocketId, type, accountingAmountMinor, occurredAt, localDate, zoneId, merchant, note,
-        paymentMethodId, originalAmountMinor, currency, conversion, rate,
+        id = id,
+        periodId = periodId,
+        pocketId = pocketId,
+        type = type,
+        accountingAmountMinor = accountingAmountMinor,
+        occurredAtUtcMillis = occurredAt,
+        localEpochDay = localDate,
+        zoneId = zoneId,
+        merchant = merchant,
+        note = note,
+        paymentMethodId = paymentMethodId,
+        originalAmountMinor = originalAmountMinor,
+        originalCurrencyCode = currency,
+        conversionStatus = conversion,
+        rate = rate,
+        conversionEffectiveEpochDay = conversionEffectiveDate,
+        conversionSource = conversionSource,
     )
 }
 @Serializable private data class TemplateDto(
@@ -444,6 +482,7 @@ private data class PendingCurrencyChangeDto(
     val rate: String,
     val effectiveEpochDay: Long,
     val source: String,
+    val quoteEffectiveEpochDay: Long? = null,
 ) {
     fun toEntity() = PendingCurrencyChangeEntity(
         fromCurrencyCode = fromCurrencyCode,
@@ -451,6 +490,7 @@ private data class PendingCurrencyChangeDto(
         rate = rate,
         effectiveEpochDay = effectiveEpochDay,
         source = source,
+        quoteEffectiveEpochDay = quoteEffectiveEpochDay,
     )
 }
 

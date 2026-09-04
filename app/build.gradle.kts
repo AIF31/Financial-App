@@ -12,6 +12,23 @@ val releaseKeyAlias = providers.environmentVariable("POCKET_RELEASE_KEY_ALIAS")
 val releaseKeyPassword = providers.environmentVariable("POCKET_RELEASE_KEY_PASSWORD")
 val releaseSigningValues = listOf(releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword)
 val releaseSigningConfigured = releaseSigningValues.all { it.isPresent }
+val banxicoToken = providers.gradleProperty("POCKET_BANXICO_TOKEN")
+    .orElse(providers.environmentVariable("POCKET_BANXICO_TOKEN"))
+    .orElse("")
+
+fun String.asBuildConfigString(): String = buildString {
+    append('"')
+    this@asBuildConfigString.forEach { character ->
+        when (character) {
+            '\\' -> append("\\\\")
+            '"' -> append("\\\"")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            else -> append(character)
+        }
+    }
+    append('"')
+}
 
 check(releaseSigningValues.none { it.isPresent } || releaseSigningConfigured) {
     "Release signing is partially configured. Set all POCKET_RELEASE_* environment variables."
@@ -28,6 +45,7 @@ android {
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "POCKET_BANXICO_TOKEN", banxicoToken.get().asBuildConfigString())
     }
 
     signingConfigs {
@@ -59,7 +77,7 @@ android {
     buildFeatures {
         compose = true
         aidl = false
-        buildConfig = false
+        buildConfig = true
         shaders = false
     }
 

@@ -104,7 +104,7 @@ class PocketLedgerBehaviorTest {
                 accountingAmountMinor = 1_250,
                 occurredAtUtcMillis = clock.millis(),
                 localDate = java.time.LocalDate.of(2026, 2, 26),
-                merchant = "KAUST Market",
+                merchant = "Neighborhood Market",
                 note = "fruta",
             )
         )
@@ -141,7 +141,7 @@ class PocketLedgerBehaviorTest {
         val csv = source.exportCsv().decodeToString()
         assertTrue(csv.startsWith("id,tipo,fecha,zona,pocket,importe_contable,moneda_contable"))
         assertTrue(csv.contains("\"SAR\""))
-        assertTrue(csv.contains("\"KAUST Market\""))
+        assertTrue(csv.contains("\"Neighborhood Market\""))
         assertTrue(csv.contains("\"12.50\""))
     }
 

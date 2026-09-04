@@ -5,9 +5,9 @@ This directory is the human-oriented operational knowledge base for Pocket. It s
 ## Start here
 
 - [Implementation reference](implementation-reference.md): product boundaries, architecture, durable decisions, and repository history.
-- [Windows, Android Studio, and S23 testing](windows-android-studio-s23-testing.md): working environment, build commands, ADB workflow, and device-test precautions.
+- [Windows, Android Studio, and physical-device testing](windows-android-studio-device-testing.md): working environment, build commands, ADB workflow, and device-test precautions.
 - [Release signing and recovery](release-signing-and-recovery.md): permanent key handling, signed builds, verification, backup, uninstall, and restore.
-- [Galaxy S23 Ultra verification — 2026-08-22](verification/galaxy-s23-ultra-2026-08-22.md): retained test evidence and known coverage gaps.
+- [Release verification](verification/release-verification.md): retained test evidence and known coverage gaps.
 
 ## Authority and maintenance
 
@@ -17,4 +17,4 @@ Update these documents when the package name, SDK, signing certificate, backup f
 
 ## Current handoff status
 
-As of 2026-08-22, the MVP is implemented and pushed to `main` at commit `2b01539`. A permanent release-signed build is installed on the tested S23 Ultra and its backup/restore flow has been exercised. Maximum-font and TalkBack checks remain intentionally unverified; see the dated verification record for the exact evidence and remaining device rerun gap.
+The MVP is implemented on `main`. Automated host, lint, and managed-device checks are retained in the verification record; physical-device checks should be repeated on a representative device before a release. Maximum-font and TalkBack checks remain release evidence gaps until they are explicitly exercised.

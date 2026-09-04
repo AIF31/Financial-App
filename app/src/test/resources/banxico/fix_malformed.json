@@ -1,0 +1,20 @@
+{
+  "bmx": {
+    "series": [
+      {
+        "idSerie": "OTHER",
+        "datos": [
+          { "fecha": "31/08/2026", "dato": "17.25" }
+        ]
+      },
+      {
+        "idSerie": "SF43718",
+        "datos": [
+          { "fecha": "not-a-date", "dato": "17.25" },
+          { "fecha": "30/08/2026", "dato": "Infinity" },
+          { "fecha": "29/08/2026", "dato": "-1" }
+        ]
+      }
+    ]
+  }
+}

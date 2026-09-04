@@ -38,6 +38,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -53,7 +54,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.aif31.pocket.data.ConversionStatus
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.LedgerState
@@ -63,6 +63,11 @@ import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.PocketLedger
 import com.aif31.pocket.domain.Money
 import com.aif31.pocket.domain.SupportedCurrency
+import com.aif31.pocket.fx.ExchangeRateRepository
+import com.aif31.pocket.fx.QuoteFailure
+import com.aif31.pocket.expense.ExpenseEntryStateHolder
+import com.aif31.pocket.expense.ExpenseRequest
+import com.aif31.pocket.expense.QuoteUiState
 import com.aif31.pocket.ui.PocketArtwork
 import com.aif31.pocket.ui.MoneyText
 import java.time.Instant
@@ -70,6 +75,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,6 +86,9 @@ internal fun ProductionMovementScreen(
     onSaved: () -> Unit,
     movementDefaults: MovementDefaults,
     initialMovement: Movement? = null,
+    defaultExpenseCurrency: SupportedCurrency = SupportedCurrency.SAR,
+    onlineFxEnabled: Boolean = false,
+    exchangeRates: ExchangeRateRepository? = null,
 ) {
     val stateKey = initialMovement?.id
     val initialAccountingCurrency = state.periods.firstOrNull { it.id == initialMovement?.periodId }?.accountingCurrency
@@ -92,7 +101,9 @@ internal fun ProductionMovementScreen(
         state.periods.firstOrNull { enteredDate >= it.start && enteredDate < it.endExclusive }?.accountingCurrency
     } ?: initialAccountingCurrency
     var amount by rememberSaveable(stateKey) {
-        mutableStateOf(initialMovement?.let { minorNumberForForm(it.accountingAmountMinor) }.orEmpty())
+        mutableStateOf(
+            initialMovement?.let { minorNumberForForm(it.originalAmountMinor ?: it.accountingAmountMinor) }.orEmpty()
+        )
     }
     var selectedPocket by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.pocketId) }
     var refund by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.type == MovementType.REFUND) }
@@ -102,13 +113,7 @@ internal fun ProductionMovementScreen(
         mutableStateOf(if (initialMovement != null) initialMovement.paymentMethodId else state.defaultPaymentMethodId)
     }
     var currency by rememberSaveable(stateKey) {
-        mutableStateOf(initialMovement?.originalCurrencyCode ?: initialAccountingCurrency.name)
-    }
-    var originalAmount by rememberSaveable(stateKey) {
-        mutableStateOf(initialMovement?.originalAmountMinor?.let(::minorNumberForForm).orEmpty())
-    }
-    var confirmed by rememberSaveable(stateKey) {
-        mutableStateOf(initialMovement?.conversionStatus != ConversionStatus.ESTIMATED)
+        mutableStateOf(initialMovement?.originalCurrencyCode ?: defaultExpenseCurrency.name)
     }
     var localTime by rememberSaveable(stateKey) {
         val instant = initialMovement?.occurredAtUtcMillis ?: movementDefaults.instantMillis
@@ -124,12 +129,53 @@ internal fun ProductionMovementScreen(
     }
     var detailsExpanded by rememberSaveable(stateKey) { mutableStateOf(initialMovement != null) }
     var error by rememberSaveable(stateKey) { mutableStateOf<String?>(null) }
+    var templateGeneration by rememberSaveable(stateKey) { mutableIntStateOf(0) }
     val focusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(stateKey) {
         focusRequester.requestFocus()
     }
+
+    val inputCurrency = SupportedCurrency.fromCode(currency)
+    val parsedDateForQuote = runCatching { LocalDate.parse(localDate) }.getOrNull()
+    val parsedInputMinor = runCatching { Money.parse(amount, inputCurrency.name).minor }.getOrNull()
+    val holder = remember(exchangeRates, initialMovement, initialAccountingCurrency, templateGeneration) {
+        ExpenseEntryStateHolder(exchangeRates, initialMovement.takeIf { templateGeneration == 0 }, initialAccountingCurrency)
+    }
+    var quoteState by remember(parsedDateForQuote, inputCurrency, accountingCurrency, amount, onlineFxEnabled, holder) {
+        mutableStateOf<QuoteUiState>(QuoteUiState.Idle)
+    }
+
+    LaunchedEffect(
+        parsedDateForQuote,
+        inputCurrency,
+        accountingCurrency,
+        amount,
+        onlineFxEnabled,
+        holder,
+    ) {
+        val requestDate = parsedDateForQuote
+        if (requestDate == null || parsedInputMinor == null || parsedInputMinor <= 0) {
+            quoteState = QuoteUiState.Idle
+            return@LaunchedEffect
+        }
+        quoteState = QuoteUiState.Loading
+        quoteState = try {
+            QuoteUiState.Ready(holder.resolve(
+                ExpenseRequest(requestDate, inputCurrency, accountingCurrency, parsedInputMinor), onlineFxEnabled,
+            ))
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: QuoteFailure) {
+            QuoteUiState.Error(failure.message.orEmpty())
+        } catch (_: Exception) {
+            QuoteUiState.Error(QuoteFailure.Unavailable().message.orEmpty())
+        }
+    }
+
+    val readyConversion = (quoteState as? QuoteUiState.Ready)?.conversion
+    val accountingAmountMinor = readyConversion?.accountingAmountMinor
 
     fun saveMovement() {
         scope.launch {
@@ -143,7 +189,7 @@ internal fun ProductionMovementScreen(
                 error = "La fecha no pertenece a un periodo existente"
                 return@launch
             }
-            val parsedAmount = runCatching { Money.parse(amount, savingAccountingCurrency.name).minor }.getOrNull() ?: run {
+            val parsedAmount = accountingAmountMinor ?: run {
                 error = "Escribe un importe válido"
                 return@launch
             }
@@ -155,14 +201,8 @@ internal fun ProductionMovementScreen(
                 error = "Escribe una hora válida"
                 return@launch
             }
-            val parsedOriginal = if (currency == savingAccountingCurrency.name) {
-                null
-            } else {
-                runCatching { Money.parse(originalAmount, currency).minor }.getOrNull() ?: run {
-                    error = "Escribe un importe original válido"
-                    return@launch
-                }
-            }
+            val conversion = readyConversion
+            val parsedOriginal = parsedInputMinor?.takeIf { inputCurrency != savingAccountingCurrency }
             val movementZone = ZoneId.of(initialMovement?.zoneId ?: "Asia/Riyadh")
             when (
                 val result = ledger.execute(
@@ -182,11 +222,10 @@ internal fun ProductionMovementScreen(
                         paymentMethodId = paymentMethod,
                         originalAmountMinor = parsedOriginal,
                         originalCurrencyCode = currency,
-                        conversionStatus = if (currency == savingAccountingCurrency.name || confirmed) {
-                            ConversionStatus.CONFIRMED
-                        } else {
-                            ConversionStatus.ESTIMATED
-                        },
+                        conversionStatus = conversion.status,
+                        rate = conversion.rate,
+                        conversionEffectiveDate = conversion.effectiveDate,
+                        conversionSource = conversion.source,
                     ),
                 )
             ) {
@@ -220,17 +259,19 @@ internal fun ProductionMovementScreen(
             Surface(tonalElevation = 3.dp) {
                 Button(
                     onClick = ::saveMovement,
+                    enabled = selectedPocket != null && accountingAmountMinor != null && quoteState is QuoteUiState.Ready,
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 12.dp)
-                        .heightIn(min = 52.dp),
+                        .heightIn(min = 52.dp)
+                        .testTag("movement_save"),
                 ) {
                     Text(
                         when {
                             initialMovement != null -> "Guardar cambios"
                             refund -> "Guardar devolución"
-                            else -> "Guardar gasto · ${accountingCurrency.name} ${amount.ifBlank { "0.00" }}"
+                            else -> "Guardar gasto · ${accountingCurrency.name} ${accountingAmountMinor?.let(::minorNumberForForm) ?: "0.00"}"
                         },
                     )
                 }
@@ -256,13 +297,8 @@ internal fun ProductionMovementScreen(
                                     selectedPocket = template.pocketId
                                     paymentMethod = template.paymentMethodId
                                     currency = template.inputCurrency.name
-                                    if (template.inputCurrency == accountingCurrency) {
-                                        amount = minorNumberForForm(template.amountMinor)
-                                        originalAmount = ""
-                                    } else {
-                                        amount = ""
-                                        originalAmount = minorNumberForForm(template.amountMinor)
-                                    }
+                                    amount = minorNumberForForm(template.amountMinor)
+                                    templateGeneration++
                                 },
                             ) {
                                 Text(template.name)
@@ -273,13 +309,23 @@ internal fun ProductionMovementScreen(
             }
             item {
                 Text("Importe", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(SupportedCurrency.entries) { option ->
+                        OutlinedButton(
+                            onClick = { currency = option.name },
+                            modifier = Modifier.testTag("movement_currency_${option.name}"),
+                        ) {
+                            Text(if (inputCurrency == option) "✓ ${option.name}" else option.name)
+                        }
+                    }
+                }
                 OutlinedTextField(
                     value = amount,
                     onValueChange = {
                         amount = it.filter { character -> character.isDigit() || character == '.' }
                         if (error == "Escribe un importe válido") error = null
                     },
-                    prefix = { Text(accountingCurrency.name, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary) },
+                    prefix = { Text(inputCurrency.name, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary) },
                     supportingText = if (error == "Escribe un importe válido") {
                         { Text(error.orEmpty()) }
                     } else {
@@ -295,6 +341,16 @@ internal fun ProductionMovementScreen(
                         .focusRequester(focusRequester)
                         .testTag("movement_amount"),
                 )
+                when (val currentQuote = quoteState) {
+                    QuoteUiState.Idle -> Unit
+                    QuoteUiState.Loading -> Text("Consultando tipo de cambio…")
+                    is QuoteUiState.Error -> Text(currentQuote.message, color = MaterialTheme.colorScheme.error)
+                    is QuoteUiState.Ready -> if (inputCurrency != accountingCurrency && accountingAmountMinor != null) {
+                        Text(MoneyText.format(accountingAmountMinor, accountingCurrency), style = MaterialTheme.typography.titleLarge)
+                        Text("Efectiva: ${currentQuote.conversion.effectiveDate ?: "No registrada"}")
+                        Text("Fuente: ${currentQuote.conversion.source ?: "Conversión manual histórica"}")
+                    }
+                }
             }
             item {
                 Text("¿De qué Pocket?", style = MaterialTheme.typography.titleLarge)
@@ -390,7 +446,7 @@ internal fun ProductionMovementScreen(
                         }
                         Column(modifier = Modifier.weight(1f)) {
                             Text(if (detailsExpanded) "Ocultar detalles" else "Más detalles", style = MaterialTheme.typography.titleMedium)
-                            Text("Fecha, moneda, nota y devolución", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Fecha, nota y devolución", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
                     }
@@ -405,33 +461,6 @@ internal fun ProductionMovementScreen(
                         }
                         OutlinedButton(onClick = { refund = true }) {
                             Text(if (refund) "✓ Devolución" else "Devolución")
-                        }
-                    }
-                }
-                item {
-                    Text("Moneda original", style = MaterialTheme.typography.titleMedium)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(listOf("SAR", "USD", "MXN")) { code ->
-                            OutlinedButton(onClick = { currency = code }) {
-                                Text(if (currency == code) "✓ $code" else code)
-                            }
-                        }
-                    }
-                    if (currency != accountingCurrency.name) {
-                        OutlinedTextField(
-                            value = originalAmount,
-                            onValueChange = { originalAmount = it },
-                            label = { Text("Importe original $currency") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier.fillMaxWidth().testTag("movement_original_amount"),
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { confirmed = false }) {
-                                Text(if (!confirmed) "✓ Estimado" else "Estimado")
-                            }
-                            OutlinedButton(onClick = { confirmed = true }) {
-                                Text(if (confirmed) "✓ Confirmado" else "Confirmado")
-                            }
                         }
                     }
                 }

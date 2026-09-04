@@ -2,7 +2,7 @@
 
 Status: planned; no test implementation performed
 
-Execution target: `C:\Users\alan1\StudioProjects\Financial-App`
+Execution target: the repository checkout containing this project.
 
 ## Existing baseline
 
@@ -24,9 +24,9 @@ Own Compose state behavior, navigation state restoration, validation messages, r
 
 Own Room/SQLite behavior, Storage Access Framework flows that can be reliably automated, notification-listener integration boundaries, WorkManager/reminder state, edge-to-edge/IME behavior, and Compose accessibility checks. Use the version-controlled API 35 ATD managed device; do not replace it with hand-scripted AVD startup.
 
-### Physical S23 milestone tests
+### Physical-device milestone tests
 
-Own Samsung-specific permission flows, notification access, actual reminder delivery, system picker behavior, TalkBack, maximum-font usability, reinstall/restore, and device-transfer exclusions. These are milestone checks rather than every-release gates.
+Own OEM-specific permission flows, notification access, actual reminder delivery, system picker behavior, TalkBack, maximum-font usability, reinstall/restore, and device-transfer exclusions. These are milestone checks rather than every-release gates.
 
 ## Release gates
 
@@ -58,6 +58,6 @@ Run device accessibility validation on API 34 or newer. Add explicit checks afte
 ## Evidence handling
 
 - Archive bounded test summaries and managed-device HTML reports.
-- Keep screenshots and S23 verification records free of personal financial data, usernames, device serials, and signing secrets.
+- Keep screenshots and physical-device verification records free of personal financial data, usernames, device serials, and signing secrets.
 - Never commit raw real-bank notification examples.
 - Treat infrastructure failure separately from assertion failure.

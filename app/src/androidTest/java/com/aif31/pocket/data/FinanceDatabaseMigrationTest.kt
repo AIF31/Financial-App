@@ -200,9 +200,78 @@ class FinanceDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migration_5_to_6_preserves_ledger_rows_and_starts_with_an_empty_fx_cache() {
+        helper.createDatabase(TEST_DATABASE_5_6, 5).apply {
+            execSQL(
+                "INSERT INTO periods (id, start_epoch_day, end_exclusive_epoch_day, new_funds_minor, " +
+                    "configured_start_day, is_transition, needs_review, accounting_currency_code) " +
+                    "VALUES ('period-1', 20478, 20506, 100000, 25, 0, 0, 'SAR')"
+            )
+            execSQL(
+                "INSERT INTO pockets (id, name, icon_key, sort_order, archived, rollover_enabled) " +
+                    "VALUES ('pocket-1', 'Viajes', 'TRAVEL', 0, 0, 1)"
+            )
+            execSQL(
+                "INSERT INTO payment_methods (id, name, archived) VALUES ('card-1', 'Tarjeta', 0)"
+            )
+            execSQL(
+                "INSERT INTO movements (id, period_id, pocket_id, type, accounting_amount_minor, " +
+                    "occurred_at_utc_millis, local_epoch_day, zone_id, merchant, note, payment_method_id, " +
+                    "original_amount_minor, original_currency_code, conversion_status, rate) " +
+                    "VALUES ('movement-1', 'period-1', 'pocket-1', 'EXPENSE', 12345, 1, 20479, " +
+                    "'Asia/Riyadh', NULL, NULL, 'card-1', 10000, 'USD', 'CONFIRMED', '1.2345')"
+            )
+            execSQL(
+                "INSERT INTO recurring_templates (id, name, amount_minor, pocket_id, payment_method_id, archived, input_currency_code) " +
+                    "VALUES ('template-1', 'Viaje', 5000, 'pocket-1', 'card-1', 0, 'USD')"
+            )
+            execSQL(
+                "INSERT INTO pending_currency_change (id, from_currency_code, target_currency_code, rate, effective_epoch_day, source) " +
+                    "VALUES (1, 'SAR', 'MXN', '4.5', 20506, 'TEST')"
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DATABASE_5_6,
+            6,
+            true,
+            FinanceDatabase.MIGRATION_5_6,
+        ).use { database ->
+            database.query("SELECT accounting_amount_minor, original_currency_code, rate, conversion_effective_epoch_day, conversion_source FROM movements").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(12_345L, cursor.getLong(0))
+                assertEquals("USD", cursor.getString(1))
+                assertEquals("1.2345", cursor.getString(2))
+                assertTrue(cursor.isNull(3))
+                assertTrue(cursor.isNull(4))
+            }
+            database.query("SELECT input_currency_code FROM recurring_templates").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("USD", cursor.getString(0))
+            }
+            database.query("SELECT target_currency_code, rate, quote_effective_epoch_day FROM pending_currency_change").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("MXN", cursor.getString(0))
+                assertEquals("4.5", cursor.getString(1))
+                assertTrue(cursor.isNull(2))
+            }
+            database.query("SELECT prior_boundary_quote_effective_epoch_day FROM periods").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertTrue(cursor.isNull(0))
+            }
+            database.query("SELECT COUNT(*) FROM fx_rate_cache").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(0, cursor.getInt(0))
+            }
+        }
+    }
+
     private companion object {
         const val TEST_DATABASE = "migration-2-3-test"
         const val TEST_DATABASE_3_4 = "migration-3-4-test"
         const val TEST_DATABASE_4_5 = "migration-4-5-test"
+        const val TEST_DATABASE_5_6 = "migration-5-6-test"
     }
 }
