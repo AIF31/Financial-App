@@ -210,7 +210,7 @@ Onboarding should establish the minimum viable financial setup with clear progre
 
 ## 9. Adaptive strategy
 
-Optimize first for the Samsung S23 class of phone while building adaptive foundations.
+Optimize first for a representative phone class while building adaptive foundations.
 
 Every critical prototype and screen should be reviewed at:
 
@@ -386,7 +386,7 @@ Use the narrowest skill that matches the current problem. Read its complete inst
 | Choose host versus device coverage | `setting-up-host-vs-device-tests` | Use the cheapest reliable layer |
 | Fix flaky synchronization | `synchronizing-with-idle` | Do not add arbitrary sleeps |
 | Enable automated accessibility validation | `enabling-accessibility-checks` | Still perform manual critical-flow review |
-| Adapt layouts across device sizes | `adaptive` | S23 first; tablet-safe foundation |
+| Adapt layouts across device sizes | `adaptive` | Representative phone first; tablet-safe foundation |
 | Run Gradle | `gradle-run` | Follow repository Gradle execution rules |
 | Investigate a reproducible defect | `diagnosing-bugs` | Diagnose before changing production code |
 | Resolve a disputed module boundary | `codebase-design` | Use only when the seam is genuinely unclear |

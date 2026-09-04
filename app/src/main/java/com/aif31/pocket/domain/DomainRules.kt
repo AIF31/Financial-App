@@ -7,6 +7,18 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 
+enum class SupportedCurrency {
+    SAR,
+    USD,
+    MXN;
+
+    companion object {
+        fun fromCode(value: String): SupportedCurrency =
+            entries.firstOrNull { it.name == value.trim().uppercase() }
+                ?: throw IllegalArgumentException("Moneda no compatible")
+    }
+}
+
 data class Money(val minor: Long, val currencyCode: String) {
     init {
         require(currencyCode.matches(Regex("[A-Z]{3}"))) { "Currency must be an ISO 4217 code" }
@@ -31,6 +43,29 @@ data class Money(val minor: Long, val currencyCode: String) {
                 .longValueExact()
             return Money(minor, currencyCode.uppercase())
         }
+    }
+}
+
+data class FrozenRate(
+    val from: SupportedCurrency,
+    val to: SupportedCurrency,
+    val value: String,
+) {
+    private val decimal: BigDecimal = runCatching { BigDecimal(value) }
+        .getOrElse { throw IllegalArgumentException("Tipo de cambio inválido") }
+
+    init {
+        require(decimal > BigDecimal.ZERO) { "El tipo de cambio debe ser positivo" }
+    }
+
+    fun convertMinor(minor: Long): Long = BigDecimal.valueOf(minor)
+        .multiply(decimal)
+        .setScale(0, RoundingMode.HALF_UP)
+        .longValueExact()
+
+    fun convert(money: Money): Money {
+        require(money.currencyCode == from.name) { "La moneda de origen no coincide con el tipo de cambio" }
+        return Money(convertMinor(money.minor), to.name)
     }
 }
 
@@ -155,27 +190,27 @@ object PocketMath {
 
 data class ManualFx(
     val originalMinor: Long,
-    val sarMinor: Long,
+    val accountingMinor: Long,
     val confirmed: Boolean,
     val rate: String?,
 ) {
-    fun confirm(sarMinor: Long): ManualFx {
-        require(sarMinor >= 0)
-        return copy(sarMinor = sarMinor, confirmed = true)
+    fun confirm(accountingMinor: Long): ManualFx {
+        require(accountingMinor >= 0)
+        return copy(accountingMinor = accountingMinor, confirmed = true)
     }
 
     companion object {
-        fun estimate(originalMinor: Long, originalFractionDigits: Int, sarPerOriginal: String): ManualFx {
+        fun estimate(originalMinor: Long, originalFractionDigits: Int, accountingPerOriginal: String): ManualFx {
             require(originalMinor >= 0)
-            val rate = BigDecimal(sarPerOriginal)
+            val rate = BigDecimal(accountingPerOriginal)
             require(rate > BigDecimal.ZERO)
-            val sarMinor = BigDecimal.valueOf(originalMinor)
+            val accountingMinor = BigDecimal.valueOf(originalMinor)
                 .movePointLeft(originalFractionDigits)
                 .multiply(rate)
                 .movePointRight(2)
                 .setScale(0, RoundingMode.HALF_UP)
                 .longValueExact()
-            return ManualFx(originalMinor, sarMinor, confirmed = false, rate = rate.stripTrailingZeros().toPlainString())
+            return ManualFx(originalMinor, accountingMinor, confirmed = false, rate = rate.stripTrailingZeros().toPlainString())
         }
     }
 }

@@ -3,8 +3,10 @@ package com.aif31.pocket.data
 import android.database.sqlite.SQLiteConstraintException
 import androidx.room.withTransaction
 import com.aif31.pocket.domain.BudgetCalendar
+import com.aif31.pocket.domain.FrozenRate
 import com.aif31.pocket.domain.PeriodSchedule
 import com.aif31.pocket.domain.PocketMath
+import com.aif31.pocket.domain.SupportedCurrency
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -40,7 +42,12 @@ class RoomPocketLedger(
         dao.observeTemplates(),
     ) { methods, movements, templates -> Triple(methods, movements, templates) }
 
-    override val state: Flow<LedgerState> = combine(budgetData, activityData) { budget, activity ->
+    override val state: Flow<LedgerState> = combine(
+        budgetData,
+        activityData,
+        dao.observePendingCurrencyChange(),
+        dao.observeLedgerPreferences(),
+    ) { budget, activity, pendingCurrencyChange, ledgerPreferences ->
         buildState(
             periodEntities = budget.periods,
             pocketEntities = budget.pockets,
@@ -50,6 +57,8 @@ class RoomPocketLedger(
             methodEntities = activity.first,
             movementEntities = activity.second,
             templateEntities = activity.third,
+            pendingCurrencyChangeEntity = pendingCurrencyChange,
+            ledgerPreferencesEntity = ledgerPreferences,
         )
     }
 
@@ -75,8 +84,11 @@ class RoomPocketLedger(
             is LedgerCommand.CreateNextPeriod -> createNextPeriod(command.startDay)
             is LedgerCommand.CatchUpPeriods -> catchUpPeriods(command.preferredStartDay)
             is LedgerCommand.MarkPeriodReviewed -> markPeriodReviewed(command.periodId)
+            is LedgerCommand.ScheduleCurrencyChange -> scheduleCurrencyChange(command)
+            LedgerCommand.CancelCurrencyChange -> cancelCurrencyChange()
             is LedgerCommand.UpsertPaymentMethod -> upsertPaymentMethod(command)
             is LedgerCommand.ArchivePaymentMethod -> archivePaymentMethod(command)
+            is LedgerCommand.SetDefaultPaymentMethod -> setDefaultPaymentMethod(command)
             is LedgerCommand.UpsertTemplate -> upsertTemplate(command)
             is LedgerCommand.ArchiveTemplate -> archiveTemplate(command)
         }
@@ -98,6 +110,7 @@ class RoomPocketLedger(
                 endExclusiveEpochDay = bounds.endExclusive.toEpochDay(),
                 newFundsMinor = command.newFundsMinor,
                 configuredStartDay = command.startDay,
+                accountingCurrencyCode = command.accountingCurrency.name,
             )
         )
         val pockets = INITIAL_POCKETS.mapIndexed { index, (name, iconKey) ->
@@ -109,8 +122,11 @@ class RoomPocketLedger(
                 PeriodPocketEntity(periodId, pocket.id, rolloverEligible = pocket.rolloverEnabled, retired = false)
             }
         )
-        dao.putPaymentMethods(
-            listOf("Efectivo", "Tarjeta").map { PaymentMethodEntity(UUID.randomUUID().toString(), it, archived = false) }
+        val paymentMethods = listOf("Efectivo", "Tarjeta")
+            .map { PaymentMethodEntity(UUID.randomUUID().toString(), it, archived = false) }
+        dao.putPaymentMethods(paymentMethods)
+        dao.putLedgerPreferences(
+            LedgerPreferencesEntity(defaultPaymentMethodId = paymentMethods.single { it.name == "Tarjeta" }.id)
         )
         LedgerResult.Success
     }
@@ -239,19 +255,41 @@ class RoomPocketLedger(
     }
 
     private suspend fun addMovement(command: LedgerCommand.AddMovement): LedgerResult = database.withTransaction {
-        require(command.sarAmountMinor > 0) { "El importe debe ser mayor que cero" }
-        require(command.originalCurrencyCode.matches(Regex("[A-Z]{3}"))) { "Moneda inválida" }
+        require(command.accountingAmountMinor > 0) { "El importe debe ser mayor que cero" }
+        require(command.rate == null || (command.rate.toBigDecimalOrNull()?.signum() ?: 0) > 0) { "Tipo de cambio inválido" }
         val periods = dao.periods()
         val period = requireNotNull(periods.firstOrNull {
             command.localDate.toEpochDay() >= it.startEpochDay && command.localDate.toEpochDay() < it.endExclusiveEpochDay
         }) { "La fecha no pertenece a un periodo existente" }
+        val accountingCurrency = SupportedCurrency.fromCode(period.accountingCurrencyCode)
+        val originalCurrency = command.originalCurrencyCode?.let(SupportedCurrency::fromCode) ?: accountingCurrency
+        require(command.accountingCurrency == null || command.accountingCurrency == accountingCurrency) {
+            "La moneda contable no coincide con el periodo"
+        }
+        if (originalCurrency == accountingCurrency) {
+            require(
+                command.originalAmountMinor == null && command.conversionStatus == ConversionStatus.CONFIRMED &&
+                    command.rate == null && command.conversionEffectiveDate == null && command.conversionSource == null
+            ) { "La conversión no corresponde a un movimiento en la moneda contable" }
+        } else {
+            require((command.originalAmountMinor ?: 0) > 0) { "Falta el importe en la moneda original" }
+            // Legacy manual conversions have no provider provenance. Preserve them unchanged.
+            if (command.conversionEffectiveDate != null || command.conversionSource != null) {
+                require(command.rate != null) { "Falta el tipo de cambio confirmado" }
+                val effectiveDate = requireNotNull(command.conversionEffectiveDate) { "Falta la fecha efectiva del tipo de cambio" }
+                require(!effectiveDate.isAfter(command.localDate) && !effectiveDate.isBefore(command.localDate.minusDays(7))) {
+                    "Fecha efectiva del tipo de cambio inválida"
+                }
+                require(!command.conversionSource.isNullOrBlank()) { "Falta la fuente del tipo de cambio" }
+            }
+        }
         val existing = command.id?.let { dao.movement(it) }
         val pocket = requireNotNull(dao.pockets().firstOrNull { it.id == command.pocketId }) { "Pocket inexistente" }
         val editsSamePocket = existing?.pocketId == pocket.id
         require(!pocket.archived || editsSamePocket) { "El Pocket está archivado" }
         val snapshot = dao.periodPockets().firstOrNull { it.periodId == period.id && it.pocketId == command.pocketId }
         require(snapshot != null && (!snapshot.retired || editsSamePocket)) { "El Pocket no está activo en este periodo" }
-        dao.putMovement(command.toEntity(period.id, zoneId.id))
+        dao.putMovement(command.toEntity(period.id, zoneId.id, originalCurrency.name))
         val sourcePeriodId = listOfNotNull(existing?.periodId, period.id)
             .minBy { id -> periods.first { it.id == id }.startEpochDay }
         recalculateRolloverFrom(sourcePeriodId)
@@ -307,6 +345,41 @@ class RoomPocketLedger(
         LedgerResult.Success
     }
 
+    private suspend fun scheduleCurrencyChange(command: LedgerCommand.ScheduleCurrencyChange): LedgerResult =
+        database.withTransaction {
+            val previous = requireNotNull(dao.periods().maxByOrNull { it.startEpochDay }) { "No existe un periodo anterior" }
+            val from = SupportedCurrency.fromCode(previous.accountingCurrencyCode)
+            require(command.targetCurrency != from) { "Elige una moneda diferente" }
+            require(command.effectiveDate.toEpochDay() == previous.endExclusiveEpochDay) {
+                "La fecha efectiva debe coincidir con el próximo periodo"
+            }
+            val source = command.source.trim()
+            require(source.isNotEmpty()) { "Falta la fuente del tipo de cambio" }
+            command.quoteEffectiveDate?.let { observed ->
+                require(!observed.isAfter(today()) && !observed.isBefore(today().minusDays(7))) {
+                    "La cotización debe ser reciente y no futura"
+                }
+                require(!observed.isAfter(command.effectiveDate)) { "Cotización posterior al cambio" }
+            }
+            FrozenRate(from, command.targetCurrency, command.rate)
+            dao.putPendingCurrencyChange(
+                PendingCurrencyChangeEntity(
+                    fromCurrencyCode = from.name,
+                    targetCurrencyCode = command.targetCurrency.name,
+                    rate = command.rate,
+                    effectiveEpochDay = command.effectiveDate.toEpochDay(),
+                    source = source,
+                    quoteEffectiveEpochDay = command.quoteEffectiveDate?.toEpochDay(),
+                )
+            )
+            LedgerResult.Success
+        }
+
+    private suspend fun cancelCurrencyChange(): LedgerResult = database.withTransaction {
+        dao.clearPendingCurrencyChange()
+        LedgerResult.Success
+    }
+
     private suspend fun recalculateRolloverFrom(sourcePeriodId: String) {
         val periods = dao.periods().sortedBy { it.startEpochDay }
         val startIndex = periods.indexOfFirst { it.id == sourcePeriodId }
@@ -328,7 +401,7 @@ class RoomPocketLedger(
                 val pocketId = targetSnapshot.pocketId
                 val sourceAllocation = allocations[source.id to pocketId]
                 val netSpend = sourceMovements.filter { it.pocketId == pocketId }.sumOf {
-                    if (it.type == MovementType.EXPENSE.name) it.sarAmountMinor else -it.sarAmountMinor
+                    if (it.type == MovementType.EXPENSE.name) it.accountingAmountMinor else -it.accountingAmountMinor
                 }
                 val sourceSnapshot = sourceSnapshots[pocketId]
                 val rollover = PocketMath.rollover(
@@ -336,9 +409,18 @@ class RoomPocketLedger(
                     netSpendMinor = netSpend,
                     enabled = sourceSnapshot?.rolloverEligible == true && !sourceSnapshot.retired,
                 )
+                val sourceCurrency = SupportedCurrency.fromCode(source.accountingCurrencyCode)
+                val targetCurrency = SupportedCurrency.fromCode(target.accountingCurrencyCode)
+                val targetRollover = if (sourceCurrency == targetCurrency) {
+                    rollover
+                } else {
+                    requireNotNull(target.frozenRateFrom(sourceCurrency)) {
+                        "Falta el tipo de cambio congelado entre periodos"
+                    }.convertMinor(rollover)
+                }
                 if (targetSnapshot.retired) {
-                    if (rollover > 0) {
-                        dao.putRolloverRelease(RolloverReleaseEntity(target.id, pocketId, rollover))
+                    if (targetRollover > 0) {
+                        dao.putRolloverRelease(RolloverReleaseEntity(target.id, pocketId, targetRollover))
                     } else {
                         dao.deleteRolloverRelease(target.id, pocketId)
                     }
@@ -349,7 +431,7 @@ class RoomPocketLedger(
                         periodId = target.id,
                         pocketId = pocketId,
                         budgetMinor = targetAllocation?.budgetMinor ?: 0,
-                        rolloverMinor = rollover,
+                        rolloverMinor = targetRollover,
                     )
                     dao.putAllocation(updated)
                     allocations[targetKey] = updated
@@ -371,6 +453,17 @@ class RoomPocketLedger(
         )
         val schedule = BudgetCalendar(previous.configuredStartDay, zoneId)
             .nextPeriodAfter(previousSchedule, preferredStartDay)
+        val pending = dao.pendingCurrencyChange()
+        val previousCurrency = SupportedCurrency.fromCode(previous.accountingCurrencyCode)
+        val boundary = pending?.let {
+            val from = SupportedCurrency.fromCode(it.fromCurrencyCode)
+            val to = SupportedCurrency.fromCode(it.targetCurrencyCode)
+            require(from == previousCurrency) { "La moneda de origen pendiente ya no coincide" }
+            require(it.effectiveEpochDay == schedule.start.toEpochDay()) { "La fecha efectiva pendiente ya no coincide" }
+            FrozenRate(from, to, it.rate)
+        }
+        val nextCurrency = boundary?.to ?: previousCurrency
+        fun convertForTarget(minor: Long): Long = boundary?.convertMinor(minor) ?: minor
         val nextId = UUID.randomUUID().toString()
         val next = previous.copy(
             id = nextId,
@@ -379,9 +472,17 @@ class RoomPocketLedger(
             configuredStartDay = schedule.configuredStartDay,
             isTransition = schedule.isTransition,
             needsReview = needsReview,
+            newFundsMinor = convertForTarget(previous.newFundsMinor),
+            accountingCurrencyCode = nextCurrency.name,
+            priorBoundaryFromCurrencyCode = boundary?.from?.name,
+            priorBoundaryRate = pending?.rate,
+            priorBoundaryEffectiveEpochDay = pending?.effectiveEpochDay,
+            priorBoundarySource = pending?.source,
+            priorBoundaryQuoteEffectiveEpochDay = pending?.quoteEffectiveEpochDay,
         )
         dao.putPeriod(next)
         val activePockets = dao.pockets().filterNot { it.archived }
+            .sortedWith(compareBy<PocketEntity> { it.sortOrder }.thenBy { it.id })
         val previousPeriodPockets = dao.periodPockets()
             .filter { it.periodId == previous.id }
             .associateBy { it.pocketId }
@@ -394,19 +495,37 @@ class RoomPocketLedger(
                 PeriodPocketEntity(nextId, pocket.id, rolloverEligible = pocket.rolloverEnabled, retired = false)
             }
         )
+        val convertedBudgets = activePockets.associate { pocket ->
+            pocket.id to convertForTarget(previousAllocations[pocket.id]?.budgetMinor ?: 0)
+        }.toMutableMap()
+        var roundingExcess = convertedBudgets.values.fold(0L, Math::addExact) - next.newFundsMinor
+        // Preserve higher-priority Pockets and absorb any independent HALF_UP excess from the end of display order.
+        activePockets.asReversed().forEach { pocket ->
+            if (roundingExcess > 0) {
+                val reduction = minOf(convertedBudgets.getValue(pocket.id), roundingExcess)
+                convertedBudgets[pocket.id] = convertedBudgets.getValue(pocket.id) - reduction
+                roundingExcess -= reduction
+            }
+        }
         val nextAllocations = activePockets.map { pocket ->
             val previousAllocation = previousAllocations[pocket.id]
             val spent = previousMovements.filter { it.pocketId == pocket.id }.sumOf {
-                if (it.type == MovementType.EXPENSE.name) it.sarAmountMinor else -it.sarAmountMinor
+                if (it.type == MovementType.EXPENSE.name) it.accountingAmountMinor else -it.accountingAmountMinor
             }
             val rollover = PocketMath.rollover(
                 allocatedMinor = (previousAllocation?.budgetMinor ?: 0) + (previousAllocation?.rolloverMinor ?: 0),
                 netSpendMinor = spent,
                 enabled = previousPeriodPockets[pocket.id]?.rolloverEligible == true,
             )
-            AllocationEntity(nextId, pocket.id, previousAllocation?.budgetMinor ?: 0, rollover)
+            AllocationEntity(
+                nextId,
+                pocket.id,
+                convertedBudgets.getValue(pocket.id),
+                convertForTarget(rollover),
+            )
         }
         dao.putAllocations(nextAllocations)
+        if (pending != null) dao.clearPendingCurrencyChange()
         return next
     }
 
@@ -425,8 +544,22 @@ class RoomPocketLedger(
     private suspend fun archivePaymentMethod(command: LedgerCommand.ArchivePaymentMethod): LedgerResult = database.withTransaction {
         val existing = requireNotNull(dao.paymentMethods().firstOrNull { it.id == command.id }) { "Método inexistente" }
         dao.putPaymentMethod(existing.copy(archived = command.archived))
+        val preferences = dao.ledgerPreferences()
+        if (command.archived && preferences?.defaultPaymentMethodId == command.id) {
+            dao.putLedgerPreferences(preferences.copy(defaultPaymentMethodId = null))
+        }
         LedgerResult.Success
     }
+
+    private suspend fun setDefaultPaymentMethod(command: LedgerCommand.SetDefaultPaymentMethod): LedgerResult =
+        database.withTransaction {
+            command.id?.let { id ->
+                val method = requireNotNull(dao.paymentMethods().firstOrNull { it.id == id }) { "Método inexistente" }
+                require(!method.archived) { "El método está archivado" }
+            }
+            dao.putLedgerPreferences(LedgerPreferencesEntity(defaultPaymentMethodId = command.id))
+            LedgerResult.Success
+        }
 
     private suspend fun upsertTemplate(command: LedgerCommand.UpsertTemplate): LedgerResult = database.withTransaction {
         require(command.name.isNotBlank() && command.amountMinor > 0) { "Completa la plantilla" }
@@ -441,6 +574,7 @@ class RoomPocketLedger(
                 command.pocketId,
                 command.paymentMethodId,
                 existing?.archived ?: false,
+                command.inputCurrency.name,
             )
         )
         LedgerResult.Success
@@ -465,6 +599,8 @@ class RoomPocketLedger(
         methodEntities: List<PaymentMethodEntity>,
         movementEntities: List<MovementEntity>,
         templateEntities: List<RecurringTemplateEntity>,
+        pendingCurrencyChangeEntity: PendingCurrencyChangeEntity?,
+        ledgerPreferencesEntity: LedgerPreferencesEntity?,
     ): LedgerState {
         val periods = periodEntities.map { it.toModel() }
         val today = today()
@@ -482,8 +618,8 @@ class RoomPocketLedger(
                 val pocketEntity = pocketsById[snapshot.pocketId] ?: return@mapNotNull null
                 val allocation = periodAllocations[pocketEntity.id]
                 val pocketMovements = periodMovements.filter { it.pocketId == pocketEntity.id }
-                val expenses = pocketMovements.filter { it.type == MovementType.EXPENSE }.sumOf { it.sarAmountMinor }
-                val refunds = pocketMovements.filter { it.type == MovementType.REFUND }.sumOf { it.sarAmountMinor }
+                val expenses = pocketMovements.filter { it.type == MovementType.EXPENSE }.sumOf { it.accountingAmountMinor }
+                val refunds = pocketMovements.filter { it.type == MovementType.REFUND }.sumOf { it.accountingAmountMinor }
                 val math = PocketMath.summary(allocation?.budgetMinor ?: 0, allocation?.rolloverMinor ?: 0, expenses, refunds)
                 PocketPeriodSummary(
                     pocket = pocketEntity.toModel(),
@@ -505,9 +641,19 @@ class RoomPocketLedger(
         val allSummaries = periods.associate { it.id to summariesFor(it.id) }
         val summaries = allSummaries.getValue(current.id)
         val previous = periods.filter { it.start < current.start }.maxByOrNull { it.start }
-        val previousSpend = previous?.let { period ->
+        val previousSpendInPreviousCurrency = previous?.let { period ->
             movements.filter { it.periodId == period.id }.sumOf {
-                if (it.type == MovementType.EXPENSE) it.sarAmountMinor else -it.sarAmountMinor
+                if (it.type == MovementType.EXPENSE) it.accountingAmountMinor else -it.accountingAmountMinor
+            }
+        }
+        val currentEntity = periodEntities.first { it.id == current.id }
+        val previousSpend = previous?.let { previousPeriod ->
+            previousSpendInPreviousCurrency?.let { amount ->
+                if (previousPeriod.accountingCurrency == current.accountingCurrency) {
+                    amount
+                } else {
+                    currentEntity.frozenRateFrom(previousPeriod.accountingCurrency)?.convertMinor(amount)
+                }
             }
         }
         val comparisonMode = if (current.isTransition) ComparisonMode.DAILY_PACE else ComparisonMode.TOTAL_SPEND
@@ -530,7 +676,17 @@ class RoomPocketLedger(
             pocketSummariesByPeriod = allSummaries,
             movements = movements,
             paymentMethods = methodEntities.map { PaymentMethod(it.id, it.name, it.archived) },
-            templates = templateEntities.map { RecurringTemplate(it.id, it.name, it.amountMinor, it.pocketId, it.paymentMethodId, it.archived) },
+            templates = templateEntities.map {
+                RecurringTemplate(
+                    it.id,
+                    it.name,
+                    it.amountMinor,
+                    it.pocketId,
+                    it.paymentMethodId,
+                    it.archived,
+                    SupportedCurrency.fromCode(it.inputCurrencyCode),
+                )
+            },
             unallocatedMinor = current.newFundsMinor - summaries.sumOf { it.budgetMinor },
             newFundsMinor = current.newFundsMinor,
             rolloverTotalMinor = summaries.sumOf { it.rolloverMinor },
@@ -544,6 +700,8 @@ class RoomPocketLedger(
             projectionMinor = PocketMath.project(netSpend, elapsed, totalDays).amountMinor,
             currentLocalDate = today,
             currentInstantMillis = clock.instant().toEpochMilli(),
+            pendingCurrencyChange = pendingCurrencyChangeEntity?.toModel(),
+            defaultPaymentMethodId = ledgerPreferencesEntity?.defaultPaymentMethodId,
         )
     }
 
@@ -586,7 +744,41 @@ private fun PeriodEntity.toModel() = Period(
     configuredStartDay = configuredStartDay,
     isTransition = isTransition,
     needsReview = needsReview,
+    accountingCurrency = SupportedCurrency.fromCode(accountingCurrencyCode),
+    priorCurrencyBoundary = priorBoundaryRate?.let { rate ->
+        CurrencyBoundary(
+            from = SupportedCurrency.fromCode(requireNotNull(priorBoundaryFromCurrencyCode)),
+            to = SupportedCurrency.fromCode(accountingCurrencyCode),
+            rate = rate,
+            effectiveDate = LocalDate.ofEpochDay(requireNotNull(priorBoundaryEffectiveEpochDay)),
+            source = requireNotNull(priorBoundarySource),
+            quoteEffectiveDate = priorBoundaryQuoteEffectiveEpochDay?.let(LocalDate::ofEpochDay),
+        )
+    },
 )
+
+private fun PendingCurrencyChangeEntity.toModel() = PendingCurrencyChange(
+    CurrencyBoundary(
+        from = SupportedCurrency.fromCode(fromCurrencyCode),
+        to = SupportedCurrency.fromCode(targetCurrencyCode),
+        rate = rate,
+        effectiveDate = LocalDate.ofEpochDay(effectiveEpochDay),
+        source = source,
+        quoteEffectiveDate = quoteEffectiveEpochDay?.let(LocalDate::ofEpochDay),
+    )
+)
+
+private fun PeriodEntity.frozenRateFrom(source: SupportedCurrency): FrozenRate? {
+    val storedRate = priorBoundaryRate ?: return null
+    val storedFrom = priorBoundaryFromCurrencyCode ?: return null
+    return runCatching {
+        FrozenRate(
+            from = SupportedCurrency.fromCode(storedFrom),
+            to = SupportedCurrency.fromCode(accountingCurrencyCode),
+            value = storedRate,
+        ).takeIf { it.from == source }
+    }.getOrNull()
+}
 
 private fun PocketEntity.toModel() = Pocket(id, name, PocketIconKey.fromStored(iconKey, name), sortOrder, archived, rolloverEnabled)
 
@@ -599,7 +791,7 @@ private fun MovementEntity.toModel(
     pocketName = pockets[pocketId]?.name ?: "Pocket archivado",
     periodId = periodId,
     type = MovementType.valueOf(type),
-    sarAmountMinor = sarAmountMinor,
+    accountingAmountMinor = accountingAmountMinor,
     occurredAtUtcMillis = occurredAtUtcMillis,
     localDate = LocalDate.ofEpochDay(localEpochDay),
     zoneId = zoneId,
@@ -611,14 +803,20 @@ private fun MovementEntity.toModel(
     originalCurrencyCode = originalCurrencyCode,
     conversionStatus = ConversionStatus.valueOf(conversionStatus),
     rate = rate,
+    conversionEffectiveDate = conversionEffectiveEpochDay?.let(LocalDate::ofEpochDay),
+    conversionSource = conversionSource,
 )
 
-private fun LedgerCommand.AddMovement.toEntity(periodId: String, zoneId: String) = MovementEntity(
+private fun LedgerCommand.AddMovement.toEntity(
+    periodId: String,
+    zoneId: String,
+    resolvedOriginalCurrencyCode: String,
+) = MovementEntity(
     id = id ?: UUID.randomUUID().toString(),
     periodId = periodId,
     pocketId = pocketId,
     type = type.name,
-    sarAmountMinor = sarAmountMinor,
+    accountingAmountMinor = accountingAmountMinor,
     occurredAtUtcMillis = occurredAtUtcMillis,
     localEpochDay = localDate.toEpochDay(),
     zoneId = zoneId,
@@ -626,12 +824,29 @@ private fun LedgerCommand.AddMovement.toEntity(periodId: String, zoneId: String)
     note = note?.trim()?.takeIf { it.isNotEmpty() },
     paymentMethodId = paymentMethodId,
     originalAmountMinor = originalAmountMinor,
-    originalCurrencyCode = originalCurrencyCode,
+    originalCurrencyCode = resolvedOriginalCurrencyCode,
     conversionStatus = conversionStatus.name,
     rate = rate,
+    conversionEffectiveEpochDay = conversionEffectiveDate?.toEpochDay(),
+    conversionSource = conversionSource?.trim()?.takeIf { it.isNotEmpty() },
 )
 
 private fun Movement.toEntity() = MovementEntity(
-    id, periodId, pocketId, type.name, sarAmountMinor, occurredAtUtcMillis, localDate.toEpochDay(), zoneId,
-    merchant, note, paymentMethodId, originalAmountMinor, originalCurrencyCode, conversionStatus.name, rate,
+    id = id,
+    periodId = periodId,
+    pocketId = pocketId,
+    type = type.name,
+    accountingAmountMinor = accountingAmountMinor,
+    occurredAtUtcMillis = occurredAtUtcMillis,
+    localEpochDay = localDate.toEpochDay(),
+    zoneId = zoneId,
+    merchant = merchant,
+    note = note,
+    paymentMethodId = paymentMethodId,
+    originalAmountMinor = originalAmountMinor,
+    originalCurrencyCode = originalCurrencyCode,
+    conversionStatus = conversionStatus.name,
+    rate = rate,
+    conversionEffectiveEpochDay = conversionEffectiveDate?.toEpochDay(),
+    conversionSource = conversionSource,
 )

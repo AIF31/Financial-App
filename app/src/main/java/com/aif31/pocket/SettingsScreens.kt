@@ -15,12 +15,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.*
 import com.aif31.pocket.domain.Money
+import com.aif31.pocket.domain.SupportedCurrency
+import com.aif31.pocket.fx.ExchangeRateRepository
+import com.aif31.pocket.fx.QuoteFailure
 import com.aif31.pocket.settings.*
 import com.aif31.pocket.ui.*
 import java.time.LocalTime
@@ -28,6 +32,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 @Composable
 internal fun SettingsScreen(
@@ -35,6 +40,7 @@ internal fun SettingsScreen(
     ledger: PocketLedger,
     preferences: AppPreferences,
     preferencesStore: PreferencesStore?,
+    exchangeRates: ExchangeRateRepository? = null,
     reminderScheduler: ReminderScheduler?,
     onCreateBackup: () -> Unit,
     onCreateCsv: () -> Unit,
@@ -52,6 +58,18 @@ internal fun SettingsScreen(
         )
         return
     }
+    if (selectedSection == SettingsSection.CURRENCY) {
+        CurrencySettingsRoute(
+            state = state,
+            ledger = ledger,
+            preferences = preferences,
+            preferencesStore = preferencesStore,
+            exchangeRates = exchangeRates,
+            padding = padding,
+            onBack = { onSectionChange(null) },
+        )
+        return
+    }
     SettingsDetailScreen(
         state = state,
         ledger = ledger,
@@ -66,6 +84,114 @@ internal fun SettingsScreen(
         section = selectedSection,
         onBack = { onSectionChange(null) },
     )
+}
+
+@Composable
+private fun CurrencySettingsRoute(
+    state: LedgerState,
+    ledger: PocketLedger,
+    preferences: AppPreferences,
+    preferencesStore: PreferencesStore?,
+    exchangeRates: ExchangeRateRepository?,
+    padding: PaddingValues,
+    onBack: () -> Unit,
+) {
+    val currentPeriod = state.currentPeriod ?: return
+    val currentCurrency = currentPeriod.accountingCurrency
+    val activationDate = currentPeriod.endExclusive
+    val requestedDate = state.currentLocalDate
+    val scope = rememberCoroutineScope()
+    var targetCurrency by rememberSaveable(currentCurrency) {
+        mutableStateOf(SupportedCurrency.entries.first { it != currentCurrency })
+    }
+    var quoteState by remember { mutableStateOf<CurrencyQuoteState>(CurrencyQuoteState.Idle) }
+    var refreshGeneration by rememberSaveable { mutableIntStateOf(0) }
+    var quoteCancelled by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(
+        currentCurrency,
+        targetCurrency,
+        requestedDate,
+        preferences.onlineFxEnabled,
+        state.pendingCurrencyChange,
+        exchangeRates,
+        refreshGeneration,
+        quoteCancelled,
+    ) {
+        if (!preferences.onlineFxEnabled || state.pendingCurrencyChange != null || quoteCancelled) {
+            quoteState = CurrencyQuoteState.Idle
+            return@LaunchedEffect
+        }
+        val repository = exchangeRates
+        if (repository == null) {
+            quoteState = CurrencyQuoteState.Error(QuoteFailure.ConfigurationUnavailable().message.orEmpty())
+            return@LaunchedEffect
+        }
+        quoteState = CurrencyQuoteState.Loading
+        quoteState = try {
+            CurrencyQuoteState.Ready(
+                repository.quote(
+                    requestedDate = requestedDate,
+                    base = currentCurrency,
+                    quote = targetCurrency,
+                    forceRefresh = refreshGeneration > 0,
+                )
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: QuoteFailure) {
+            CurrencyQuoteState.Error(error.message.orEmpty())
+        } catch (_: Exception) {
+            CurrencyQuoteState.Error(QuoteFailure.Unavailable().message.orEmpty())
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+        TextButton(onClick = onBack) { Text("Atrás") }
+        CurrencySettingsContent(
+            state = CurrencySettingsUiState(
+                currentCurrency = currentCurrency,
+                onlineFxEnabled = preferences.onlineFxEnabled,
+                defaultExpenseCurrency = preferences.defaultExpenseCurrency,
+                targetCurrency = targetCurrency,
+                quoteState = quoteState,
+                pendingChange = state.pendingCurrencyChange?.boundary,
+            ),
+            contentPadding = PaddingValues(16.dp),
+            onOnlineFxEnabledChange = { enabled ->
+                scope.launch { preferencesStore?.setOnlineFxEnabled(enabled) }
+            },
+            onDefaultExpenseCurrencyChange = { currency ->
+                scope.launch { preferencesStore?.setDefaultExpenseCurrency(currency) }
+            },
+            onTargetCurrencyChange = { currency ->
+                targetCurrency = currency
+                quoteCancelled = false
+            },
+            onRefreshQuote = {
+                quoteCancelled = false
+                refreshGeneration++
+            },
+            onCancelQuote = { quoteCancelled = true },
+            onConfirmTransition = {
+                val quote = (quoteState as? CurrencyQuoteState.Ready)?.quote ?: return@CurrencySettingsContent
+                scope.launch {
+                    ledger.execute(
+                        LedgerCommand.ScheduleCurrencyChange(
+                            targetCurrency = quote.quote,
+                            rate = quote.rate,
+                            effectiveDate = activationDate,
+                            source = quote.source,
+                            quoteEffectiveDate = quote.effectiveDate,
+                        )
+                    )
+                }
+            },
+            onCancelPendingTransition = {
+                scope.launch { ledger.execute(LedgerCommand.CancelCurrencyChange) }
+            },
+        )
+    }
 }
 
 @Composable
@@ -94,10 +220,12 @@ private fun SettingsDetailScreen(
     var templateAmount by rememberSaveable { mutableStateOf("") }
     var templatePocketId by rememberSaveable { mutableStateOf<String?>(null) }
     var templateMethodId by rememberSaveable { mutableStateOf<String?>(null) }
+    var templateInputCurrency by rememberSaveable { mutableStateOf(SupportedCurrency.SAR) }
     var editingTemplate by rememberSaveable { mutableStateOf<String?>(null) }
     var message by rememberSaveable { mutableStateOf<String?>(null) }
     var reminderPermissionRationaleVisible by rememberSaveable { mutableStateOf(false) }
     val selectedFundsPeriod = state.periods.firstOrNull { it.id == selectedFundsPeriodId }
+    val selectedFundsCurrency = selectedFundsPeriod?.accountingCurrency ?: SupportedCurrency.SAR
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding).testTag("settings_list"),
@@ -125,10 +253,10 @@ private fun SettingsDetailScreen(
                     }) { Text(if (period.id == selectedFundsPeriodId) "✓ ${period.start}" else period.start.toString()) }
                 }
             }
-            OutlinedTextField(funds, { funds = it }, label = { Text("Fondos nuevos SAR") })
+            OutlinedTextField(funds, { funds = it }, label = { Text("Fondos nuevos ${selectedFundsCurrency.name}") })
             Button(onClick = {
                 scope.launch {
-                    val value = runCatching { Money.parse(funds, "SAR").minor }.getOrNull() ?: run {
+                    val value = runCatching { Money.parse(funds, selectedFundsCurrency.name).minor }.getOrNull() ?: run {
                         message = "Escribe fondos válidos"
                         return@launch
                     }
@@ -221,6 +349,29 @@ private fun SettingsDetailScreen(
         if (section == SettingsSection.PAYMENT_METHODS) {
             item {
                 Text("Métodos de pago", style = MaterialTheme.typography.titleLarge)
+            Text("Método predeterminado", style = MaterialTheme.typography.titleMedium)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    OutlinedButton(
+                        onClick = { scope.launch { ledger.execute(LedgerCommand.SetDefaultPaymentMethod(null)) } },
+                        modifier = Modifier
+                            .testTag("default_payment_none")
+                            .semantics { selected = state.defaultPaymentMethodId == null },
+                    ) {
+                        Text(if (state.defaultPaymentMethodId == null) "✓ Ninguno" else "Ninguno")
+                    }
+                }
+                items(state.paymentMethods.filterNot { it.archived }, key = { "default_${it.id}" }) { method ->
+                    OutlinedButton(
+                        onClick = { scope.launch { ledger.execute(LedgerCommand.SetDefaultPaymentMethod(method.id)) } },
+                        modifier = Modifier
+                            .testTag("default_payment_${method.name}")
+                            .semantics { selected = state.defaultPaymentMethodId == method.id },
+                    ) {
+                        Text(if (state.defaultPaymentMethodId == method.id) "✓ ${method.name}" else method.name)
+                    }
+                }
+            }
             OutlinedTextField(methodName, { methodName = it }, label = { Text("Nombre") })
             Button(onClick = {
                 scope.launch {
@@ -254,7 +405,11 @@ private fun SettingsDetailScreen(
                 Text("Plantillas recurrentes", style = MaterialTheme.typography.titleLarge)
             Text("Solo precargan el formulario; nunca crean gastos automáticamente.")
             OutlinedTextField(templateName, { templateName = it }, label = { Text("Nombre de plantilla") })
-            OutlinedTextField(templateAmount, { templateAmount = it }, label = { Text("Importe SAR") })
+            OutlinedTextField(
+                templateAmount,
+                { templateAmount = it },
+                label = { Text("Importe ${templateInputCurrency.name}") },
+            )
             Text("Pocket")
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(state.pockets.filterNot { it.pocket.archived || it.retiredThisPeriod }, key = { it.pocket.id }) { pocket ->
@@ -281,11 +436,21 @@ private fun SettingsDetailScreen(
             Button(onClick = {
                 scope.launch {
                     val pocketId = templatePocketId ?: run { message = "Selecciona un Pocket"; return@launch }
-                    val amount = runCatching { Money.parse(templateAmount, "SAR").minor }.getOrNull()
+                    val amount = runCatching { Money.parse(templateAmount, templateInputCurrency.name).minor }.getOrNull()
                         ?: run { message = "Escribe un importe válido"; return@launch }
-                    when (val result = ledger.execute(LedgerCommand.UpsertTemplate(editingTemplate, templateName, amount, pocketId, templateMethodId))) {
+                    when (val result = ledger.execute(
+                        LedgerCommand.UpsertTemplate(
+                            id = editingTemplate,
+                            name = templateName,
+                            amountMinor = amount,
+                            pocketId = pocketId,
+                            paymentMethodId = templateMethodId,
+                            inputCurrency = templateInputCurrency,
+                        )
+                    )) {
                         LedgerResult.Success -> {
                             templateName = ""; templateAmount = ""; templatePocketId = null; templateMethodId = null
+                            templateInputCurrency = SupportedCurrency.SAR
                             editingTemplate = null; message = "Plantilla guardada"
                         }
                         is LedgerResult.Rejected -> message = result.message
@@ -302,9 +467,10 @@ private fun SettingsDetailScreen(
                 templateAmount = minorNumber(template.amountMinor)
                 templatePocketId = template.pocketId
                 templateMethodId = template.paymentMethodId
+                templateInputCurrency = template.inputCurrency
             }) {
                 Row(Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("${template.name}: ${money(template.amountMinor)}${if (template.archived) " (archivada)" else ""}")
+                    Text("${template.name}: ${MoneyText.format(template.amountMinor, template.inputCurrency)}${if (template.archived) " (archivada)" else ""}")
                     TextButton(onClick = { scope.launch { ledger.execute(LedgerCommand.ArchiveTemplate(template.id, !template.archived)) } }) {
                         Text(if (template.archived) "Restaurar" else "Archivar")
                     }
@@ -324,5 +490,4 @@ private fun SettingsDetailScreen(
     }
 }
 
-private fun money(minor: Long): String = MoneyText.sar(minor)
 private fun minorNumber(minor: Long): String = MoneyText.grouped(minor)

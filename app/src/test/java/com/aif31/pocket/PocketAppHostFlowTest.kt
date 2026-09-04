@@ -1,6 +1,8 @@
 package com.aif31.pocket
 
 import android.content.Context
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -8,6 +10,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasContentDescription
@@ -24,6 +27,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.waitUntilExactlyOneExists
 import androidx.compose.ui.test.waitUntilAtLeastOneExists
@@ -34,11 +38,17 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.aif31.pocket.data.FinanceDatabase
 import com.aif31.pocket.data.RoomPocketLedger
 import com.aif31.pocket.data.LedgerCommand
+import com.aif31.pocket.data.LedgerResult
+import com.aif31.pocket.data.PocketLedger
 import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.PocketIconKey
+import com.aif31.pocket.domain.SupportedCurrency
+import com.aif31.pocket.fx.ExchangeRateRepository
+import com.aif31.pocket.fx.FxQuote
 import com.aif31.pocket.settings.AppPreferences
 import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
+import com.aif31.pocket.ui.SettingsSection
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -75,7 +85,7 @@ class PocketAppHostFlowTest {
         compose.waitUntilExactlyOneExists(hasText("Configura tu primer periodo"), 5_000)
         compose.onNodeWithTag("new_funds").performTextInput("1000.00")
         compose.onNodeWithTag("start_day").performTextReplacement("10")
-        compose.onNodeWithText("Comenzar").performClick()
+        compose.onNodeWithText("Comenzar").performScrollTo().performClick()
         compose.waitUntilDoesNotExist(hasText("Configura tu primer periodo"), 10_000)
         compose.waitUntil(5_000) { preferences.current.futurePeriodStartDay == 10 }
         compose.waitUntilAtLeastOneExists(hasText("SAR 1,000.00"), 5_000)
@@ -109,6 +119,90 @@ class PocketAppHostFlowTest {
     }
 
     @Test
+    fun new_expense_uses_default_payment_and_template_method_overrides_it() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking {
+            ledger.execute(LedgerCommand.Initialize(100_000))
+            val state = ledger.state.first { !it.needsOnboarding }
+            val cashId = state.paymentMethods.single { it.name == "Efectivo" }.id
+            ledger.execute(
+                LedgerCommand.UpsertTemplate(
+                    id = "cash-template",
+                    name = "Plantilla efectivo",
+                    amountMinor = 2_500,
+                    pocketId = state.pockets.first().pocket.id,
+                    paymentMethodId = cashId,
+                    inputCurrency = com.aif31.pocket.domain.SupportedCurrency.USD,
+                )
+            )
+        }
+        compose.setContent { PocketApp(ledger) }
+
+        compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        compose.onNodeWithTag("contextual_add").performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag("movement_form"), 5_000)
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("✓ Tarjeta"))
+        compose.onNodeWithText("✓ Tarjeta").assertIsDisplayed()
+
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("Plantilla efectivo"))
+        compose.onNodeWithText("Plantilla efectivo").performClick()
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("✓ Efectivo"))
+        compose.onNodeWithText("✓ Efectivo").assertIsDisplayed()
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasTestTag("movement_currency_USD"))
+        compose.onNodeWithTag("movement_currency_USD").assertTextContains("✓ USD")
+        compose.onNodeWithTag("movement_amount").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("25.00"))
+        )
+    }
+
+    @Test
+    fun settings_selects_an_active_default_payment_or_none() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000)) }
+        compose.setContent {
+            val state = ledger.state.collectAsState(initial = null).value
+            state?.let {
+                SettingsScreen(
+                    state = it,
+                    ledger = ledger,
+                    preferences = AppPreferences(),
+                    preferencesStore = null,
+                    reminderScheduler = null,
+                    onCreateBackup = {},
+                    onCreateCsv = {},
+                    onPickBackup = {},
+                    onRequestNotificationPermission = {},
+                    padding = PaddingValues(),
+                    section = SettingsSection.PAYMENT_METHODS,
+                    onSectionChange = {},
+                )
+            }
+        }
+
+        compose.waitUntilExactlyOneExists(hasTestTag("settings_list"), 5_000)
+        compose.onNodeWithTag("settings_list").performScrollToNode(hasTestTag("default_payment_Tarjeta"))
+        compose.onNodeWithTag("default_payment_Tarjeta").assertTextContains("✓ Tarjeta")
+
+        compose.onNodeWithTag("default_payment_none").performClick()
+        // Room can commit before this screen's collector renders the new selection.
+        compose.waitUntilExactlyOneExists(
+            hasTestTag("default_payment_none") and hasText("✓ Ninguno"), 5_000,
+        )
+        compose.onNodeWithTag("default_payment_none").assertTextContains("✓ Ninguno")
+        assertEquals(null, runBlocking { ledger.state.first().defaultPaymentMethodId })
+
+        compose.onNodeWithTag("default_payment_Efectivo").performClick()
+        val cashId = runBlocking { ledger.state.first().paymentMethods.single { it.name == "Efectivo" }.id }
+        compose.waitUntilExactlyOneExists(
+            hasTestTag("default_payment_Efectivo") and hasText("✓ Efectivo"), 5_000,
+        )
+        compose.onNodeWithTag("default_payment_Efectivo").assertTextContains("✓ Efectivo")
+        assertEquals(cashId, runBlocking { ledger.state.first().defaultPaymentMethodId })
+    }
+
+    @Test
     fun dashboard_expense_action_opens_a_full_screen_task_and_returns_to_inicio() {
         val zone = ZoneId.of("Asia/Riyadh")
         val ledger = RoomPocketLedger(
@@ -134,7 +228,7 @@ class PocketAppHostFlowTest {
         val saved = runBlocking {
             ledger.state.first { it.movements.size == 1 }.movements.single()
         }
-        assertEquals(1_234L, saved.sarAmountMinor)
+        assertEquals(1_234L, saved.accountingAmountMinor)
     }
 
     @Test
@@ -190,7 +284,7 @@ class PocketAppHostFlowTest {
 
         compose.waitUntilExactlyOneExists(hasText("Inicio"), 5_000)
         compose.onNodeWithText("Ajustes").performClick()
-        compose.onNodeWithText("Recordatorio diario").performClick()
+        compose.onNodeWithText("Recordatorio diario").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
         compose.onAllNodesWithText("Inicio").assertCountEquals(0)
         compose.onNodeWithTag("settings_list").performScrollToNode(hasTestTag("reminder_switch"))
         compose.onNodeWithTag("reminder_time").performTextReplacement("08:30")
@@ -215,15 +309,15 @@ class PocketAppHostFlowTest {
             val cash = state.paymentMethods.first { it.name == "Efectivo" }
             val card = state.paymentMethods.first { it.name == "Tarjeta" }
             ledger.execute(LedgerCommand.AddMovement(id = "market", pocketId = supermarket.pocket.id, type = MovementType.EXPENSE,
-                sarAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(), localDate = java.time.LocalDate.of(2026, 2, 26),
+                accountingAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(), localDate = java.time.LocalDate.of(2026, 2, 26),
                 merchant = "Mercado", note = "fruta fresca", paymentMethodId = cash.id))
             ledger.execute(LedgerCommand.AddMovement(id = "hotel", pocketId = travel.pocket.id, type = MovementType.EXPENSE,
-                sarAmountMinor = 2_000, occurredAtUtcMillis = clock.millis() + 1, localDate = java.time.LocalDate.of(2026, 2, 26),
+                accountingAmountMinor = 2_000, occurredAtUtcMillis = clock.millis() + 1, localDate = java.time.LocalDate.of(2026, 2, 26),
                 merchant = "Hotel", paymentMethodId = card.id, originalAmountMinor = 500, originalCurrencyCode = "USD"))
             ledger.execute(LedgerCommand.CreateNextPeriod())
             val nextPeriod = ledger.state.first { it.periods.size == 2 }.periods.last()
             ledger.execute(LedgerCommand.AddMovement(id = "taxi", pocketId = travel.pocket.id, type = MovementType.EXPENSE,
-                sarAmountMinor = 3_000, occurredAtUtcMillis = clock.millis() + 2, localDate = nextPeriod.start,
+                accountingAmountMinor = 3_000, occurredAtUtcMillis = clock.millis() + 2, localDate = nextPeriod.start,
                 merchant = "Taxi", paymentMethodId = card.id))
         }
         runBlocking { ledger.state.first { it.movements.size == 3 } }
@@ -275,7 +369,7 @@ class PocketAppHostFlowTest {
                     id = "market",
                     pocketId = pocket.pocket.id,
                     type = MovementType.EXPENSE,
-                    sarAmountMinor = 1_000,
+                    accountingAmountMinor = 1_000,
                     occurredAtUtcMillis = clock.millis(),
                     localDate = LocalDate.of(2026, 2, 26),
                     merchant = "Mercado",
@@ -305,7 +399,7 @@ class PocketAppHostFlowTest {
             ledger.execute(LedgerCommand.Initialize(100_000))
             val pocket = ledger.state.first { !it.needsOnboarding }.pockets.first()
             ledger.execute(LedgerCommand.AddMovement(id = "undo", pocketId = pocket.pocket.id, type = MovementType.EXPENSE,
-                sarAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(), localDate = java.time.LocalDate.of(2026, 2, 26)))
+                accountingAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(), localDate = java.time.LocalDate.of(2026, 2, 26)))
         }
         compose.setContent { PocketApp(ledger, undoWindowMillis = 1_000) }
         compose.waitUntilExactlyOneExists(hasText("Inicio"), 5_000)
@@ -335,7 +429,7 @@ class PocketAppHostFlowTest {
         compose.onNodeWithText("Guardar gasto", substring = true).performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
         val saved = runBlocking { ledger.state.first { it.movements.size == 1 }.movements.single() }
-        assertEquals(1_234L, saved.sarAmountMinor)
+        assertEquals(1_234L, saved.accountingAmountMinor)
         assertEquals("Supermercado", saved.pocketName)
     }
 
@@ -624,7 +718,7 @@ class PocketAppHostFlowTest {
                     id = "historical-expense",
                     pocketId = pocket.id,
                     type = MovementType.EXPENSE,
-                    sarAmountMinor = 2_000,
+                    accountingAmountMinor = 2_000,
                     occurredAtUtcMillis = Instant.parse("2026-03-26T09:00:00Z").toEpochMilli(),
                     localDate = LocalDate.of(2026, 3, 26),
                 )
@@ -634,7 +728,7 @@ class PocketAppHostFlowTest {
                     id = "historical-refund",
                     pocketId = pocket.id,
                     type = MovementType.REFUND,
-                    sarAmountMinor = 500,
+                    accountingAmountMinor = 500,
                     occurredAtUtcMillis = Instant.parse("2026-03-26T09:01:00Z").toEpochMilli(),
                     localDate = LocalDate.of(2026, 3, 26),
                 )
@@ -689,6 +783,77 @@ class PocketAppHostFlowTest {
         compose.onNodeWithTag("retired_Ocio").performClick()
         compose.onNodeWithText("Rollover liberado: SAR 50.00").assertIsDisplayed()
         compose.onNodeWithText("Disponibilidad final: SAR 0.00").assertIsDisplayed()
+    }
+
+    @Test
+    fun period_owned_amounts_use_their_accounting_currency_without_exposing_currency_controls() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val firstLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone),
+            zone,
+        )
+        runBlocking {
+            firstLedger.execute(LedgerCommand.Initialize(100_000))
+            val firstState = firstLedger.state.first { !it.needsOnboarding }
+            val first = firstState.currentPeriod!!
+            val pocket = firstState.pockets.first { it.pocket.name == "Viajes" }.pocket
+            firstLedger.execute(LedgerCommand.SetAllocation(first.id, pocket.id, 10_000))
+            firstLedger.execute(
+                LedgerCommand.ScheduleCurrencyChange(
+                    com.aif31.pocket.domain.SupportedCurrency.MXN,
+                    "2",
+                    first.endExclusive,
+                    "TEST",
+                )
+            )
+            firstLedger.execute(LedgerCommand.CreateNextPeriod())
+            firstLedger.execute(
+                LedgerCommand.AddMovement(
+                    id = "mxn-movement",
+                    pocketId = pocket.id,
+                    type = MovementType.EXPENSE,
+                    accountingAmountMinor = 2_000,
+                    occurredAtUtcMillis = Instant.parse("2026-03-26T09:00:00Z").toEpochMilli(),
+                    localDate = LocalDate.of(2026, 3, 26),
+                    originalCurrencyCode = "MXN",
+                )
+            )
+        }
+        val currentLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone),
+            zone,
+        )
+        compose.setContent { PocketApp(currentLedger) }
+
+        compose.waitUntilExactlyOneExists(hasText("MXN 180.00"), 5_000)
+        compose.onNodeWithText("MXN 180.00").assertIsDisplayed()
+        compose.onNodeWithTag("contextual_add").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Guardar gasto · MXN 0.00"), 5_000)
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("Más detalles"))
+        compose.onNodeWithText("Más detalles").performClick()
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("Fecha (AAAA-MM-DD)"))
+        compose.onNodeWithText("Fecha (AAAA-MM-DD)").performTextReplacement("2026-02-26")
+        compose.waitUntilExactlyOneExists(hasText("Guardar gasto · SAR 0.00"), 5_000)
+        compose.onNodeWithContentDescription("Cerrar").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Pockets"), 5_000)
+        compose.onNodeWithText("Pockets").performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag("pockets_list"), 5_000)
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Presupuesto MXN 200.00"))
+        compose.onNodeWithText("Presupuesto MXN 200.00").assertIsDisplayed()
+        compose.onAllNodesWithText("Cambiar moneda", substring = true).assertCountEquals(0)
+
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("period_selector"))
+        compose.onNodeWithTag("period_selector").performScrollToNode(hasText("25 feb – 24 mar"))
+        compose.onNodeWithText("25 feb – 24 mar").performClick()
+        compose.onNodeWithText("Moneda del periodo · SAR").assertIsDisplayed()
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Presupuesto SAR 100.00"))
+        compose.onNodeWithText("Presupuesto SAR 100.00").assertIsDisplayed()
+
+        compose.onNodeWithText("Movimientos").performClick()
+        compose.waitUntilExactlyOneExists(hasText("- MXN 20.00"), 5_000)
+        compose.onNodeWithText("- MXN 20.00").assertIsDisplayed()
     }
 
     @Test
@@ -792,7 +957,7 @@ class PocketAppHostFlowTest {
                     id = "transition-ui-previous-spend",
                     pocketId = firstState.pockets.first().pocket.id,
                     type = MovementType.EXPENSE,
-                    sarAmountMinor = 1_000,
+                    accountingAmountMinor = 1_000,
                     occurredAtUtcMillis = Instant.parse("2026-02-26T09:00:00Z").toEpochMilli(),
                     localDate = LocalDate.of(2026, 2, 26),
                 ),
@@ -827,6 +992,143 @@ class PocketAppHostFlowTest {
         val current: AppPreferences get() = values.value
         override suspend fun setFuturePeriodStartDay(day: Int) { values.value = values.value.copy(futurePeriodStartDay = day) }
         override suspend fun setReminder(enabled: Boolean, time: LocalTime) { values.value = values.value.copy(reminderEnabled = enabled, reminderTime = time) }
+        override suspend fun setOnlineFxEnabled(enabled: Boolean) { values.value = values.value.copy(onlineFxEnabled = enabled) }
+        override suspend fun setDefaultExpenseCurrency(currency: com.aif31.pocket.domain.SupportedCurrency) {
+            values.value = values.value.copy(defaultExpenseCurrency = currency)
+        }
+    }
+
+    @Test
+    fun onboarding_uses_the_selected_currency_for_funds_and_expense_defaults() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        val preferences = FakePreferences()
+        compose.setContent { PocketApp(ledger, preferences = preferences) }
+
+        compose.waitUntilExactlyOneExists(hasText("Configura tu primer periodo"), 5_000)
+        compose.onNodeWithText("MXN").performClick()
+        compose.onNodeWithTag("new_funds").performTextInput("1000.00")
+        compose.onNodeWithText("Comenzar").performScrollTo().performClick()
+
+        compose.waitUntilDoesNotExist(hasText("Configura tu primer periodo"), 10_000)
+        compose.waitUntil(5_000) {
+            preferences.current.defaultExpenseCurrency == com.aif31.pocket.domain.SupportedCurrency.MXN
+        }
+        val state = runBlocking { ledger.state.first { !it.needsOnboarding } }
+        assertEquals(com.aif31.pocket.domain.SupportedCurrency.MXN, state.currentPeriod?.accountingCurrency)
+        compose.waitUntilAtLeastOneExists(hasText("MXN 1,000.00"), 5_000)
+    }
+
+    @Test
+    fun currency_settings_confirms_a_quoted_next_period_change_without_mutating_the_current_period() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        val preferences = FakePreferences().also {
+            runBlocking { it.setOnlineFxEnabled(true) }
+        }
+        val exchangeRates = object : ExchangeRateRepository {
+            override suspend fun quote(
+                requestedDate: LocalDate,
+                base: SupportedCurrency,
+                quote: SupportedCurrency,
+                forceRefresh: Boolean,
+            ): FxQuote {
+                assertEquals(LocalDate.of(2026, 2, 26), requestedDate)
+                return FxQuote(requestedDate, requestedDate.minusDays(1), base, quote, "4.6", "TEST_FROZEN_QUOTE")
+            }
+        }
+        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000, accountingCurrency = SupportedCurrency.SAR)) }
+
+        compose.setContent {
+            PocketApp(
+                ledger = ledger,
+                preferences = preferences,
+                exchangeRates = exchangeRates,
+            )
+        }
+
+        compose.waitUntilExactlyOneExists(hasText("Ajustes"), 5_000)
+        compose.onNodeWithText("Ajustes").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Moneda y conversión"), 5_000)
+        compose.onNodeWithText("Moneda y conversión").performClick()
+        compose.waitUntilAtLeastOneExists(hasText("1 SAR = 4.6 USD"), 5_000)
+        compose.onNodeWithTag("currency_settings_list")
+            .performScrollToNode(hasText("Confirmar cambio próximo periodo"))
+        compose.onNodeWithText("Confirmar cambio próximo periodo").performClick()
+
+        compose.waitUntil(5_000) {
+            runBlocking { ledger.state.first().pendingCurrencyChange?.boundary?.to == SupportedCurrency.USD }
+        }
+        val state = runBlocking { ledger.state.first() }
+        assertEquals(SupportedCurrency.SAR, state.currentPeriod?.accountingCurrency)
+        assertEquals("TEST_FROZEN_QUOTE", state.pendingCurrencyChange?.boundary?.source)
+        assertEquals(LocalDate.of(2026, 2, 25), state.pendingCurrencyChange?.boundary?.quoteEffectiveDate)
+        assertEquals(LocalDate.of(2026, 3, 25), state.pendingCurrencyChange?.boundary?.effectiveDate)
+    }
+
+    @Test
+    fun expense_uses_the_preferred_input_currency_and_freezes_the_rendered_quote() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        val preferences = FakePreferences().also {
+            runBlocking {
+                it.setOnlineFxEnabled(true)
+                it.setDefaultExpenseCurrency(SupportedCurrency.USD)
+            }
+        }
+        val exchangeRates = object : ExchangeRateRepository {
+            override suspend fun quote(
+                requestedDate: LocalDate,
+                base: SupportedCurrency,
+                quote: SupportedCurrency,
+                forceRefresh: Boolean,
+            ) = FxQuote(requestedDate, requestedDate.minusDays(1), base, quote, "3.75", "SAMA_PARITY")
+        }
+        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000)) }
+        var submitted: LedgerCommand.AddMovement? = null
+        var submitResult: LedgerResult? = null
+        val recordingLedger = object : PocketLedger by ledger {
+            override suspend fun execute(command: LedgerCommand): LedgerResult {
+                val result = ledger.execute(command)
+                if (command is LedgerCommand.AddMovement) {
+                    submitted = command
+                    submitResult = result
+                }
+                return result
+            }
+        }
+
+        compose.setContent {
+            PocketApp(
+                ledger = recordingLedger,
+                preferences = preferences,
+                exchangeRates = exchangeRates,
+                openNewExpense = true,
+            )
+        }
+
+        compose.waitUntilExactlyOneExists(hasTestTag("movement_amount"), 5_000)
+        compose.onNodeWithTag("movement_currency_USD").assertTextContains("✓ USD")
+        compose.onNodeWithTag("movement_amount").performTextInput("10.00")
+        compose.onNodeWithTag("movement_pocket_Supermercado")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithTag("movement_pocket_Supermercado").assertTextContains("✓ Supermercado")
+        compose.waitUntilAtLeastOneExists(hasText("SAR 37.50"), 5_000)
+        compose.onNodeWithText("Efectiva: 2026-02-25").assertIsDisplayed()
+        compose.onNodeWithText("Fuente: SAMA_PARITY").assertIsDisplayed()
+        compose.onNodeWithTag("movement_save").assertIsEnabled().performClick()
+
+        compose.waitUntil(5_000) { submitted != null }
+        assertEquals(LedgerResult.Success, submitResult)
+        assertEquals(LocalDate.of(2026, 2, 25), submitted?.conversionEffectiveDate)
+        compose.waitUntil(5_000) { runBlocking { ledger.state.first().movements.size == 1 } }
+        val saved = runBlocking { ledger.state.first().movements.single() }
+        assertEquals(1_000L, saved.originalAmountMinor)
+        assertEquals("USD", saved.originalCurrencyCode)
+        assertEquals(3_750L, saved.accountingAmountMinor)
+        assertEquals("3.75", saved.rate)
+        assertEquals(LocalDate.of(2026, 2, 25), saved.conversionEffectiveDate)
+        assertEquals("SAMA_PARITY", saved.conversionSource)
     }
 
     private class FakeReminderScheduler : ReminderScheduler {

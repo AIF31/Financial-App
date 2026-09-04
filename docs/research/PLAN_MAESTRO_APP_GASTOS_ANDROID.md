@@ -1,7 +1,7 @@
-# Plan maestro: app personal de gastos y *pocketing* para Samsung S23
+# Plan maestro: app Android local-first de presupuesto y gastos
 
 **Fecha de investigación:** 2026-08-21  
-**Contexto:** un único usuario, residencia en KAUST, Android/Samsung S23, moneda base SAR  
+**Contexto:** aplicación para usuarios individuales, dispositivos Android representativos y configuración regional configurable
 **Objetivo:** registrar movimientos diarios, presupuestar por sobres (*pockets*) y reducir gradualmente la captura manual sin comprometer la integridad de los datos.
 
 ## Decisión ejecutiva
@@ -17,15 +17,15 @@ La vía más rápida, razonable y técnicamente sólida es una **app Android nat
 - Backup portátil cifrado y exportación CSV explícita.
 - Captura por notificaciones únicamente en una fase posterior y siempre como **candidato pendiente de confirmar**.
 - SMS directo fuera del alcance inicial.
-- Open Banking saudí como opción futura mediante un proveedor AISP autorizado, no mediante conexión directa de una APK personal a los bancos.
+- Open Banking regulado como opción futura mediante un proveedor AISP autorizado, no mediante conexión directa de una APK a los bancos.
 
 La app puede ser utilizable en **5–8 días de trabajo enfocado**. Una versión personal endurecida, con recuperación probada, captura rápida y buena cobertura de pruebas, requiere aproximadamente **2–3 semanas**. La automatización de notificaciones agrega **1–2 semanas por la variabilidad de cada banco e idioma**.
 
 ## Supuestos que deben validarse
 
-- La instalación será privada mediante un APK firmado en el S23; no se publicará inicialmente en Google Play.
+- La distribución inicial será controlada mediante un APK firmado en un dispositivo Android representativo; no se publicará inicialmente en Google Play.
 - La moneda base es SAR y la zona presupuestaria es `Asia/Riyadh`.
-- Se empezará con una cuenta bancaria y una cartera de efectivo.
+- Las primeras pruebas usarán fixtures sintéticos para representar cuentas, efectivo y otros medios de pago.
 - Las notificaciones bancarias reales todavía no han sido inspeccionadas.
 - Los tiempos son estimaciones para una persona trabajando de forma enfocada y se ajustarán después del *spike* técnico.
 
@@ -81,7 +81,7 @@ Reglas:
 - Gastos anuales conocidos se modelan como *sinking funds* mensuales.
 - “Misceláneos” existe, pero permanece visible para detectar abuso.
 
-Una plantilla inicial para KAUST puede incluir vivienda/servicios, supermercado, restaurantes/café, transporte, universidad/software, salud, viajes familiares, ocio, regalos/donaciones, emergencia e irregulares. El método de separar dinero por “pots” está descrito por [MoneyHelper](https://www.moneyhelper.org.uk/en/everyday-money/budgeting/managing-your-money-using-the-jam-jar-approach).
+Una plantilla inicial puede incluir vivienda/servicios, supermercado, restaurantes/café, transporte, educación/software, salud, viajes, ocio, regalos/donaciones, emergencia e irregulares. El método de separar dinero por “pots” está descrito por [MoneyHelper](https://www.moneyhelper.org.uk/en/everyday-money/budgeting/managing-your-money-using-the-jam-jar-approach).
 
 ## Reglas financieras que no deben negociarse
 
@@ -247,9 +247,9 @@ Notificación nueva
 
 Los callbacks del listener llegan en el hilo principal; el análisis y la escritura deben moverse a una coroutine de I/O. El servicio necesita `BIND_NOTIFICATION_LISTENER_SERVICE` y el usuario concede acceso desde Ajustes. [Referencia y declaración del listener](https://developer.android.com/reference/android/service/notification/NotificationListenerService), [ajustes específicos](https://developer.android.com/reference/android/provider/Settings#ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS).
 
-### Samsung/One UI
+### Diferencias entre fabricantes
 
-No se necesita SDK específico de Samsung. One UI puede colocar apps poco usadas en *sleeping/deep sleeping*. No se solicitará excluir la optimización de batería de forma preventiva. Solo si pruebas físicas demuestran eventos perdidos se documentará añadir la app a `Never sleeping apps`, midiendo el consumo. [Samsung app management](https://developer.samsung.com/mobile/app-management.html).
+No se necesita un SDK específico de fabricante. Las políticas de ahorro de batería y suspensión pueden variar entre versiones y fabricantes. No se solicitará excluir la optimización de batería de forma preventiva; solo se documentará una excepción si una prueba física reproducible demuestra pérdida de eventos, midiendo también el consumo.
 
 ### Umbral para automatizar más
 
@@ -259,17 +259,17 @@ No se auto-confirma ningún candidato en la primera versión. Solo se evaluará 
 
 `READ_SMS`/`RECEIVE_SMS` son permisos restringidos y Google Play limita su uso; una app normalmente debe ser el handler predeterminado o calificar para una excepción revisada. Aunque existe un caso de gestión financiera basada en SMS, exige declaración y aprobación. [Android: permisos SMS](https://developer.android.com/reference/android/Manifest.permission#READ_SMS), [Google Play: SMS/Call Log policy](https://support.google.com/googleplay/android-developer/answer/10208820).
 
-Leer SMS introduciría conversaciones, OTP, formatos variables y una superficie de seguridad desproporcionada. Tampoco se usarán notificaciones de Samsung/Google Messages para rodear esas restricciones. El listener se limitará a apps bancarias.
+Leer SMS introduciría conversaciones, OTP, formatos variables y una superficie de seguridad desproporcionada. Tampoco se usarán notificaciones de aplicaciones de mensajería para rodear esas restricciones. El listener se limitará a las aplicaciones seleccionadas por el usuario.
 
-## Open Banking en Arabia Saudita
+## Open Banking regulado
 
-SAMA define Account Information Services para compartir datos de cuentas con terceros bajo consentimiento. El framework incorpora reglas de negocio, especificaciones API, seguridad, experiencia del cliente y certificación. [SAMA Open Banking](https://www.openbanking.sama.gov.sa/index-en.html).
+Los servicios de información de cuentas permiten compartir datos con terceros bajo consentimiento. Cualquier integración debe cumplir las reglas del regulador y del proveedor autorizado aplicables a la región, incluidas seguridad, experiencia del cliente y certificación.
 
-El 26 de marzo de 2026 SAMA anunció el inicio del licenciamiento formal de empresas de Open Banking tras el sandbox. El acceso se produce mediante entidades supervisadas y conformes con el framework; no es una API personal abierta para que una APK se conecte directamente a cada banco. [SAMA: licensing commencement](https://sama.gov.sa/en-US/MediaCenter/News/Pages/news-1135.aspx). Las reglas para proveedores de información de cuentas exigen consentimiento, comunicación segura, acceso limitado y eliminación al retirar el consentimiento cuando corresponda. [SAMA Rulebook, Article 99](https://rulebook.sama.gov.sa/en/article-99-0).
+El acceso debe producirse mediante entidades supervisadas y conformes con el marco aplicable; no debe tratarse como una API abierta para que una APK se conecte directamente a cada banco. Las reglas deben exigir consentimiento, comunicación segura, acceso limitado y eliminación al retirar el consentimiento cuando corresponda.
 
 ### Consecuencia para este proyecto
 
-La ruta realista sería integrar un AISP autorizado por SAMA. Eso añade contrato, cobertura bancaria, backend seguro, redirects de consentimiento, tokens, revocación, retención, reconciliación, coste y obligaciones operativas. Para un usuario no se justifica hasta que los datos demuestren que manual + notificaciones/CSV no cubren la necesidad.
+La ruta realista sería integrar un AISP autorizado por el regulador correspondiente. Eso añade contrato, cobertura bancaria, backend seguro, redirects de consentimiento, tokens, revocación, retención, reconciliación, coste y obligaciones operativas. No se justifica hasta que los datos demuestren que el registro manual y las importaciones no cubren la necesidad.
 
 **Prohibido:** scraping de banca web, guardar credenciales bancarias o simular el login del usuario.
 
@@ -295,7 +295,7 @@ No se promete resistencia forense en un dispositivo rooteado y desbloqueado. El 
 - Componentes no exportados salvo los que Android exija y con permisos de binding correspondientes.
 - Ningún importe, comercio, nota o texto de notificación en logs.
 - Dependencias mínimas y actualizadas; no criptografía casera.
-- Aviso prominente y consentimiento antes de habilitar notificaciones, aunque la instalación sea privada.
+- Aviso prominente y consentimiento antes de habilitar notificaciones, aunque la distribución sea controlada.
 
 ### Backup
 
@@ -304,7 +304,7 @@ Auto Backup puede incluir bases privadas por defecto. Para datos financieros se 
 - `android:allowBackup="false"`.
 - `dataExtractionRules` explícitas para excluir base, archivos y preferencias tanto de nube como de transferencia entre dispositivos.
 - Reglas legacy equivalentes si la versión mínima las necesita.
-- Prueba real en One UI, ya que el comportamiento D2D puede variar por versión/fabricante. [Android Auto Backup](https://developer.android.com/identity/data/autobackup).
+- Prueba en al menos un dispositivo físico representativo, ya que el comportamiento de transferencia entre dispositivos puede variar por versión/fabricante. [Android Auto Backup](https://developer.android.com/identity/data/autobackup).
 
 La recuperación se realiza mediante Storage Access Framework, sin permisos generales de archivos. [Android SAF](https://developer.android.com/training/data-storage/shared/documents-files).
 
@@ -321,7 +321,7 @@ La importación limita tamaño, valida esquema/UUID/moneda/relaciones, muestra v
 
 **Trabajo**
 
-- Confirmar versión de Android/One UI y configuración de idioma.
+- Confirmar versión de Android, configuración del fabricante y configuración de idioma.
 - Enumerar bancos, tarjetas, efectivo y wallets usados.
 - Recoger 10–20 ejemplos anonimizados por banco: compra, ATM, transferencia, devolución, rechazo e ingreso.
 - Registrar si la notificación contiene importe, moneda, comercio, últimos dígitos y tipo.
@@ -356,7 +356,7 @@ La importación limita tamaño, valida esquema/UUID/moneda/relaciones, muestra v
 - Transferencias/retiros no aparecen como gasto.
 - Totales de cuenta y pockets coinciden con fixtures conocidos.
 - Backup → desinstalar → reinstalar → importar restaura exactamente los datos.
-- APK release firmado instalado y probado en el S23.
+- APK release firmado instalado y probado en un dispositivo físico representativo.
 
 ### Fase 2 — Captura rápida y endurecimiento, 3–5 días
 
@@ -399,7 +399,7 @@ Android recomienda accesibilidad semántica en Compose y Material 3. [Accesibili
 - Notificaciones repetidas/actualizadas no crean duplicados.
 - Parser falla cerrado cuando faltan importe, moneda o tipo.
 - Compra, ATM, transferencia, devolución y rechazo se distinguen en los bancos probados.
-- Prueba de varios días en S23 sin pérdida atribuible al ciclo de vida.
+- Prueba de varios días en un dispositivo físico representativo sin pérdida atribuible al ciclo de vida.
 
 ### Fase 4 — Calidad financiera, 1 semana incremental
 
@@ -430,7 +430,7 @@ Android recomienda accesibilidad semántica en Compose y Material 3. [Accesibili
 
 **Trabajo**
 
-- Verificar registro/licencia vigente en SAMA.
+- Verificar registro y licencia vigentes del proveedor elegido ante el regulador correspondiente.
 - Evaluar sandbox, bancos, SLA, precios, retención y exportabilidad.
 - Diseñar backend y secretos; nunca embebidos en APK.
 - Consentimiento, renovación, revocación y eliminación.
@@ -458,7 +458,7 @@ Android recomienda accesibilidad semántica en Compose y Material 3. [Accesibili
 
 Room recomienda ejecutar pruebas de base en Android porque SQLite del host puede diferir. [Room testing](https://developer.android.com/training/data-storage/room/testing-db), [migrations](https://developer.android.com/training/data-storage/room/migrating-db-versions).
 
-### Dispositivo físico S23
+### Dispositivo físico representativo
 
 - Modo avión, reinicio, proceso destruido y actualización de APK.
 - Bloqueo/cancelación/fallback biométrico.
@@ -506,11 +506,11 @@ Room recomienda ejecutar pruebas de base en Android porque SQLite del host puede
 
 Ejecutar la Fase 0 antes de escribir el proyecto final. Los únicos datos que faltan para cerrar el alcance son:
 
-1. Bancos y wallets que se usarán en Arabia Saudita.
+1. Bancos y proveedores que se incluirán en el alcance regional.
 2. Ejemplos anonimizados de sus notificaciones en árabe/inglés.
 3. Si se usará efectivo regularmente.
 4. Pockets iniciales y reglas de rollover.
-5. Preferencia de instalación privada y política de backup.
+5. Política de distribución controlada y de backup.
 
 Con esa evidencia se puede producir el backlog técnico definitivo, wireframes del flujo rápido y esquema Room v1 sin apostar a una automatización que el banco quizá no permita.
 
@@ -529,8 +529,5 @@ Con esa evidencia se puede producir el backlog técnico definitivo, wireframes d
 - [Storage Access Framework](https://developer.android.com/training/data-storage/shared/documents-files)
 - [BiometricPrompt](https://developer.android.com/identity/sign-in/biometric-auth)
 - [Google Play SMS policy](https://support.google.com/googleplay/android-developer/answer/10208820)
-- [SAMA Open Banking](https://www.openbanking.sama.gov.sa/index-en.html)
-- [SAMA licensing announcement, 2026-03-26](https://sama.gov.sa/en-US/MediaCenter/News/Pages/news-1135.aspx)
-- [SAMA Rulebook, Article 99](https://rulebook.sama.gov.sa/en/article-99-0)
 - [ISO 4217](https://www.iso.org/iso-4217-currency-codes.html)
 

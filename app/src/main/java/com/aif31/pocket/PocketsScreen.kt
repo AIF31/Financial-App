@@ -24,6 +24,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.*
 import com.aif31.pocket.domain.Money
+import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.settings.*
 import com.aif31.pocket.ui.*
 import java.time.LocalTime
@@ -40,6 +41,8 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
     var creating by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val selectedPeriod = state.periods.firstOrNull { it.id == selectedPeriodId } ?: state.currentPeriod
+    val selectedCurrency = selectedPeriod?.accountingCurrency ?: SupportedCurrency.SAR
+    fun money(minor: Long): String = MoneyText.format(minor, selectedCurrency)
     val shownPockets = state.pocketSummariesByPeriod[selectedPeriodId].orEmpty()
     val isHistorical = selectedPeriod?.id != null && selectedPeriod.id != state.currentPeriod?.id
     val activePockets = shownPockets.filterNot { summary ->
@@ -67,7 +70,10 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
                 ) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("Vista histórica · Solo lectura", style = MaterialTheme.typography.titleMedium)
-                        Text("Moneda del periodo · SAR", color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        Text(
+                            "Moneda del periodo · ${selectedCurrency.name}",
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
                     }
                 }
             }
@@ -91,7 +97,10 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
             }
         }
         item {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.testTag("period_selector"),
+            ) {
                 items(state.periods, key = { it.id }) { period ->
                     Surface(
                         shape = MaterialTheme.shapes.extraLarge,
@@ -100,7 +109,9 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
                         } else {
                             MaterialTheme.colorScheme.surfaceContainer
                         },
-                        modifier = Modifier.clickable { selectedPeriodId = period.id },
+                        modifier = Modifier
+                            .testTag("period_${period.id}")
+                            .clickable { selectedPeriodId = period.id },
                     ) {
                         Column(
                             modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
@@ -311,6 +322,7 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
             summary = summary,
             ledger = ledger,
             readOnly = isHistorical,
+            currency = selectedCurrency,
             onEdit = { selected = null; editing = summary },
             onDismiss = { selected = null },
         )
@@ -425,9 +437,11 @@ private fun PocketManagementDialog(
     summary: PocketPeriodSummary,
     ledger: PocketLedger,
     readOnly: Boolean,
+    currency: SupportedCurrency,
     onEdit: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    fun money(minor: Long): String = MoneyText.format(minor, currency)
     if (readOnly) {
         AlertDialog(
             onDismissRequest = onDismiss,
@@ -489,7 +503,7 @@ private fun PocketManagementDialog(
                 OutlinedTextField(
                     value = amount,
                     onValueChange = { amount = it; error = null },
-                    label = { Text("Presupuesto SAR") },
+                    label = { Text("Presupuesto ${currency.name}") },
                     placeholder = { Text("0.00") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier
@@ -537,7 +551,7 @@ private fun PocketManagementDialog(
                     val parsed = if (amount.text.isBlank()) {
                         0L
                     } else {
-                        runCatching { Money.parse(amount.text, "SAR").minor }.getOrNull() ?: run {
+                        runCatching { Money.parse(amount.text, currency.name).minor }.getOrNull() ?: run {
                             error = "Escribe un presupuesto válido"
                             return@launch
                         }
@@ -554,5 +568,4 @@ private fun PocketManagementDialog(
     )
 }
 
-private fun money(minor: Long): String = MoneyText.sar(minor)
 private fun minorNumber(minor: Long): String = MoneyText.grouped(minor)

@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.CurrencyExchange
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Repeat
@@ -46,6 +47,11 @@ internal enum class SettingsSection(
         "Periodo y fondos",
         "Fondos, fecha de inicio y creación del siguiente periodo",
         Icons.Default.AccountBalanceWallet,
+    ),
+    CURRENCY(
+        "Moneda y conversión",
+        "Moneda contable, cotizaciones y moneda predeterminada para gastos",
+        Icons.Default.CurrencyExchange,
     ),
     REMINDERS(
         "Recordatorio diario",

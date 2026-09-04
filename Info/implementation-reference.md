@@ -54,12 +54,12 @@ Bank integrations, notification ingestion, SMS reading, automatic exchange rates
 | `5abb97c` | Initial local-first spending MVP implementation |
 | `4e17dd3` | Material implementation-review fixes |
 | `bfe56b5` | Retained host/device flow verification tests |
-| `2b01539` | Permanent signed-release workflow, strengthened tests, and S23 evidence |
+| `2b01539` | Permanent signed-release workflow and strengthened tests |
 
-## Review findings resolved on 2026-08-22
+## Review findings resolved
 
 - Replaced machine-specific usernames in reusable instructions with `%USERPROFILE%` or `$env:USERPROFILE`.
-- Removed the physical device serial from committed evidence.
+- Removed device-specific identifiers from committed evidence.
 - Standardized documentation on the canonical term **Pocket budget**.
 - Strengthened history tests so period, Pocket, currency, and payment-method filters each have positive and negative observable assertions.
 - Strengthened shortcut coverage to submit a movement; the Android test now launches `MainActivity` with the real shortcut action via `ActivityScenario`.

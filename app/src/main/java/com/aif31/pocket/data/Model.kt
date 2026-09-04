@@ -1,6 +1,20 @@
 package com.aif31.pocket.data
 
+import com.aif31.pocket.domain.SupportedCurrency
 import java.time.LocalDate
+
+data class CurrencyBoundary(
+    val from: SupportedCurrency,
+    val to: SupportedCurrency,
+    val rate: String,
+    val effectiveDate: LocalDate,
+    val source: String,
+    val quoteEffectiveDate: LocalDate? = null,
+)
+
+data class PendingCurrencyChange(
+    val boundary: CurrencyBoundary,
+)
 
 data class Period(
     val id: String,
@@ -10,6 +24,8 @@ data class Period(
     val configuredStartDay: Int,
     val isTransition: Boolean = false,
     val needsReview: Boolean = false,
+    val accountingCurrency: SupportedCurrency = SupportedCurrency.SAR,
+    val priorCurrencyBoundary: CurrencyBoundary? = null,
 )
 
 enum class ComparisonMode { TOTAL_SPEND, DAILY_PACE }
@@ -63,7 +79,7 @@ data class Movement(
     val pocketName: String,
     val periodId: String,
     val type: MovementType,
-    val sarAmountMinor: Long,
+    val accountingAmountMinor: Long,
     val occurredAtUtcMillis: Long,
     val localDate: LocalDate,
     val zoneId: String,
@@ -75,6 +91,8 @@ data class Movement(
     val originalCurrencyCode: String,
     val conversionStatus: ConversionStatus,
     val rate: String?,
+    val conversionEffectiveDate: LocalDate?,
+    val conversionSource: String?,
 )
 
 data class PaymentMethod(val id: String, val name: String, val archived: Boolean)
@@ -86,6 +104,7 @@ data class RecurringTemplate(
     val pocketId: String,
     val paymentMethodId: String?,
     val archived: Boolean,
+    val inputCurrency: SupportedCurrency = SupportedCurrency.SAR,
 )
 
 data class PocketPeriodSummary(
@@ -125,12 +144,18 @@ data class LedgerState(
     val projectionMinor: Long = 0,
     val currentLocalDate: LocalDate = LocalDate.of(1970, 1, 1),
     val currentInstantMillis: Long = 0,
+    val pendingCurrencyChange: PendingCurrencyChange? = null,
+    val defaultPaymentMethodId: String? = null,
 ) {
     val needsOnboarding: Boolean get() = periods.isEmpty()
 }
 
 sealed interface LedgerCommand {
-    data class Initialize(val newFundsMinor: Long, val startDay: Int = 25) : LedgerCommand
+    data class Initialize(
+        val newFundsMinor: Long,
+        val startDay: Int = 25,
+        val accountingCurrency: SupportedCurrency = SupportedCurrency.SAR,
+    ) : LedgerCommand
     data class UpdatePeriodFunds(val periodId: String, val newFundsMinor: Long) : LedgerCommand
     data class SetAllocation(val periodId: String, val pocketId: String, val amountMinor: Long) : LedgerCommand
     data class UpsertPocket(
@@ -145,30 +170,43 @@ sealed interface LedgerCommand {
         val id: String? = null,
         val pocketId: String,
         val type: MovementType,
-        val sarAmountMinor: Long,
+        val accountingAmountMinor: Long,
         val occurredAtUtcMillis: Long,
         val localDate: LocalDate,
         val merchant: String? = null,
         val note: String? = null,
         val paymentMethodId: String? = null,
         val originalAmountMinor: Long? = null,
-        val originalCurrencyCode: String = "SAR",
+        val originalCurrencyCode: String? = null,
         val conversionStatus: ConversionStatus = ConversionStatus.CONFIRMED,
         val rate: String? = null,
+        val conversionEffectiveDate: LocalDate? = null,
+        val conversionSource: String? = null,
+        val accountingCurrency: SupportedCurrency? = null,
     ) : LedgerCommand
     data class DeleteMovement(val movementId: String) : LedgerCommand
     data class RestoreMovement(val movement: Movement) : LedgerCommand
     data class CreateNextPeriod(val startDay: Int? = null) : LedgerCommand
     data class CatchUpPeriods(val preferredStartDay: Int) : LedgerCommand
     data class MarkPeriodReviewed(val periodId: String) : LedgerCommand
+    data class ScheduleCurrencyChange(
+        val targetCurrency: SupportedCurrency,
+        val rate: String,
+        val effectiveDate: LocalDate,
+        val source: String,
+        val quoteEffectiveDate: LocalDate? = null,
+    ) : LedgerCommand
+    data object CancelCurrencyChange : LedgerCommand
     data class UpsertPaymentMethod(val id: String? = null, val name: String) : LedgerCommand
     data class ArchivePaymentMethod(val id: String, val archived: Boolean = true) : LedgerCommand
+    data class SetDefaultPaymentMethod(val id: String?) : LedgerCommand
     data class UpsertTemplate(
         val id: String? = null,
         val name: String,
         val amountMinor: Long,
         val pocketId: String,
         val paymentMethodId: String? = null,
+        val inputCurrency: SupportedCurrency = SupportedCurrency.SAR,
     ) : LedgerCommand
     data class ArchiveTemplate(val id: String, val archived: Boolean = true) : LedgerCommand
 }

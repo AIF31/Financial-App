@@ -2,13 +2,13 @@
 
 ## Permanent release identity
 
-The private release uses a dedicated 4096-bit RSA key and APK Signature Scheme v2.
+The release build uses a dedicated 4096-bit RSA key and APK Signature Scheme v2.
 
 - Package: `com.aif31.pocket`
 - Keystore: `%USERPROFILE%\PocketKeys\pocket-release.jks`
 - Alias: `pocket`
 - DPAPI credential: `%USERPROFILE%\PocketKeys\pocket-release-credential.xml`
-- Certificate SHA-256: `d9d3555d1c0173e45141ff7d63c01a377c2cc7a68d0193a0aad24751eaef5fd4`
+- Certificate SHA-256: verify against the release fingerprint stored in the project's approved secret store.
 
 The keystore and credential must remain outside the repository. `.gitignore` blocks common `*.jks` and `*.keystore` files, but operators must still inspect staged files before every commit.
 
@@ -46,7 +46,7 @@ $buildTools = Get-ChildItem "$env:LOCALAPPDATA\Android\Sdk\build-tools" -Directo
 & "$($buildTools.FullName)\apksigner.bat" verify --verbose --print-certs .\app\build\outputs\apk\release\app-release.apk
 ```
 
-Confirm that v2 verification succeeds and the certificate SHA-256 matches the value above. A release install should reject `run-as com.aif31.pocket` because it is non-debuggable.
+Confirm that v2 verification succeeds and the certificate SHA-256 matches the independently stored release fingerprint. A release install should reject `run-as com.aif31.pocket` because it is non-debuggable.
 
 ## Password and migration recovery
 
@@ -60,10 +60,10 @@ Back up both the keystore file and password independently. Losing either prevent
 
 ## App-data backup and reinstall
 
-Pocket backup uses the Storage Access Framework and a versioned `.pocketbackup` file. The 2026-08-22 device exercise saved:
+Pocket backup uses the Storage Access Framework and a versioned `.pocketbackup` file. A device exercise can use a temporary file such as:
 
 ```text
-/sdcard/Download/pocket-s23-test-2026-08-22.pocketbackup
+/sdcard/Download/pocket-test-backup.pocketbackup
 ```
 
 Recommended transition procedure:

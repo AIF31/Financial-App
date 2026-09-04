@@ -4,7 +4,7 @@ Status: planning approved; implementation not started
 
 Decision session completed: 2026-08-29
 
-Product code source of truth: `C:\Users\alan1\StudioProjects\Financial-App`
+Product code source of truth: the repository checkout containing this project.
 
 Reviewed baseline: local `main` at `61f5782fbf4aefad053c260c0e5e8d2610de0338`
 
@@ -12,7 +12,7 @@ Reviewed baseline: local `main` at `61f5782fbf4aefad053c260c0e5e8d2610de0338`
 
 This document converts the completed product grill into an implementation-ready direction for later work in the canonical Windows checkout. This WSL repository stores planning documentation only. It is not the source of truth for current application code.
 
-The plan preserves Pocket as a private, single-user, offline-first personal spending tool. Reliability and financial correctness precede UX refinement and feature expansion.
+The plan preserves Pocket as an offline-first spending tool for individual users. Reliability and financial correctness precede UX refinement and feature expansion.
 
 ## Verified baseline
 
@@ -44,7 +44,7 @@ The following gaps remain relevant:
 ### Product boundary and priorities
 
 1. Preserve the Pocket-only financial model; do not introduce accounts or bank balances.
-2. Optimize for a private personal tool and the owner's Galaxy S23 Ultra next.
+2. Optimize for individual users while keeping the foundation adaptive across representative Android devices.
 3. Prioritize trust and reliability, then UX quality, then expansion.
 4. Remain offline-first. A narrowly scoped opt-in network feature may be considered later.
 5. Keep the approved production UI direction.
@@ -103,7 +103,7 @@ The following gaps remain relevant:
 
 41. Automated host and device tests are release gates. A manual TalkBack/max-font pass is valuable milestone evidence but not required for every release.
 42. GitHub Actions runs host tests, lint, and builds.
-43. A fixed API-level Gradle Managed Device is the repeatable device gate; the physical S23 is used for milestone validation.
+43. A fixed API-level Gradle Managed Device is the repeatable device gate; a representative physical Android device is used for milestone validation.
 44. Production accessibility checks run on an API 34+ managed device, supplemented by large-font assertions for critical flows.
 45. The delivery order is financial correctness, recovery/settings correctness, automated release gates, notification beta, then later network features.
 
@@ -143,7 +143,7 @@ Acceptance evidence:
 - API 34+ accessibility validation exercises production flows.
 - Critical screens run at compact, medium, expanded, compact-height, and 1.5x font configurations where applicable.
 - Navigation covers back behavior, process restoration, shortcut launch, and warm/cold start.
-- The S23 milestone checklist covers edge-to-edge, IME, TalkBack, maximum font size, reminder permission, backup, and restore.
+- The physical-device milestone checklist covers edge-to-edge, IME, TalkBack, maximum font size, reminder permission, backup, and restore.
 
 ### M4 — experimental notification beta
 
