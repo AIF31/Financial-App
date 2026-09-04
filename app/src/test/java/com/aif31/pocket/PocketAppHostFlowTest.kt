@@ -186,13 +186,20 @@ class PocketAppHostFlowTest {
         compose.onNodeWithTag("default_payment_Tarjeta").assertTextContains("✓ Tarjeta")
 
         compose.onNodeWithTag("default_payment_none").performClick()
-        compose.waitUntil(5_000) { runBlocking { ledger.state.first().defaultPaymentMethodId == null } }
+        // Room can commit before this screen's collector renders the new selection.
+        compose.waitUntilExactlyOneExists(
+            hasTestTag("default_payment_none") and hasText("✓ Ninguno"), 5_000,
+        )
         compose.onNodeWithTag("default_payment_none").assertTextContains("✓ Ninguno")
+        assertEquals(null, runBlocking { ledger.state.first().defaultPaymentMethodId })
 
         compose.onNodeWithTag("default_payment_Efectivo").performClick()
         val cashId = runBlocking { ledger.state.first().paymentMethods.single { it.name == "Efectivo" }.id }
-        compose.waitUntil(5_000) { runBlocking { ledger.state.first().defaultPaymentMethodId == cashId } }
+        compose.waitUntilExactlyOneExists(
+            hasTestTag("default_payment_Efectivo") and hasText("✓ Efectivo"), 5_000,
+        )
         compose.onNodeWithTag("default_payment_Efectivo").assertTextContains("✓ Efectivo")
+        assertEquals(cashId, runBlocking { ledger.state.first().defaultPaymentMethodId })
     }
 
     @Test
