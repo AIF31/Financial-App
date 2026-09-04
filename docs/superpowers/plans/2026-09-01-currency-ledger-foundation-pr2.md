@@ -8,7 +8,7 @@
 
 **Tech Stack:** Kotlin, Room 2.8, kotlinx.serialization JSON, Jetpack Compose Material 3, Robolectric/Compose host tests, Android migration tests, JUnit 4.
 
-**Spec:** `C:\Users\alan1\AppData\Local\Temp\financial-app-historical-multicurrency-handoff.md` (locked decisions and PR 2 section)
+**Spec:** the task handoff and locked PR 2 decisions recorded with the project work item
 
 ## Global Constraints
 
@@ -322,7 +322,7 @@ Expected: current SAR screens remain identical and historical non-SAR fixtures r
 
 - [ ] **Step 5: Run review and verification gates**
 
-Request separate read-only Standards and Spec reviews. Fix every validated Critical/Important issue test-first. Through one compact Gradle workflow run `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease :app:pixel6Api35DebugAndroidTest`. Then install with `adb install -r` on the Galaxy S23 Ultra, compare protected data hashes before/after, verify migration/UI/crash logs without reading personal values, and confirm the existing user data remains intact.
+Request separate read-only Standards and Spec reviews. Fix every validated Critical/Important issue test-first. Through one compact Gradle workflow run `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease :app:pixel6Api35DebugAndroidTest`. Then install with `adb install -r` on a representative physical device, compare protected data hashes before/after, verify migration/UI/crash logs without reading personal values, and confirm the existing application data remains intact.
 
 - [ ] **Step 6: Commit, push, and open the stacked PR**
 

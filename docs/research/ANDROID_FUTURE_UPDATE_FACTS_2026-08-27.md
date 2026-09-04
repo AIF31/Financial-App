@@ -54,7 +54,7 @@ See `docs/product/FUTURE_UPDATES_DECISION_SPEC.md` and ADR 0001 for the accepted
 
 ### Pocket implications
 
-- Automated checks do not close the retained physical-device gaps. Repeat expense, refund, filtering, Pocket-budget, backup, and restore with TalkBack and maximum font size on the S23.
+- Automated checks do not close the retained physical-device gaps. Repeat expense, refund, filtering, Pocket-budget, backup, and restore with TalkBack and maximum font size on a representative physical device.
 - Treat spoken amounts, conversion status, warning state, error recovery, and delete/undo feedback as acceptance criteria, not only content descriptions.
 
 ## Local data, backup, and recovery
@@ -67,7 +67,7 @@ See `docs/product/FUTURE_UPDATES_DECISION_SPEC.md` and ADR 0001 for the accepted
 
 ### Pocket implications
 
-- Keep the current opt-out and explicit exclusions covered by manifest tests and a real Samsung transfer/reinstall exercise after meaningful storage changes.
+- Keep the current opt-out and explicit exclusions covered by manifest tests and a transfer/reinstall exercise across at least one representative physical device after meaningful storage changes.
 - The picker controls location and access, not exported-payload confidentiality. Decide whether `.pocketbackup` requires password-based authenticated encryption; if so, specify format versioning, wrong-password behavior, tamper rejection, recovery-key handling, and migration tests first.
 
 ## Notification-assisted capture

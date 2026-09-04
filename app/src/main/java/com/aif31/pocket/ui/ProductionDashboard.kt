@@ -129,7 +129,7 @@ internal fun ActionableDashboardContent(
                     }
                 }
                 Image(
-                    painter = painterResource(R.drawable.pocket_kaust_logo),
+                    painter = painterResource(R.drawable.pocket_logo),
                     contentDescription = null,
                     modifier = Modifier.size(56.dp).clip(CircleShape),
                 )

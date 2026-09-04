@@ -8,7 +8,7 @@
 
 **Tech Stack:** Kotlin 2.3, Room 2.8, DataStore Preferences, kotlinx.serialization JSON, `HttpsURLConnection`, coroutines, Jetpack Compose Material 3, Robolectric/Compose host tests, Android migration tests, JUnit 4.
 
-**Spec:** `C:\Users\alan1\AppData\Local\Temp\financial-app-historical-multicurrency-handoff.md` (locked decisions and PR 3 section)
+**Spec:** the task handoff and locked PR 3 decisions recorded with the project work item
 
 ## Execution status (2026-09-04)
 
@@ -35,9 +35,9 @@ choices and release evidence.
   semantics instead of removed manual-conversion controls.
 - Local release gates are complete. Publish the stacked PR against
   `codex/currency-ledger-foundation` and confirm its GitHub checks before handoff.
-- Physical-device scope: use the disposable Pixel 6 API 35 device for this
-  acceptance work. No Galaxy install, launch, instrumentation, or data mutation
-  is needed. The earlier Android 16 visual-tour finding is not claimed fixed.
+- Physical-device scope: use the disposable managed device for this acceptance
+  work. No additional personal-device install, launch, instrumentation, or data
+  mutation is needed. The earlier Android 16 visual-tour finding is not claimed fixed.
 
 ## Global Constraints
 
@@ -52,7 +52,7 @@ choices and release evidence.
 - The token comes only from an untracked `POCKET_BANXICO_TOKEN` Gradle property or environment variable. Tests and fixtures contain no token and make no live call.
 - The v6 rate cache is excluded from portable backup and replacement restore.
 - Primary-agent implementation only. Separate read-only Spec and Standards reviewers run before finalization.
-- Physical-device work follows `docs/agents/physical-device-testing.md`; the Galaxy is never a Gradle connected-device target.
+- Physical-device work follows `docs/agents/physical-device-testing.md`; the physical device is never a Gradle connected-device target.
 
 ---
 
@@ -362,7 +362,7 @@ Expected: host tests, lint, both app builds, test APK, Room migrations, accessib
 
 - [ ] **Step 3: Decide physical-device scope from the safety guide**
 
-Audit a non-destructive allowlist before any Galaxy command. If every target is proven safe, use serial-qualified `adb install -r`, `adb install -r -t`, and direct `am instrument`; parse instrumentation status codes, compare protected fingerprints without reading values, restore animation settings, and leave the app installed. Otherwise record the managed-device evidence and stop physical testing.
+Audit a non-destructive allowlist before any physical-device command. If every target is proven safe, use serial-qualified `adb install -r`, `adb install -r -t`, and direct `am instrument`; parse instrumentation status codes, compare protected fingerprints without reading values, restore animation settings, and leave the app installed. Otherwise record the managed-device evidence and stop physical testing.
 
 - [ ] **Step 4: Verify the exact diff and commit state**
 

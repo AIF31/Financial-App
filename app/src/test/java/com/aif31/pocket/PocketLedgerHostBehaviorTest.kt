@@ -927,7 +927,7 @@ class PocketLedgerHostBehaviorTest {
         val sourceState = source.state.first { !it.needsOnboarding }
         val pocket = sourceState.pockets.first()
         source.execute(LedgerCommand.SetAllocation(sourceState.currentPeriod!!.id, pocket.pocket.id, 25_000))
-        source.execute(LedgerCommand.AddMovement(pocketId = pocket.pocket.id, type = MovementType.EXPENSE, accountingAmountMinor = 1_250, occurredAtUtcMillis = clock.millis(), localDate = LocalDate.of(2026, 2, 26), merchant = "KAUST Market", note = "fruta"))
+        source.execute(LedgerCommand.AddMovement(pocketId = pocket.pocket.id, type = MovementType.EXPENSE, accountingAmountMinor = 1_250, occurredAtUtcMillis = clock.millis(), localDate = LocalDate.of(2026, 2, 26), merchant = "Neighborhood Market", note = "fruta"))
         val backup = source.exportBackup()
 
         assertTrue(source.previewBackup(backup).valid)
@@ -978,7 +978,7 @@ class PocketLedgerHostBehaviorTest {
         val csv = source.exportCsv().decodeToString()
         assertTrue(csv.startsWith("id,tipo,fecha,zona,pocket,importe_contable,moneda_contable"))
         assertTrue(csv.contains("\"SAR\""))
-        assertTrue(csv.contains("\"KAUST Market\""))
+        assertTrue(csv.contains("\"Neighborhood Market\""))
         assertTrue(csv.contains("\"12.50\""))
     }
 

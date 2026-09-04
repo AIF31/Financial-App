@@ -8,7 +8,7 @@
 
 **Tech Stack:** Kotlin, Jetpack Compose with the repository's Compose BOM `2026.03.01`, Material 3, Room-backed `PocketLedger`, Robolectric Compose host tests, JDK 17.
 
-**Spec:** `C:\Users\alan1\AppData\Local\Temp\financial-app-historical-multicurrency-handoff.md` (PR 1 section)
+**Spec:** the task handoff and locked PR 1 decisions recorded with the project work item
 
 ## Global Constraints
 
