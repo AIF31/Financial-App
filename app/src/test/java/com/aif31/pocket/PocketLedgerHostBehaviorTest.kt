@@ -48,6 +48,47 @@ class PocketLedgerHostBehaviorTest {
     fun tearDown() = database.close()
 
     @Test
+    fun invalid_period_dates_are_rejected_before_replacing_the_ledger() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(100_000))
+        val before = ledger.exportBackup()
+        val period = ledger.state.first().currentPeriod!!
+        listOf("start" to period.start.toEpochDay(), "endExclusive" to period.endExclusive.toEpochDay()).forEach { (field, value) ->
+            val invalid = before.decodeToString()
+                .replace("\"$field\": $value", "\"$field\": ${if (field == "start") Long.MIN_VALUE else Long.MAX_VALUE}")
+                .encodeToByteArray()
+            assertFalse(ledger.previewBackup(invalid).valid)
+            assertTrue(ledger.restoreBackup(invalid) is LedgerResult.Rejected)
+            assertEquals(before.decodeToString(), ledger.exportBackup().decodeToString())
+            assertEquals(period, ledger.state.first().currentPeriod)
+        }
+    }
+
+    @Test
+    fun restoring_a_Pocket_reclaims_released_rollover_and_keeps_backup_restorable() = runTest {
+        val firstLedger = RoomPocketLedger(database, clock, zone)
+        firstLedger.execute(LedgerCommand.Initialize(30_000))
+        val initial = firstLedger.state.first()
+        val pocket = initial.pockets.first { it.pocket.name == "Viajes" }.pocket
+        firstLedger.execute(LedgerCommand.UpsertPocket(pocket.id, pocket.name, rolloverEnabled = true))
+        firstLedger.execute(LedgerCommand.SetAllocation(initial.currentPeriod!!.id, pocket.id, 10_000))
+        firstLedger.execute(LedgerCommand.CreateNextPeriod())
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone), zone)
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePocket(pocket.id)))
+        assertEquals(10_000L, database.financeDao().rolloverReleases().single().amountMinor)
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePocket(pocket.id, archived = false)))
+        val restored = ledger.state.first().pockets.single { it.pocket.id == pocket.id }
+        assertFalse(restored.retiredThisPeriod)
+        assertEquals(10_000L, restored.rolloverMinor)
+        assertEquals(0L, restored.budgetMinor)
+        assertTrue(database.financeDao().rolloverReleases().isEmpty())
+        val backup = ledger.exportBackup()
+        assertTrue(ledger.previewBackup(backup).valid)
+        assertEquals(LedgerResult.Success, ledger.restoreBackup(backup))
+        assertEquals(restored, ledger.state.first().pockets.single { it.pocket.id == pocket.id })
+    }
+
+    @Test
     fun allocation_refund_and_selective_rollover_are_transactional() = runTest {
         val ledger = RoomPocketLedger(database, clock, zone)
         ledger.execute(LedgerCommand.Initialize(100_000))

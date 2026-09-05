@@ -76,6 +76,66 @@ class PocketAppHostFlowTest {
     }
 
     @Test
+    fun prefilled_large_funds_and_allocations_save_without_retyping() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking {
+            ledger.execute(LedgerCommand.Initialize(200_000))
+            val state = ledger.state.first()
+            val pocket = state.pockets.first { it.pocket.name == "Viajes" }.pocket
+            ledger.execute(LedgerCommand.SetAllocation(state.currentPeriod!!.id, pocket.id, 100_000))
+        }
+        compose.setContent { PocketApp(ledger) }
+        compose.waitUntilExactlyOneExists(hasText("Pockets"), 5_000)
+        compose.onNodeWithText("Pockets").performClick()
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("pocket_Viajes"))
+        compose.onNodeWithTag("pocket_Viajes").performClick()
+        compose.onNodeWithText("Guardar presupuesto").performClick()
+        compose.waitUntilDoesNotExist(hasTestTag("allocation_amount"), 5_000)
+        assertEquals(100_000L, runBlocking { ledger.state.first().pockets.single { it.pocket.name == "Viajes" }.budgetMinor })
+        compose.onNodeWithText("Ajustes").performClick()
+        compose.onNodeWithText(SettingsSection.PERIOD.title).performClick()
+        compose.onNodeWithText("Guardar fondos").performScrollTo().performClick()
+        compose.waitUntilExactlyOneExists(hasText("Fondos guardados"), 5_000)
+        assertEquals(200_000L, runBlocking { ledger.state.first().newFundsMinor })
+    }
+
+    @Test
+    fun templates_use_preferred_currency_allow_selection_and_preserve_large_amounts_on_edit() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(200_000, accountingCurrency = SupportedCurrency.USD)) }
+        compose.setContent {
+            val state = ledger.state.collectAsState(initial = null).value
+            state?.let {
+                SettingsScreen(
+                    state = it, ledger = ledger,
+                    preferences = AppPreferences(defaultExpenseCurrency = SupportedCurrency.USD),
+                    preferencesStore = null, reminderScheduler = null,
+                    onCreateBackup = {}, onCreateCsv = {}, onPickBackup = {},
+                    onRequestNotificationPermission = {}, padding = PaddingValues(),
+                    section = SettingsSection.TEMPLATES, onSectionChange = {},
+                )
+            }
+        }
+        compose.waitUntilExactlyOneExists(hasText("Importe USD"), 5_000)
+        compose.onNodeWithText("Nombre de plantilla").performTextInput("Renta")
+        compose.onNodeWithText("MXN").performClick()
+        compose.onNodeWithText("Importe MXN").performTextInput("1500.00")
+        compose.onNodeWithTag("settings_list").performScrollToNode(hasTestTag("template_pocket_Supermercado"))
+        compose.onNodeWithTag("template_pocket_Supermercado").performClick()
+        compose.onNodeWithText("Añadir plantilla").performScrollTo().performClick()
+        compose.waitUntil(5_000) { runBlocking { ledger.state.first().templates.size == 1 } }
+        compose.onNodeWithTag("settings_list").performScrollToNode(hasText("Renta: MXN 1,500.00"))
+        compose.onNodeWithText("Renta: MXN 1,500.00").performClick()
+        compose.onNodeWithText("Guardar plantilla").performScrollTo().performClick()
+        compose.waitUntilExactlyOneExists(hasText("Añadir plantilla"), 5_000)
+        val saved = runBlocking { ledger.state.first().templates.single() }
+        assertEquals(150_000L, saved.amountMinor)
+        assertEquals(SupportedCurrency.MXN, saved.inputCurrency)
+    }
+
+    @Test
     fun user_completes_the_core_spending_flow_through_the_public_UI() {
         val zone = ZoneId.of("Asia/Riyadh")
         val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)

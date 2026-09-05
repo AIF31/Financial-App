@@ -13,6 +13,17 @@ class DefaultExchangeRateRepositoryTest {
     private val requested = LocalDate.of(2026, 8, 31)
 
     @Test
+    fun `missing configuration remains identifiable without a cached quote`() = runTest {
+        val repository = DefaultExchangeRateRepository(
+            HttpsBanxicoClient(token = ""), FakeCache(), onlineFxEnabled = { true },
+        )
+        val failure = runCatching {
+            repository.quote(requested, SupportedCurrency.USD, SupportedCurrency.MXN)
+        }.exceptionOrNull()
+        assertTrue(failure is QuoteFailure.ConfigurationUnavailable)
+    }
+
+    @Test
     fun `same currency stays offline even without consent`() = runTest {
         val source = FakeBanxicoSource()
         val repository = DefaultExchangeRateRepository(source, FakeCache(), onlineFxEnabled = { false })

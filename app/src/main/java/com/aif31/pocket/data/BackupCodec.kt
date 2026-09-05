@@ -196,6 +196,10 @@ internal object BackupCodec {
         val pocketIds = payload.pockets.mapTo(mutableSetOf()) { it.id }
         val methodIds = payload.paymentMethods.mapTo(mutableSetOf()) { it.id }
         require(payload.periods.all { it.start < it.endExclusive && it.newFundsMinor >= 0 && it.startDay in 1..31 }) { "Periodo inválido" }
+        require(payload.periods.all {
+            it.start in LocalDate.MIN.toEpochDay()..LocalDate.MAX.toEpochDay() &&
+                it.endExclusive in LocalDate.MIN.toEpochDay()..LocalDate.MAX.toEpochDay()
+        }) { "Fecha de periodo inválida" }
         val orderedPeriods = payload.periods.sortedBy { it.start }
         require(orderedPeriods.all { runCatching { SupportedCurrency.fromCode(it.accountingCurrencyCode) }.isSuccess }) {
             "Moneda de periodo inválida"

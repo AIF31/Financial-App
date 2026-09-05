@@ -15,6 +15,16 @@ class BanxicoClientTest {
     private val requested = LocalDate.of(2026, 8, 31)
 
     @Test
+    fun `parser rejects comma rates and impossible dates`() {
+        listOf("28/02/2026" to "17,25", "31/02/2026" to "17.25").forEach { (date, rate) ->
+            val payload = """{"bmx":{"series":[{"idSerie":"SF43718","datos":[{"fecha":"$date","dato":"$rate"}]}]}}"""
+            assertThrows(QuoteFailure.Unavailable::class.java) {
+                parseBanxicoUsdToMxn(payload, LocalDate.of(2026, 2, 28))
+            }
+        }
+    }
+
+    @Test
     fun `parser chooses nearest prior numeric FIX observation`() {
         val quote = parseBanxicoUsdToMxn(fixture("fix_numeric.json"), requested)
 

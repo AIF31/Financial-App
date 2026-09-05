@@ -568,4 +568,4 @@ private fun PocketManagementDialog(
     )
 }
 
-private fun minorNumber(minor: Long): String = MoneyText.grouped(minor)
+private fun minorNumber(minor: Long): String = MoneyText.editable(minor)

@@ -24,3 +24,9 @@ The repository uses the five default mattpocock/skills triage labels. See `docs/
 ### Domain docs
 
 This is a single-context repository. See `docs/agents/domain.md`.
+
+### Model delegation
+
+- Delegate documentation changes to `gpt-5.6-luna max`.
+- Delegate code changes to `gpt-5.6-sol medium`.
+- The primary agent owns orchestration and validation.

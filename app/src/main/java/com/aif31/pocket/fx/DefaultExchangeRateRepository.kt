@@ -22,8 +22,9 @@ class DefaultExchangeRateRepository(
             buildQuote(requestedDate, base, quote).also { cache.put(it) }
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
-            cache.latestEligible(requestedDate, base, quote) ?: throw QuoteFailure.Unavailable()
+        } catch (failure: Exception) {
+            cache.latestEligible(requestedDate, base, quote)
+                ?: throw (failure as? QuoteFailure ?: QuoteFailure.Unavailable())
         }
     }
 

@@ -9,6 +9,7 @@ import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.time.format.ResolverStyle
 import javax.net.ssl.HttpsURLConnection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -106,7 +107,7 @@ internal fun parseBanxicoUsdToMxn(payload: String, requestedDate: LocalDate): Fx
         .mapNotNull { value ->
             val date = runCatching { LocalDate.parse(value.date, BANXICO_DATE) }.getOrNull() ?: return@mapNotNull null
             if (date.isAfter(requestedDate) || date.isBefore(lowerBound)) return@mapNotNull null
-            val rate = runCatching { BigDecimal(value.value.replace(",", "")) }.getOrNull()
+            val rate = runCatching { BigDecimal(value.value) }.getOrNull()
                 ?.takeIf { it > BigDecimal.ZERO }
                 ?: return@mapNotNull null
             date to rate
@@ -125,6 +126,7 @@ internal fun parseBanxicoUsdToMxn(payload: String, requestedDate: LocalDate): Fx
 
 private val BANXICO_JSON = Json { ignoreUnknownKeys = true }
 private val BANXICO_DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/uuuu")
+    .withResolverStyle(ResolverStyle.STRICT)
 private const val SERIES_ID = "SF43718"
 
 @Serializable

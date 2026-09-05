@@ -43,6 +43,12 @@ To build an installable debug APK:
 
 The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Release APKs require the project's signing credentials and are built by maintainers for distribution.
 
+## License
+
+Pocket is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE.md) (`PolyForm-Noncommercial-1.0.0`). Personal, educational, research, charitable, and other noncommercial uses are permitted under its terms. Commercial use is not permitted without a separate license from the copyright holder.
+
+This is a source-available license, not an OSI-approved open-source license. Third-party dependencies remain subject to their own licenses.
+
 ## Release and device operations
 
 Use [`Info/release-signing-and-recovery.md`](Info/release-signing-and-recovery.md) for signed builds, key backup, APK verification, and reinstall/restore procedures. Use [`Info/windows-android-studio-device-testing.md`](Info/windows-android-studio-device-testing.md) before running tests on Windows or a physical phone; device instrumentation can clear app data.

@@ -203,10 +203,18 @@ class RoomPocketLedger(
             val currentPeriod = dao.periods().firstOrNull { today().toEpochDay() in it.startEpochDay until it.endExclusiveEpochDay }
             currentPeriod?.let { period ->
                 val snapshot = dao.periodPockets().firstOrNull { it.periodId == period.id && it.pocketId == pocket.id }
+                dao.rolloverReleases().firstOrNull { it.periodId == period.id && it.pocketId == pocket.id }?.let { release ->
+                    val allocation = dao.allocation(period.id, pocket.id)
+                    dao.putAllocation(
+                        AllocationEntity(period.id, pocket.id, allocation?.budgetMinor ?: 0, release.amountMinor)
+                    )
+                    dao.deleteRolloverRelease(period.id, pocket.id)
+                }
                 dao.putPeriodPocket(
                     snapshot?.copy(retired = false)
                         ?: PeriodPocketEntity(period.id, pocket.id, pocket.rolloverEnabled, retired = false)
                 )
+                recalculateRolloverFrom(period.id)
             }
             return@withTransaction LedgerResult.Success
         }
