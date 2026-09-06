@@ -44,8 +44,19 @@ class NotificationSuggestionLedgerTest {
         val ledger = RoomPocketLedger(database, fixedClock)
         assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.Initialize(100_000)))
         val store = NotificationSuggestionStore(database, fixedClock)
-        store.ingest("example.payments", "notification-7", instant.toEpochMilli(), ParsedPayment(1200, SupportedCurrency.SAR, "First"))
-        store.ingest("example.payments", "notification-7", instant.toEpochMilli() + 1, ParsedPayment(2500, SupportedCurrency.SAR, "Updated"))
+        val identities = NotificationLifecycleIdentities()
+        store.ingest(
+            "example.payments",
+            identities.identityForPosted("example.payments", "notification-7", instant.toEpochMilli()),
+            instant.toEpochMilli(),
+            ParsedPayment(1200, SupportedCurrency.SAR, "First"),
+        )
+        store.ingest(
+            "example.payments",
+            identities.identityForPosted("example.payments", "notification-7", instant.toEpochMilli() + 1),
+            instant.toEpochMilli() + 1,
+            ParsedPayment(2500, SupportedCurrency.SAR, "Updated"),
+        )
         val state = ledger.state.first { it.movementSuggestions.isNotEmpty() }
         assertEquals(1, state.movementSuggestions.size)
         assertEquals(2500L, state.movementSuggestions.single().amountMinor)
@@ -107,6 +118,60 @@ class NotificationSuggestionLedgerTest {
         assertNull(tombstone.amountMinor)
         assertNull(tombstone.currencyCode)
         assertNull(tombstone.merchant)
+    }
+
+    @Test fun reused_android_key_after_removal_creates_a_distinct_suggestion_before_tombstone_expiry() = runTest {
+        val store = NotificationSuggestionStore(database, fixedClock)
+        val identities = NotificationLifecycleIdentities()
+        suspend fun capture(amount: Long, merchant: String, postedAtUtcMillis: Long) = store.ingest(
+            sourcePackage = "example.payments",
+            notificationIdentity = identities.identityForPosted(
+                sourcePackage = "example.payments",
+                notificationKey = "reused-key",
+                postedAtUtcMillis = postedAtUtcMillis,
+            ),
+            postedAtUtcMillis = postedAtUtcMillis,
+            payment = ParsedPayment(amount, SupportedCurrency.SAR, merchant),
+        )
+
+        capture(1_200, "First", instant.toEpochMilli())
+        val first = database.financeDao().observeMovementSuggestions().first().single()
+        val ledger = RoomPocketLedger(database, fixedClock)
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.RejectSuggestion(first.identityHash)))
+
+        identities.onRemoved("example.payments", "reused-key")
+        capture(2_500, "Second", instant.toEpochMilli())
+
+        val second = database.financeDao().observeMovementSuggestions().first().single()
+        assertTrue(first.identityHash != second.identityHash)
+        assertEquals(2_500L, second.amountMinor)
+        assertEquals("Second", second.merchant)
+        assertEquals("REJECTED", database.financeDao().movementSuggestion(first.identityHash)?.status)
+    }
+
+    @Test fun listener_recreation_recovers_the_identity_of_an_active_notification() {
+        val activeNotification = ActiveNotificationIdentity(
+            sourcePackage = "example.payments",
+            notificationKey = "active-key",
+            postedAtUtcMillis = instant.toEpochMilli(),
+        )
+        val originalIdentity = NotificationLifecycleIdentities().identityForPosted(
+            activeNotification.sourcePackage,
+            activeNotification.notificationKey,
+            activeNotification.postedAtUtcMillis,
+        )
+        val recreated = NotificationLifecycleIdentities()
+
+        recreated.onListenerConnected(listOf(activeNotification))
+
+        assertEquals(
+            originalIdentity,
+            recreated.identityForPosted(
+                activeNotification.sourcePackage,
+                activeNotification.notificationKey,
+                activeNotification.postedAtUtcMillis + 1,
+            ),
+        )
     }
 
     @Test fun different_notification_identities_with_the_same_amount_remain_distinct() = runTest {
