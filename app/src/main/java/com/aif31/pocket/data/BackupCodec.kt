@@ -111,6 +111,7 @@ internal object BackupCodec {
                 val dao = database.financeDao()
                 dao.clearPendingCurrencyChange()
                 dao.clearLedgerPreferences()
+                dao.clearMovementSuggestions()
                 dao.clearTemplates()
                 dao.clearMovements()
                 dao.clearRolloverReleases()

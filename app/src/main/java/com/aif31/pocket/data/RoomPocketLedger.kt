@@ -23,6 +23,7 @@ class RoomPocketLedger(
     private val clock: Clock = Clock.systemUTC(),
     private val zoneId: ZoneId = ZoneId.of("Asia/Riyadh"),
     private val codecDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val recordNotificationConfirmation: (amountCorrected: Boolean, currencyCorrected: Boolean) -> Unit = { _, _ -> },
 ) : PocketLedger {
     private val dao = database.financeDao()
 
@@ -47,7 +48,8 @@ class RoomPocketLedger(
         activityData,
         dao.observePendingCurrencyChange(),
         dao.observeLedgerPreferences(),
-    ) { budget, activity, pendingCurrencyChange, ledgerPreferences ->
+        dao.observeMovementSuggestions(),
+    ) { budget, activity, pendingCurrencyChange, ledgerPreferences, suggestions ->
         buildState(
             periodEntities = budget.periods,
             pocketEntities = budget.pockets,
@@ -59,6 +61,7 @@ class RoomPocketLedger(
             templateEntities = activity.third,
             pendingCurrencyChangeEntity = pendingCurrencyChange,
             ledgerPreferencesEntity = ledgerPreferences,
+            suggestionEntities = suggestions,
         )
     }
 
@@ -79,6 +82,8 @@ class RoomPocketLedger(
             is LedgerCommand.ArchivePocket -> archivePocket(command)
             is LedgerCommand.MovePocket -> movePocket(command)
             is LedgerCommand.AddMovement -> addMovement(command)
+            is LedgerCommand.ConfirmSuggestion -> confirmSuggestion(command)
+            is LedgerCommand.RejectSuggestion -> rejectSuggestion(command.suggestionId)
             is LedgerCommand.DeleteMovement -> deleteMovement(command)
             is LedgerCommand.RestoreMovement -> restoreMovement(command)
             is LedgerCommand.CreateNextPeriod -> createNextPeriod(command.startDay)
@@ -304,6 +309,34 @@ class RoomPocketLedger(
         LedgerResult.Success
     }
 
+    private suspend fun confirmSuggestion(command: LedgerCommand.ConfirmSuggestion): LedgerResult {
+        var corrections: Pair<Boolean, Boolean>? = null
+        val result = database.withTransaction {
+            val suggestion = dao.movementSuggestion(command.suggestionId)
+            require(suggestion?.status == "PENDING" && suggestion.expiresAtUtcMillis > clock.millis()) { "La sugerencia ya no está disponible" }
+            // A confirmed suggestion always creates a new Movement. A caller-provided ID could overwrite one.
+            val movementResult = addMovement(command.movement.copy(id = null))
+            if (movementResult == LedgerResult.Success) {
+                dao.putMovementSuggestion(suggestion.asTombstone("CONFIRMED"))
+                val confirmedAmount = command.movement.originalAmountMinor ?: command.movement.accountingAmountMinor
+                corrections = (confirmedAmount != suggestion.amountMinor) to
+                    (command.movement.originalCurrencyCode != suggestion.currencyCode)
+            }
+            movementResult
+        }
+        corrections?.let { (amountCorrected, currencyCorrected) ->
+            runCatching { recordNotificationConfirmation(amountCorrected, currencyCorrected) }
+        }
+        return result
+    }
+
+    private suspend fun rejectSuggestion(id: String): LedgerResult = database.withTransaction {
+        val suggestion = dao.movementSuggestion(id)
+        require(suggestion?.status == "PENDING" && suggestion.expiresAtUtcMillis > clock.millis()) { "La sugerencia ya no está disponible" }
+        dao.putMovementSuggestion(suggestion.asTombstone("REJECTED"))
+        LedgerResult.Success
+    }
+
     private suspend fun deleteMovement(command: LedgerCommand.DeleteMovement): LedgerResult = database.withTransaction {
         val entity = requireNotNull(dao.movement(command.movementId)) { "Movimiento inexistente" }
         val movement = entity.toModel(dao.pockets().associateBy { it.id }, dao.paymentMethods().associateBy { it.id })
@@ -326,6 +359,7 @@ class RoomPocketLedger(
     }
 
     private suspend fun catchUpPeriods(preferredStartDay: Int): LedgerResult = database.withTransaction {
+        dao.deleteExpiredMovementSuggestions(clock.millis())
         require(preferredStartDay in 1..31) { "Día de inicio inválido" }
         var previous = requireNotNull(dao.periods().maxByOrNull { it.startEpochDay }) { "No existe un periodo anterior" }
         val created = mutableListOf<PeriodEntity>()
@@ -609,6 +643,7 @@ class RoomPocketLedger(
         templateEntities: List<RecurringTemplateEntity>,
         pendingCurrencyChangeEntity: PendingCurrencyChangeEntity?,
         ledgerPreferencesEntity: LedgerPreferencesEntity?,
+        suggestionEntities: List<MovementSuggestionEntity>,
     ): LedgerState {
         val periods = periodEntities.map { it.toModel() }
         val today = today()
@@ -616,7 +651,8 @@ class RoomPocketLedger(
         val pocketsById = pocketEntities.associateBy { it.id }
         val methodsById = methodEntities.associateBy { it.id }
         val movements = movementEntities.map { it.toModel(pocketsById, methodsById) }
-        if (current == null) return LedgerState(periods = periods, movements = movements)
+        val suggestions = suggestionEntities.filter { it.expiresAtUtcMillis > clock.millis() }.mapNotNull { it.toModel() }
+        if (current == null) return LedgerState(periods = periods, movements = movements, movementSuggestions = suggestions)
         fun summariesFor(periodId: String): List<PocketPeriodSummary> {
             val periodMovements = movements.filter { it.periodId == periodId }
             val periodAllocations = allocations.filter { it.periodId == periodId }.associateBy { it.pocketId }
@@ -710,6 +746,7 @@ class RoomPocketLedger(
             currentInstantMillis = clock.instant().toEpochMilli(),
             pendingCurrencyChange = pendingCurrencyChangeEntity?.toModel(),
             defaultPaymentMethodId = ledgerPreferencesEntity?.defaultPaymentMethodId,
+            movementSuggestions = suggestions,
         )
     }
 
@@ -743,6 +780,26 @@ class RoomPocketLedger(
         val rolloverReleases: List<RolloverReleaseEntity>,
     )
 }
+
+private fun MovementSuggestionEntity.asTombstone(newStatus: String) = copy(
+    amountMinor = null,
+    currencyCode = null,
+    effectiveAtUtcMillis = null,
+    sourcePackage = null,
+    merchant = null,
+    status = newStatus,
+)
+
+private fun MovementSuggestionEntity.toModel(): MovementSuggestion? = runCatching {
+    MovementSuggestion(
+        id = identityHash,
+        amountMinor = requireNotNull(amountMinor),
+        currency = SupportedCurrency.fromCode(requireNotNull(currencyCode)),
+        effectiveAtUtcMillis = requireNotNull(effectiveAtUtcMillis),
+        sourcePackage = requireNotNull(sourcePackage),
+        merchant = merchant,
+    )
+}.getOrNull()
 
 private fun PeriodEntity.toModel() = Period(
     id = id,

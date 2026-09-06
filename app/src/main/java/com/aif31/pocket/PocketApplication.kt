@@ -8,6 +8,7 @@ import com.aif31.pocket.fx.DefaultExchangeRateRepository
 import com.aif31.pocket.fx.ExchangeRateRepository
 import com.aif31.pocket.fx.HttpsBanxicoClient
 import com.aif31.pocket.fx.RoomFxQuoteCache
+import com.aif31.pocket.notifications.notificationBetaMetrics as createNotificationBetaMetrics
 import com.aif31.pocket.settings.DataStorePreferences
 import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
@@ -16,7 +17,12 @@ import kotlinx.coroutines.flow.first
 
 class PocketApplication : Application() {
     val database: FinanceDatabase by lazy { FinanceDatabase.open(this) }
-    val ledger: PocketLedger by lazy { RoomPocketLedger(database) }
+    internal val notificationBetaMetrics by lazy { createNotificationBetaMetrics(this) }
+    val ledger: PocketLedger by lazy {
+        RoomPocketLedger(database) { amountCorrected, currencyCorrected ->
+            notificationBetaMetrics.recordConfirmation(amountCorrected, currencyCorrected)
+        }
+    }
     val preferences: PreferencesStore by lazy { DataStorePreferences(this) }
     val exchangeRates: ExchangeRateRepository by lazy {
         DefaultExchangeRateRepository(

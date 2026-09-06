@@ -45,6 +45,8 @@ import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.fx.ExchangeRateRepository
 import com.aif31.pocket.fx.FxQuote
+import com.aif31.pocket.notifications.NotificationSuggestionStore
+import com.aif31.pocket.notifications.ParsedPayment
 import com.aif31.pocket.settings.AppPreferences
 import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
@@ -1044,6 +1046,45 @@ class PocketAppHostFlowTest {
         compose.waitUntilExactlyOneExists(hasTestTag("pockets_list"), 10_000)
         compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Periodo de transición"))
         compose.onNodeWithText("Periodo de transición").assertIsDisplayed()
+    }
+
+    @Test
+    fun notification_review_prefills_normalized_fields_and_stays_unavailable_if_it_expires() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val instant = Instant.parse("2026-02-26T09:00:00Z")
+        val ledger = RoomPocketLedger(database, Clock.fixed(instant, zone), zone)
+        val suggestionId = runBlocking {
+            ledger.execute(LedgerCommand.Initialize(100_000))
+            NotificationSuggestionStore(database, Clock.fixed(instant, zone)).ingest(
+                sourcePackage = "synthetic.payments",
+                notificationIdentity = "review-1",
+                postedAtUtcMillis = instant.toEpochMilli(),
+                payment = ParsedPayment(2_500, SupportedCurrency.SAR, "Tienda"),
+            )
+            ledger.state.first { it.movementSuggestions.isNotEmpty() }.movementSuggestions.single().id
+        }
+        compose.setContent { PocketApp(ledger) }
+
+        compose.waitUntilExactlyOneExists(hasText("Movimientos"), 5_000)
+        compose.onNodeWithText("Movimientos").performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag("movement_suggestion"), 5_000)
+        compose.onNodeWithTag("movement_suggestion").performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag("movement_amount"), 5_000)
+        compose.onNodeWithTag("movement_amount").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("25.00"))
+        )
+        compose.onNodeWithTag("movement_currency_SAR").assertTextContains("✓ SAR")
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("Más detalles"))
+        compose.onNodeWithText("Más detalles").performClick()
+        compose.onNodeWithText("Comercio (opcional)").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("Tienda"))
+        )
+
+        runBlocking { ledger.execute(LedgerCommand.RejectSuggestion(suggestionId)) }
+
+        compose.waitUntilExactlyOneExists(hasText("Sugerencia no disponible"), 5_000)
+        compose.onNodeWithText("Esta sugerencia ya fue revisada o expiró.").assertIsDisplayed()
+        compose.onAllNodesWithText("Nuevo gasto").assertCountEquals(0)
     }
 
     private class FakePreferences : PreferencesStore {

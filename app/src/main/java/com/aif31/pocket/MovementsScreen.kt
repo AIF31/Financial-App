@@ -71,6 +71,7 @@ internal fun MovementsScreen(
     undoWindowMillis: Long,
     onRecordExpense: () -> Unit,
     onEditMovement: (Movement) -> Unit,
+    onReviewSuggestion: (String) -> Unit = {},
 ) {
     fun money(movement: Movement): String {
         val currency = state.periods.firstOrNull { it.id == movement.periodId }?.accountingCurrency
@@ -112,6 +113,24 @@ internal fun MovementsScreen(
     ) {
         item {
             Text("Movimientos", style = MaterialTheme.typography.headlineMedium)
+        }
+        if (state.movementSuggestions.isNotEmpty()) {
+            item { Text("Sugerencias para revisar · Experimental", style = MaterialTheme.typography.titleMedium) }
+            items(state.movementSuggestions, key = { "suggestion-${it.id}" }) { suggestion ->
+                Card(Modifier.fillMaxWidth().testTag("movement_suggestion").clickable { onReviewSuggestion(suggestion.id) }) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text(suggestion.merchant ?: "Pago detectado")
+                            Text(suggestion.sourcePackage, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(MoneyText.format(suggestion.amountMinor, suggestion.currency))
+                    }
+                    TextButton(
+                        onClick = { scope.launch { ledger.execute(LedgerCommand.RejectSuggestion(suggestion.id)) } },
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    ) { Text("Descartar") }
+                }
+            }
         }
         item {
             OutlinedTextField(

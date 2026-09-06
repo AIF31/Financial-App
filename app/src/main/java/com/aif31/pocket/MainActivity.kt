@@ -80,6 +80,9 @@ class MainActivity : ComponentActivity() {
                     onCreateBackup = { createBackup.launch("pocket-${java.time.LocalDate.now()}.pocketbackup") },
                     onCreateCsv = { createCsv.launch("pocket-movimientos-${java.time.LocalDate.now()}.csv") },
                     onPickBackup = { openBackup.launch(arrayOf("application/octet-stream", "application/json", "*/*")) },
+                    onSuccessfulRestore = {
+                        runCatching { (application as PocketApplication).notificationBetaMetrics.reset() }
+                    },
                     onRequestNotificationPermission = {
                         if (android.os.Build.VERSION.SDK_INT >= 33) requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                     },

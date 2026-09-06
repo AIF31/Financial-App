@@ -268,10 +268,28 @@ class FinanceDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migration_6_to_7_adds_an_empty_private_suggestion_inbox() {
+        helper.createDatabase(TEST_DATABASE_6_7, 6).close()
+
+        helper.runMigrationsAndValidate(
+            TEST_DATABASE_6_7,
+            7,
+            true,
+            FinanceDatabase.MIGRATION_6_7,
+        ).use { database ->
+            database.query("SELECT COUNT(*) FROM movement_suggestions").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(0, cursor.getInt(0))
+            }
+        }
+    }
+
     private companion object {
         const val TEST_DATABASE = "migration-2-3-test"
         const val TEST_DATABASE_3_4 = "migration-3-4-test"
         const val TEST_DATABASE_4_5 = "migration-4-5-test"
         const val TEST_DATABASE_5_6 = "migration-5-6-test"
+        const val TEST_DATABASE_6_7 = "migration-6-7-test"
     }
 }

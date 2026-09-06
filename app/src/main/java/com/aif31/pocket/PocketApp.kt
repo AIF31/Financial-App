@@ -93,7 +93,7 @@ private sealed interface PocketRoute : NavKey
 private data class RootRoute(val screen: RootScreen) : PocketRoute
 
 @Serializable
-private data class MovementRoute(val movementId: String? = null) : PocketRoute
+private data class MovementRoute(val movementId: String? = null, val suggestionId: String? = null) : PocketRoute
 
 @Serializable
 private data class SettingsDetailRoute(val section: SettingsSection) : PocketRoute
@@ -113,6 +113,7 @@ fun PocketApp(
     onCreateCsv: () -> Unit = {},
     onPickBackup: () -> Unit = {},
     onRequestNotificationPermission: () -> Unit = {},
+    onSuccessfulRestore: () -> Unit = {},
     undoWindowMillis: Long = 5_000,
 ) {
     val observedState by ledger.state.collectAsStateWithLifecycle(initialValue = null)
@@ -150,6 +151,7 @@ fun PocketApp(
                     scope.launch {
                         when (val result = ledger.restoreBackup(restoreCandidate)) {
                             LedgerResult.Success -> {
+                                runCatching { onSuccessfulRestore() }
                                 val restored = ledger.state.first { !it.needsOnboarding }
                                 val latest = restored.periods.maxByOrNull { it.start }
                                 val preferredStartDay = latest?.configuredStartDay ?: preferenceState.futurePeriodStartDay
@@ -223,7 +225,19 @@ fun PocketApp(
 
     if (movementRoute != null) {
         val movementBeingEdited = state.movements.firstOrNull { it.id == movementRoute.movementId }
+        val suggestion = state.movementSuggestions.firstOrNull { it.id == movementRoute.suggestionId }
         BackHandler { backStack.removeLastOrNull() }
+        if (movementRoute.suggestionId != null && suggestion == null) {
+            AlertDialog(
+                onDismissRequest = { backStack.removeLastOrNull() },
+                title = { Text("Sugerencia no disponible") },
+                text = { Text("Esta sugerencia ya fue revisada o expiró.") },
+                confirmButton = {
+                    TextButton(onClick = { backStack.removeLastOrNull() }) { Text("Cerrar") }
+                },
+            )
+            return
+        }
         MovementDialog(
             state = state,
             ledger = ledger,
@@ -242,6 +256,7 @@ fun PocketApp(
                 }
             },
             initialMovement = movementBeingEdited,
+            suggestion = suggestion,
         )
         return
     }
@@ -320,6 +335,7 @@ fun PocketApp(
                         undoWindowMillis = undoWindowMillis,
                         onRecordExpense = { backStack.add(MovementRoute()) },
                         onEditMovement = { backStack.add(MovementRoute(it.id)) },
+                        onReviewSuggestion = { backStack.add(MovementRoute(suggestionId = it)) },
                     )
                     RootScreen.POCKETS -> PocketsScreen(state, ledger, padding)
                     RootScreen.SETTINGS -> SettingsScreen(
@@ -473,6 +489,7 @@ private fun MovementDialog(
     onDismiss: () -> Unit,
     onSaved: () -> Unit,
     initialMovement: Movement? = null,
+    suggestion: com.aif31.pocket.data.MovementSuggestion? = null,
 ) {
     ProductionMovementScreen(
         state = state,
@@ -481,6 +498,7 @@ private fun MovementDialog(
         onSaved = onSaved,
         movementDefaults = ledger.movementDefaults(),
         initialMovement = initialMovement,
+        suggestion = suggestion,
         defaultExpenseCurrency = defaultExpenseCurrency,
         onlineFxEnabled = onlineFxEnabled,
         exchangeRates = exchangeRates,

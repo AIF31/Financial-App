@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.CurrencyExchange
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Card
@@ -57,6 +58,11 @@ internal enum class SettingsSection(
         "Recordatorio diario",
         "Horario diario y privacidad en la pantalla bloqueada",
         Icons.Default.Notifications,
+    ),
+    NOTIFICATION_ASSISTANCE(
+        "Captura desde notificaciones",
+        "Sugerencias experimentales de apps que tú elijas",
+        Icons.Default.NotificationsActive,
     ),
     PAYMENT_METHODS(
         "Métodos de pago",

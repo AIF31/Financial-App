@@ -70,6 +70,15 @@ internal fun SettingsScreen(
         )
         return
     }
+    if (selectedSection == SettingsSection.NOTIFICATION_ASSISTANCE) {
+        NotificationAssistanceSettings(
+            preferences = preferences,
+            preferencesStore = preferencesStore,
+            padding = padding,
+            onBack = { onSectionChange(null) },
+        )
+        return
+    }
     SettingsDetailScreen(
         state = state,
         ledger = ledger,
