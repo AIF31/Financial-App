@@ -213,8 +213,8 @@ fun PocketApp(
     }
 
     fun navigateRoot(destination: RootScreen) {
-        backStack.clear()
-        backStack.add(RootRoute(destination))
+        backStack[0] = RootRoute(destination)
+        while (backStack.size > 1) backStack.removeLastOrNull()
     }
 
     LaunchedEffect(openNewExpense, state.currentPeriod.id) {
