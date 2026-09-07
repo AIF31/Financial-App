@@ -11,6 +11,7 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasContentDescription
@@ -56,6 +57,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -548,12 +550,14 @@ class PocketAppHostFlowTest {
         }
         val target = RoomPocketLedger(database, clock, zone)
         runBlocking { target.execute(LedgerCommand.Initialize(10_000)) }
+        var completionMessage: String? = null
 
         compose.setContent {
             PocketApp(
                 ledger = target,
                 restoreCandidate = backup,
                 onRestoreCandidateHandled = {},
+                onRestoreCompleted = { completionMessage = it },
             )
         }
 
@@ -563,6 +567,37 @@ class PocketAppHostFlowTest {
         )
         compose.onNodeWithText("Restaurar y reemplazar").performClick()
         compose.waitUntil(5_000) { runBlocking { target.state.first().newFundsMinor == 75_000L } }
+        compose.waitUntil(5_000) { completionMessage?.startsWith("Backup restaurado:") == true }
+    }
+
+    @Test
+    fun restore_confirmation_disables_duplicate_submissions_until_the_result_arrives() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val clock = Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone)
+        val ledger = RoomPocketLedger(database, clock, zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(10_000)) }
+        val backup = runBlocking { ledger.exportBackup() }
+        val started = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        var attempts = 0
+        val slowLedger = object : PocketLedger by ledger {
+            override suspend fun restoreBackup(bytes: ByteArray): LedgerResult {
+                attempts += 1
+                started.complete(Unit)
+                finish.await()
+                return LedgerResult.Rejected("Fallo controlado")
+            }
+        }
+
+        compose.setContent { PocketApp(ledger = slowLedger, restoreCandidate = backup) }
+        compose.waitUntilExactlyOneExists(hasText("Restaurar y reemplazar"), 5_000)
+        compose.onNodeWithText("Restaurar y reemplazar").performClick()
+        compose.waitUntil(5_000) { started.isCompleted }
+        compose.onNodeWithText("Restaurando…").assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(1, attempts) }
+        finish.complete(Unit)
+        compose.waitUntilExactlyOneExists(hasText("Fallo controlado"), 5_000)
+        compose.runOnIdle { assertEquals(1, attempts) }
     }
 
     @Test
@@ -630,7 +665,30 @@ class PocketAppHostFlowTest {
         }
 
         compose.waitUntilExactlyOneExists(hasText("No se pudo crear el backup."), 5_000)
+        assertEquals(false, handled)
+        compose.onNodeWithText("Aceptar").performClick()
         compose.waitUntil(5_000) { handled }
+    }
+
+    @Test
+    fun onboarding_document_failure_stays_visible_and_retries_only_that_operation() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        var retries = 0
+
+        compose.setContent {
+            PocketApp(
+                ledger = ledger,
+                operationMessage = "No se pudo leer el backup.",
+                operationRetryLabel = "Reintentar",
+                onRetryOperation = { retries += 1 },
+            )
+        }
+
+        compose.waitUntilExactlyOneExists(hasText("No se pudo leer el backup."), 5_000)
+        compose.onNodeWithText("Configura tu primer periodo").assertExists()
+        compose.onNodeWithText("Reintentar").performClick()
+        compose.runOnIdle { assertEquals(1, retries) }
     }
 
     @Test

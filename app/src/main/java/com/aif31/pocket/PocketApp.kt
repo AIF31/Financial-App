@@ -108,12 +108,15 @@ fun PocketApp(
     restoreCandidate: ByteArray? = null,
     onRestoreCandidateHandled: () -> Unit = {},
     operationMessage: String? = null,
+    operationRetryLabel: String? = null,
     onOperationMessageHandled: () -> Unit = {},
+    onRetryOperation: () -> Unit = {},
     onCreateBackup: () -> Unit = {},
     onCreateCsv: () -> Unit = {},
     onPickBackup: () -> Unit = {},
     onRequestNotificationPermission: () -> Unit = {},
     onSuccessfulRestore: () -> Unit = {},
+    onRestoreCompleted: (String) -> Unit = {},
     undoWindowMillis: Long = 5_000,
 ) {
     val observedState by ledger.state.collectAsStateWithLifecycle(initialValue = null)
@@ -121,15 +124,37 @@ fun PocketApp(
     val preferenceState by preferencesFlow.collectAsStateWithLifecycle(initialValue = AppPreferences())
     var backupPreview by remember { mutableStateOf<com.aif31.pocket.data.BackupPreview?>(null) }
     var restoreError by rememberSaveable { mutableStateOf<String?>(null) }
+    var restoreInProgress by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(restoreCandidate) {
         restoreError = null
         backupPreview = restoreCandidate?.let { ledger.previewBackup(it) }
+    }
+    operationMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = onOperationMessageHandled,
+            title = { Text(if (operationRetryLabel == null) "Operación de documentos" else "La operación falló") },
+            text = { Text(message) },
+            confirmButton = {
+                if (operationRetryLabel == null) {
+                    TextButton(onClick = onOperationMessageHandled) { Text("Aceptar") }
+                } else {
+                    Button(onClick = onRetryOperation) { Text(operationRetryLabel) }
+                }
+            },
+            dismissButton = if (operationRetryLabel == null) null else {
+                { TextButton(onClick = onOperationMessageHandled) { Text("Cerrar") } }
+            },
+        )
     }
     if (restoreCandidate != null && backupPreview != null) {
         val preview = backupPreview!!
         val scope = rememberCoroutineScope()
         AlertDialog(
-            onDismissRequest = { onRestoreCandidateHandled(); backupPreview = null; restoreError = null },
+            onDismissRequest = {
+                if (!restoreInProgress) {
+                    onRestoreCandidateHandled(); backupPreview = null; restoreError = null
+                }
+            },
             title = { Text(if (restoreError != null) "No se pudo restaurar" else if (preview.valid) "Confirmar restauración" else "Backup inválido") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -147,7 +172,10 @@ fun PocketApp(
                 }
             },
             confirmButton = {
-                if (preview.valid) Button(onClick = {
+                if (preview.valid) Button(
+                    enabled = !restoreInProgress,
+                    onClick = {
+                    restoreInProgress = true
                     scope.launch {
                         when (val result = ledger.restoreBackup(restoreCandidate)) {
                             LedgerResult.Success -> {
@@ -156,31 +184,34 @@ fun PocketApp(
                                 val latest = restored.periods.maxByOrNull { it.start }
                                 val preferredStartDay = latest?.configuredStartDay ?: preferenceState.futurePeriodStartDay
                                 preferences?.setFuturePeriodStartDay(preferredStartDay)
-                                val today = ledger.movementDefaults().localDate
-                                if (restored.periods.none { today >= it.start && today < it.endExclusive } &&
-                                    today < restored.periods.minOf { it.start }
-                                ) {
-                                    restoreError = "El backup empieza después de la fecha actual"
-                                } else {
-                                    when (val catchUp = ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay))) {
-                                        LedgerResult.Success -> {
-                                            ledger.state.first { it.currentPeriod != null }
-                                            onRestoreCandidateHandled()
-                                            backupPreview = null
-                                            restoreError = null
-                                        }
-                                        is LedgerResult.Rejected -> restoreError = catchUp.message
-                                        is LedgerResult.Deleted -> Unit
+                                when (val catchUp = ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay))) {
+                                    LedgerResult.Success -> {
+                                        ledger.state.first { it.currentPeriod != null }
+                                        onRestoreCompleted(
+                                            "Backup restaurado: ${preview.periods} periodos, " +
+                                                "${preview.pockets} Pockets y ${preview.movements} movimientos.",
+                                        )
+                                        onRestoreCandidateHandled()
+                                        backupPreview = null
+                                        restoreError = null
                                     }
+                                    is LedgerResult.Rejected -> restoreError = catchUp.message
+                                    is LedgerResult.Deleted -> Unit
                                 }
                             }
                             is LedgerResult.Rejected -> restoreError = result.message
                             is LedgerResult.Deleted -> Unit
                         }
+                        restoreInProgress = false
                     }
-                }) { Text(if (observedState?.needsOnboarding == false) "Restaurar y reemplazar" else "Restaurar") }
+                }) { Text(if (restoreInProgress) "Restaurando…" else if (observedState?.needsOnboarding == false) "Restaurar y reemplazar" else "Restaurar") }
             },
-            dismissButton = { TextButton(onClick = { onRestoreCandidateHandled(); backupPreview = null; restoreError = null }) { Text("Cancelar") } },
+            dismissButton = {
+                TextButton(
+                    enabled = !restoreInProgress,
+                    onClick = { onRestoreCandidateHandled(); backupPreview = null; restoreError = null },
+                ) { Text("Cancelar") }
+            },
         )
     }
     val state = observedState
@@ -204,13 +235,6 @@ fun PocketApp(
     val settingsSection = (currentRoute as? SettingsDetailRoute)?.section
     val snackbar = remember { SnackbarHostState() }
     val appScope = rememberCoroutineScope()
-
-    LaunchedEffect(operationMessage) {
-        operationMessage?.let {
-            snackbar.showSnackbar(it)
-            onOperationMessageHandled()
-        }
-    }
 
     fun navigateRoot(destination: RootScreen) {
         backStack.clear()

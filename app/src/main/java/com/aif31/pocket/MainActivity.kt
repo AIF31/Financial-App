@@ -24,15 +24,21 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     private var restoreCandidate by mutableStateOf<ByteArray?>(null)
     private var operationMessage by mutableStateOf<String?>(null)
+    private var retryOperation by mutableStateOf<DocumentOperation?>(null)
 
     private val createBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        uri?.let { writeExport(it, backup = true) }
+        if (uri == null) showOperationMessage("Creación de backup cancelada.")
+        else writeExport(uri, DocumentOperation.BACKUP)
     }
     private val createCsv = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
-        uri?.let { writeExport(it, backup = false) }
+        if (uri == null) showOperationMessage("Exportación CSV cancelada.")
+        else writeExport(uri, DocumentOperation.CSV)
     }
     private val openBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { target ->
+        if (uri == null) {
+            showOperationMessage("Selección de backup cancelada.")
+        } else {
+            val target = uri
             lifecycleScope.launch {
                 try {
                     restoreCandidate = withContext(Dispatchers.IO) {
@@ -51,9 +57,13 @@ class MainActivity : ComponentActivity() {
                             output.toByteArray()
                         }
                     }
+                    retryOperation = null
                 } catch (error: Exception) {
                     if (error is CancellationException) throw error
-                    operationMessage = "No se pudo leer el backup. Comprueba el archivo y vuelve a intentarlo."
+                    showOperationMessage(
+                        "No se pudo leer el backup. Comprueba el archivo y vuelve a intentarlo.",
+                        DocumentOperation.RESTORE,
+                    )
                 }
             }
         }
@@ -62,6 +72,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        operationMessage = savedInstanceState?.getString(STATE_OPERATION_MESSAGE)
+        retryOperation = savedInstanceState?.getString(STATE_RETRY_OPERATION)?.let(DocumentOperation::valueOf)
         enableEdgeToEdge()
         catchUpPeriods()
         val openExpense = intent?.action == ACTION_NEW_EXPENSE
@@ -76,19 +88,28 @@ class MainActivity : ComponentActivity() {
                     restoreCandidate = restoreCandidate,
                     onRestoreCandidateHandled = { restoreCandidate = null },
                     operationMessage = operationMessage,
-                    onOperationMessageHandled = { operationMessage = null },
-                    onCreateBackup = { createBackup.launch("pocket-${java.time.LocalDate.now()}.pocketbackup") },
-                    onCreateCsv = { createCsv.launch("pocket-movimientos-${java.time.LocalDate.now()}.csv") },
-                    onPickBackup = { openBackup.launch(arrayOf("application/octet-stream", "application/json", "*/*")) },
+                    operationRetryLabel = retryOperation?.let { "Reintentar" },
+                    onOperationMessageHandled = { showOperationMessage(null) },
+                    onRetryOperation = ::retryDocumentOperation,
+                    onCreateBackup = { launchDocumentOperation(DocumentOperation.BACKUP) },
+                    onCreateCsv = { launchDocumentOperation(DocumentOperation.CSV) },
+                    onPickBackup = { launchDocumentOperation(DocumentOperation.RESTORE) },
                     onSuccessfulRestore = {
                         runCatching { (application as PocketApplication).notificationBetaMetrics.reset() }
                     },
+                    onRestoreCompleted = { showOperationMessage(it) },
                     onRequestNotificationPermission = {
                         if (android.os.Build.VERSION.SDK_INT >= 33) requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                     },
                 )
             }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        operationMessage?.let { outState.putString(STATE_OPERATION_MESSAGE, it) }
+        retryOperation?.let { outState.putString(STATE_RETRY_OPERATION, it.name) }
+        super.onSaveInstanceState(outState)
     }
 
     override fun onResume() {
@@ -104,24 +125,43 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun writeExport(uri: Uri, backup: Boolean) {
+    private fun launchDocumentOperation(operation: DocumentOperation) {
+        showOperationMessage(null)
+        when (operation) {
+            DocumentOperation.BACKUP -> createBackup.launch("pocket-${java.time.LocalDate.now()}.pocketbackup")
+            DocumentOperation.CSV -> createCsv.launch("pocket-movimientos-${java.time.LocalDate.now()}.csv")
+            DocumentOperation.RESTORE -> openBackup.launch(arrayOf("application/octet-stream", "application/json", "*/*"))
+        }
+    }
+
+    private fun retryDocumentOperation() {
+        retryOperation?.let(::launchDocumentOperation)
+    }
+
+    private fun showOperationMessage(message: String?, retry: DocumentOperation? = null) {
+        operationMessage = message
+        retryOperation = retry
+    }
+
+    private fun writeExport(uri: Uri, operation: DocumentOperation) {
         lifecycleScope.launch {
             try {
                 withContext(Dispatchers.IO) {
                     val ledger = (application as PocketApplication).ledger
-                    val bytes = if (backup) ledger.exportBackup() else ledger.exportCsv()
+                    val bytes = if (operation == DocumentOperation.BACKUP) ledger.exportBackup() else ledger.exportCsv()
                     val output = contentResolver.openOutputStream(uri, "wt")
                         ?: throw IOException("The selected document could not be opened")
                     output.use { it.write(bytes) }
                 }
-                operationMessage = if (backup) "Backup creado." else "CSV exportado."
+                showOperationMessage(if (operation == DocumentOperation.BACKUP) "Backup creado." else "CSV exportado.")
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
-                operationMessage = if (backup) {
+                val message = if (operation == DocumentOperation.BACKUP) {
                     "No se pudo crear el backup. Comprueba el destino y vuelve a intentarlo."
                 } else {
                     "No se pudo exportar el CSV. Comprueba el destino y vuelve a intentarlo."
                 }
+                showOperationMessage(message, operation)
             }
         }
     }
@@ -129,5 +169,9 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val ACTION_NEW_EXPENSE = "com.aif31.pocket.NEW_EXPENSE"
         private const val MAX_BACKUP_BYTES = 10 * 1024 * 1024
+        private const val STATE_OPERATION_MESSAGE = "operation_message"
+        private const val STATE_RETRY_OPERATION = "retry_operation"
     }
 }
+
+private enum class DocumentOperation { BACKUP, CSV, RESTORE }
