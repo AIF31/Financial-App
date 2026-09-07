@@ -854,8 +854,12 @@ class RoomPocketLedger(
     private fun today(): LocalDate = clock.instant().atZone(zoneId).toLocalDate()
 
     override suspend fun exportBackup(): ByteArray = withContext(codecDispatcher) { BackupCodec.encode(database) }
-    override suspend fun previewBackup(bytes: ByteArray): BackupPreview = withContext(codecDispatcher) { BackupCodec.preview(bytes) }
-    override suspend fun restoreBackup(bytes: ByteArray): LedgerResult = withContext(codecDispatcher) { BackupCodec.restore(database, bytes) }
+    override suspend fun previewBackup(bytes: ByteArray): BackupPreview = withContext(codecDispatcher) {
+        BackupCodec.preview(bytes, today())
+    }
+    override suspend fun restoreBackup(bytes: ByteArray): LedgerResult = withContext(codecDispatcher) {
+        BackupCodec.restore(database, bytes, today())
+    }
     override suspend fun exportCsv(): ByteArray = withContext(codecDispatcher) { BackupCodec.csv(database) }
 
     private companion object {

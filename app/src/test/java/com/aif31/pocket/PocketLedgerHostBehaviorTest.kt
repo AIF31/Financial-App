@@ -165,6 +165,35 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
+    fun future_only_backup_is_rejected_before_replacement_but_future_periods_after_a_current_one_are_valid() = runTest {
+        val target = RoomPocketLedger(database, clock, zone)
+        target.execute(LedgerCommand.Initialize(10_000))
+        val before = target.exportBackup()
+        val sourceDatabase = FinanceDatabase.inMemory(ApplicationProvider.getApplicationContext<Context>())
+        try {
+            val futureClock = Clock.fixed(Instant.parse("2026-06-26T09:00:00Z"), zone)
+            val source = RoomPocketLedger(sourceDatabase, futureClock, zone)
+            source.execute(LedgerCommand.Initialize(75_000))
+            val futureOnly = source.exportBackup()
+
+            assertFalse(target.previewBackup(futureOnly).valid)
+            assertTrue(target.restoreBackup(futureOnly) is LedgerResult.Rejected)
+            assertEquals(before.decodeToString(), target.exportBackup().decodeToString())
+
+            sourceDatabase.clearAllTables()
+            val currentSource = RoomPocketLedger(sourceDatabase, clock, zone)
+            currentSource.execute(LedgerCommand.Initialize(75_000))
+            currentSource.execute(LedgerCommand.CreateNextPeriod())
+            val currentAndFuture = currentSource.exportBackup()
+
+            assertTrue(target.previewBackup(currentAndFuture).valid)
+            assertEquals(LedgerResult.Success, target.restoreBackup(currentAndFuture))
+        } finally {
+            sourceDatabase.close()
+        }
+    }
+
+    @Test
     fun restoring_a_Pocket_reclaims_released_rollover_and_keeps_backup_restorable() = runTest {
         val firstLedger = RoomPocketLedger(database, clock, zone)
         firstLedger.execute(LedgerCommand.Initialize(30_000))

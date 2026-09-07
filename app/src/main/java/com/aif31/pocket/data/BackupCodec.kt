@@ -95,16 +95,16 @@ internal object BackupCodec {
         return json.encodeToString(BackupPayload.serializer(), payload).toByteArray(StandardCharsets.UTF_8)
     }
 
-    fun preview(bytes: ByteArray): BackupPreview = try {
-        val payload = decodeAndValidate(bytes)
+    fun preview(bytes: ByteArray, today: LocalDate): BackupPreview = try {
+        val payload = decodeAndValidate(bytes, today)
         BackupPreview(payload.version, payload.periods.size, payload.pockets.size, payload.movements.size, valid = true)
     } catch (error: Exception) {
         BackupPreview(0, 0, 0, 0, valid = false, message = error.message ?: "Backup inválido")
     }
 
-    suspend fun restore(database: FinanceDatabase, bytes: ByteArray): LedgerResult {
+    suspend fun restore(database: FinanceDatabase, bytes: ByteArray, today: LocalDate): LedgerResult {
         val payload = try {
-            decodeAndValidate(bytes)
+            decodeAndValidate(bytes, today)
         } catch (error: Exception) {
             return LedgerResult.Rejected(error.message ?: "Backup inválido")
         }
@@ -174,7 +174,7 @@ internal object BackupCodec {
         return rows.toByteArray(StandardCharsets.UTF_8)
     }
 
-    private fun decodeAndValidate(bytes: ByteArray): BackupPayload {
+    private fun decodeAndValidate(bytes: ByteArray, today: LocalDate): BackupPayload {
         require(bytes.isNotEmpty() && bytes.size <= 10 * 1024 * 1024) { "Tamaño de backup inválido" }
         val decoded = json.decodeFromString(BackupPayload.serializer(), bytes.toString(StandardCharsets.UTF_8))
         require(decoded.version in 1..VERSION) { "Versión de backup incompatible" }
@@ -204,6 +204,9 @@ internal object BackupCodec {
                 it.endExclusive in LocalDate.MIN.toEpochDay()..LocalDate.MAX.toEpochDay()
         }) { "Fecha de periodo inválida" }
         val orderedPeriods = payload.periods.sortedBy { it.start }
+        require(orderedPeriods.first().start <= today.toEpochDay()) {
+            "El backup empieza después de la fecha actual"
+        }
         require(orderedPeriods.all { runCatching { SupportedCurrency.fromCode(it.accountingCurrencyCode) }.isSuccess }) {
             "Moneda de periodo inválida"
         }
