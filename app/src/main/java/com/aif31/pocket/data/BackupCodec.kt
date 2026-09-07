@@ -330,6 +330,12 @@ internal object BackupCodec {
                 .map { it.accountingAmountMinor }.sumMoneyExact()
             summaries.map { it.rolloverMinor }.sumMoneyExact()
             summaries.map { it.availabilityMinor }.sumMoneyExact()
+            val releasedRollover = payload.rolloverReleases.filter { it.periodId == period.id }
+                .map { it.amountMinor }.sumMoneyExact()
+            Math.addExact(
+                Math.subtractExact(period.newFundsMinor, periodAllocations.map { it.budgetMinor }.sumMoneyExact()),
+                releasedRollover,
+            )
             val netSpend = summaries.map { it.netSpendMinor }.sumMoneyExact()
             val totalDays = Math.toIntExact(Math.subtractExact(period.endExclusive, period.start))
             PocketMath.project(netSpend, elapsedDays = 1, totalDays = totalDays)

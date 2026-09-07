@@ -176,12 +176,15 @@ class PocketLedgerHostBehaviorTest {
         val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone), zone)
         assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePocket(pocket.id)))
         assertEquals(10_000L, database.financeDao().rolloverReleases().single().amountMinor)
+        assertEquals(40_000L, ledger.state.first().unallocatedMinor)
+        assertEquals(30_000L, ledger.state.first().newFundsMinor)
         assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePocket(pocket.id, archived = false)))
         val restored = ledger.state.first().pockets.single { it.pocket.id == pocket.id }
         assertFalse(restored.retiredThisPeriod)
         assertEquals(10_000L, restored.rolloverMinor)
         assertEquals(0L, restored.budgetMinor)
         assertTrue(database.financeDao().rolloverReleases().isEmpty())
+        assertEquals(30_000L, ledger.state.first().unallocatedMinor)
         val backup = ledger.exportBackup()
         assertTrue(ledger.previewBackup(backup).valid)
         assertEquals(LedgerResult.Success, ledger.restoreBackup(backup))
@@ -372,7 +375,8 @@ class PocketLedgerHostBehaviorTest {
 
         state = ledger.state.first { it.pockets.any { summary -> summary.pocket.id == pocket.id && summary.retiredThisPeriod } }
         val retired = state.pockets.single { it.pocket.id == pocket.id }
-        assertEquals(30_000L, state.unallocatedMinor)
+        assertEquals(35_000L, state.unallocatedMinor)
+        assertEquals(30_000L, state.newFundsMinor)
         assertEquals(0L, retired.budgetMinor)
         assertEquals(0L, retired.rolloverMinor)
         assertEquals(5_000L, retired.rolloverReleasedMinor)
@@ -382,10 +386,14 @@ class PocketLedgerHostBehaviorTest {
             state.movements.filter { it.periodId == current.id && it.pocketId == pocket.id }.map { it.id }.toSet(),
         )
         assertEquals(5_000L, database.financeDao().rolloverReleases().single { it.periodId == current.id && it.pocketId == pocket.id }.amountMinor)
+        assertEquals(35_000L, ledger.state.first().unallocatedMinor)
 
         assertTrue(ledger.execute(LedgerCommand.SetAllocation(current.id, pocket.id, 1_000)) is LedgerResult.Rejected)
         assertTrue(ledger.execute(LedgerCommand.AddMovement("new", pocket.id, MovementType.EXPENSE, 1_000, clock.millis(), LocalDate.of(2026, 3, 26))) is LedgerResult.Rejected)
         assertTrue(ledger.execute(LedgerCommand.UpsertTemplate(name = "Nueva", amountMinor = 1_000, pocketId = pocket.id)) is LedgerResult.Rejected)
+        val otherPocket = state.pockets.first { !it.pocket.archived && it.pocket.id != pocket.id }.pocket
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.SetAllocation(current.id, otherPocket.id, 30_000)))
+        assertTrue(ledger.execute(LedgerCommand.SetAllocation(current.id, otherPocket.id, 30_001)) is LedgerResult.Rejected)
 
         ledger.execute(LedgerCommand.CreateNextPeriod())
         val after = ledger.state.first { it.periods.size == 3 }
@@ -447,6 +455,20 @@ class PocketLedgerHostBehaviorTest {
         val retired = secondLedger.state.first().pockets.single { it.pocket.id == pocket.id }
         assertTrue(retired.retiredThisPeriod)
         assertEquals(2_000L, retired.rolloverReleasedMinor)
+
+        assertEquals(
+            LedgerResult.Success,
+            firstLedger.execute(LedgerCommand.AddMovement(
+                "release-source",
+                pocket.id,
+                MovementType.EXPENSE,
+                12_000,
+                clock.millis(),
+                LocalDate.of(2026, 2, 26),
+            )),
+        )
+        assertTrue(database.financeDao().rolloverReleases().none { it.periodId == second.id })
+        assertEquals(0L, secondLedger.state.first().pockets.single { it.pocket.id == pocket.id }.rolloverReleasedMinor)
     }
 
     @Test

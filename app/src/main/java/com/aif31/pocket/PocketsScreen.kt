@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.*
 import com.aif31.pocket.domain.Money
 import com.aif31.pocket.domain.SupportedCurrency
+import com.aif31.pocket.domain.sumMoneyExact
 import com.aif31.pocket.settings.*
 import com.aif31.pocket.ui.*
 import java.time.LocalTime
@@ -49,10 +50,14 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
         summary.retiredThisPeriod || (!isHistorical && summary.pocket.archived)
     }
     val retiredPockets = shownPockets.filter { it.retiredThisPeriod }
-    val allocatedMinor = shownPockets.sumOf { it.budgetMinor }
-    val availableMinor = shownPockets.sumOf { it.availabilityMinor }
+    val allocatedMinor = shownPockets.map { it.budgetMinor }.sumMoneyExact()
+    val availableMinor = shownPockets.map { it.availabilityMinor }.sumMoneyExact()
+    val releasedRolloverMinor = shownPockets.map { it.rolloverReleasedMinor }.sumMoneyExact()
     val periodFundsMinor = selectedPeriod?.newFundsMinor ?: state.newFundsMinor
-    val unallocatedForPeriodMinor = periodFundsMinor - allocatedMinor
+    val unallocatedForPeriodMinor = Math.addExact(
+        Math.subtractExact(periodFundsMinor, allocatedMinor),
+        releasedRolloverMinor,
+    )
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding).testTag("pockets_list"),
