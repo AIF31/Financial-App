@@ -189,6 +189,18 @@ class DomainRulesTest {
     }
 
     @Test
+    fun `summary rejects a percentage outside the UI range`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            PocketMath.summary(
+                budgetMinor = 1,
+                rolloverMinor = 0,
+                expensesMinor = Int.MAX_VALUE.toLong() / 100 + 1,
+                refundsMinor = 0,
+            )
+        }
+    }
+
+    @Test
     fun `projection is an explicitly estimated straight line pace`() {
         val projection = PocketMath.project(netSpendMinor = 9_000, elapsedDays = 9, totalDays = 30)
 

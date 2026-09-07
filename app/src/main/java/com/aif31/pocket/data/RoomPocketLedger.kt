@@ -1,12 +1,14 @@
 package com.aif31.pocket.data
 
 import android.database.sqlite.SQLiteConstraintException
+import android.database.sqlite.SQLiteException
 import androidx.room.withTransaction
 import com.aif31.pocket.domain.BudgetCalendar
 import com.aif31.pocket.domain.FrozenRate
 import com.aif31.pocket.domain.PeriodSchedule
 import com.aif31.pocket.domain.PocketMath
 import com.aif31.pocket.domain.SupportedCurrency
+import com.aif31.pocket.domain.sumMoneyExact
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -99,8 +101,12 @@ class RoomPocketLedger(
         }
     } catch (error: IllegalArgumentException) {
         LedgerResult.Rejected(error.message ?: "Datos inválidos")
+    } catch (_: ArithmeticException) {
+        LedgerResult.Rejected("El resultado monetario supera el rango admitido")
     } catch (_: SQLiteConstraintException) {
         LedgerResult.Rejected("Ya existe un elemento con esos datos")
+    } catch (_: SQLiteException) {
+        LedgerResult.Rejected("No se pudo guardar el cambio", RejectionKind.PERSISTENCE)
     }
 
     private suspend fun initialize(command: LedgerCommand.Initialize): LedgerResult = database.withTransaction {
@@ -139,8 +145,9 @@ class RoomPocketLedger(
     private suspend fun updateFunds(command: LedgerCommand.UpdatePeriodFunds): LedgerResult = database.withTransaction {
         require(command.newFundsMinor >= 0) { "Los fondos no pueden ser negativos" }
         val period = requireNotNull(dao.period(command.periodId)) { "Periodo inexistente" }
-        require(dao.allocated(period.id) <= command.newFundsMinor) { "Reduce primero los presupuestos asignados" }
-        dao.updatePeriod(period.copy(newFundsMinor = command.newFundsMinor))
+        val updated = period.copy(newFundsMinor = command.newFundsMinor)
+        validatePeriodTotals(updated, dao.allocations(), dao.movements())
+        dao.updatePeriod(updated)
         LedgerResult.Success
     }
 
@@ -152,11 +159,12 @@ class RoomPocketLedger(
         val snapshot = dao.periodPockets().firstOrNull { it.periodId == command.periodId && it.pocketId == command.pocketId }
         require(snapshot != null && !snapshot.retired) { "El Pocket no está activo en este periodo" }
         val existing = dao.allocation(command.periodId, command.pocketId)
-        val resultingTotal = dao.allocated(command.periodId) - (existing?.budgetMinor ?: 0) + command.amountMinor
-        require(resultingTotal <= period.newFundsMinor) { "No puedes asignar más que los fondos nuevos" }
-        dao.putAllocation(
-            AllocationEntity(command.periodId, command.pocketId, command.amountMinor, existing?.rolloverMinor ?: 0)
-        )
+        val updated = AllocationEntity(command.periodId, command.pocketId, command.amountMinor, existing?.rolloverMinor ?: 0)
+        val allocations = dao.allocations().filterNot {
+            it.periodId == command.periodId && it.pocketId == command.pocketId
+        } + updated
+        validatePeriodTotals(period, allocations, dao.movements())
+        dao.putAllocation(updated)
         recalculateRolloverFrom(command.periodId)
         LedgerResult.Success
     }
@@ -302,7 +310,10 @@ class RoomPocketLedger(
         require(!pocket.archived || editsSamePocket) { "El Pocket está archivado" }
         val snapshot = dao.periodPockets().firstOrNull { it.periodId == period.id && it.pocketId == command.pocketId }
         require(snapshot != null && (!snapshot.retired || editsSamePocket)) { "El Pocket no está activo en este periodo" }
-        dao.putMovement(command.toEntity(period.id, zoneId.id, originalCurrency.name))
+        val updated = command.toEntity(period.id, zoneId.id, originalCurrency.name)
+        val movements = dao.movements().filterNot { it.id == updated.id } + updated
+        validatePeriodTotals(period, dao.allocations(), movements)
+        dao.putMovement(updated)
         val sourcePeriodId = listOfNotNull(existing?.periodId, period.id)
             .minBy { id -> periods.first { it.id == id }.startEpochDay }
         recalculateRolloverFrom(sourcePeriodId)
@@ -347,6 +358,8 @@ class RoomPocketLedger(
 
     private suspend fun restoreMovement(command: LedgerCommand.RestoreMovement): LedgerResult = database.withTransaction {
         val entity = command.movement.toEntity()
+        val period = requireNotNull(dao.period(entity.periodId)) { "Periodo inexistente" }
+        validatePeriodTotals(period, dao.allocations(), dao.movements().filterNot { it.id == entity.id } + entity)
         dao.putMovement(entity)
         recalculateRolloverFrom(entity.periodId)
         LedgerResult.Success
@@ -422,6 +435,46 @@ class RoomPocketLedger(
         LedgerResult.Success
     }
 
+    private fun validatePeriodTotals(
+        period: PeriodEntity,
+        allocations: List<AllocationEntity>,
+        movements: List<MovementEntity>,
+    ) {
+        val periodAllocations = allocations.filter { it.periodId == period.id }
+        val allocated = periodAllocations.map { it.budgetMinor }.sumMoneyExact()
+        require(allocated <= period.newFundsMinor) { "No puedes asignar más que los fondos nuevos" }
+
+        val periodMovements = movements.filter { it.periodId == period.id }
+        periodMovements.filter { it.type == MovementType.EXPENSE.name }
+            .map { it.accountingAmountMinor }.sumMoneyExact()
+        periodMovements.filter { it.type == MovementType.REFUND.name }
+            .map { it.accountingAmountMinor }.sumMoneyExact()
+
+        val summaries = (periodAllocations.map { it.pocketId } + periodMovements.map { it.pocketId })
+            .distinct()
+            .map { pocketId ->
+                val allocation = periodAllocations.firstOrNull { it.pocketId == pocketId }
+                val pocketMovements = periodMovements.filter { it.pocketId == pocketId }
+                PocketMath.summary(
+                    budgetMinor = allocation?.budgetMinor ?: 0,
+                    rolloverMinor = allocation?.rolloverMinor ?: 0,
+                    expensesMinor = pocketMovements.filter { it.type == MovementType.EXPENSE.name }
+                        .map { it.accountingAmountMinor }.sumMoneyExact(),
+                    refundsMinor = pocketMovements.filter { it.type == MovementType.REFUND.name }
+                        .map { it.accountingAmountMinor }.sumMoneyExact(),
+                )
+            }
+        summaries.map { it.rolloverMinor }.sumMoneyExact()
+        summaries.map { it.availabilityMinor }.sumMoneyExact()
+        val netSpend = summaries.map { it.netSpendMinor }.sumMoneyExact()
+        val today = today()
+        if (today.toEpochDay() in period.startEpochDay until period.endExclusiveEpochDay) {
+            val elapsed = (today.toEpochDay() - period.startEpochDay + 1).toInt().coerceAtLeast(1)
+            val totalDays = (period.endExclusiveEpochDay - period.startEpochDay).toInt()
+            PocketMath.project(netSpend, elapsed, totalDays)
+        }
+    }
+
     private suspend fun recalculateRolloverFrom(sourcePeriodId: String) {
         val periods = dao.periods().sortedBy { it.startEpochDay }
         val startIndex = periods.indexOfFirst { it.id == sourcePeriodId }
@@ -442,12 +495,15 @@ class RoomPocketLedger(
             targetSnapshots.forEach { targetSnapshot ->
                 val pocketId = targetSnapshot.pocketId
                 val sourceAllocation = allocations[source.id to pocketId]
-                val netSpend = sourceMovements.filter { it.pocketId == pocketId }.sumOf {
-                    if (it.type == MovementType.EXPENSE.name) it.accountingAmountMinor else -it.accountingAmountMinor
-                }
+                val pocketMovements = sourceMovements.filter { it.pocketId == pocketId }
+                val expenses = pocketMovements.filter { it.type == MovementType.EXPENSE.name }
+                    .map { it.accountingAmountMinor }.sumMoneyExact()
+                val refunds = pocketMovements.filter { it.type == MovementType.REFUND.name }
+                    .map { it.accountingAmountMinor }.sumMoneyExact()
+                val netSpend = Math.subtractExact(expenses, refunds)
                 val sourceSnapshot = sourceSnapshots[pocketId]
                 val rollover = PocketMath.rollover(
-                    allocatedMinor = (sourceAllocation?.budgetMinor ?: 0) + (sourceAllocation?.rolloverMinor ?: 0),
+                    allocatedMinor = Math.addExact(sourceAllocation?.budgetMinor ?: 0, sourceAllocation?.rolloverMinor ?: 0),
                     netSpendMinor = netSpend,
                     enabled = sourceSnapshot?.rolloverEligible == true && !sourceSnapshot.retired,
                 )
@@ -479,6 +535,7 @@ class RoomPocketLedger(
                     allocations[targetKey] = updated
                 }
             }
+            validatePeriodTotals(target, allocations.values.toList(), movements)
         }
     }
 
@@ -540,7 +597,7 @@ class RoomPocketLedger(
         val convertedBudgets = activePockets.associate { pocket ->
             pocket.id to convertForTarget(previousAllocations[pocket.id]?.budgetMinor ?: 0)
         }.toMutableMap()
-        var roundingExcess = convertedBudgets.values.fold(0L, Math::addExact) - next.newFundsMinor
+        var roundingExcess = Math.subtractExact(convertedBudgets.values.sumMoneyExact(), next.newFundsMinor)
         // Preserve higher-priority Pockets and absorb any independent HALF_UP excess from the end of display order.
         activePockets.asReversed().forEach { pocket ->
             if (roundingExcess > 0) {
@@ -551,11 +608,14 @@ class RoomPocketLedger(
         }
         val nextAllocations = activePockets.map { pocket ->
             val previousAllocation = previousAllocations[pocket.id]
-            val spent = previousMovements.filter { it.pocketId == pocket.id }.sumOf {
-                if (it.type == MovementType.EXPENSE.name) it.accountingAmountMinor else -it.accountingAmountMinor
-            }
+            val pocketMovements = previousMovements.filter { it.pocketId == pocket.id }
+            val expenses = pocketMovements.filter { it.type == MovementType.EXPENSE.name }
+                .map { it.accountingAmountMinor }.sumMoneyExact()
+            val refunds = pocketMovements.filter { it.type == MovementType.REFUND.name }
+                .map { it.accountingAmountMinor }.sumMoneyExact()
+            val spent = Math.subtractExact(expenses, refunds)
             val rollover = PocketMath.rollover(
-                allocatedMinor = (previousAllocation?.budgetMinor ?: 0) + (previousAllocation?.rolloverMinor ?: 0),
+                allocatedMinor = Math.addExact(previousAllocation?.budgetMinor ?: 0, previousAllocation?.rolloverMinor ?: 0),
                 netSpendMinor = spent,
                 enabled = previousPeriodPockets[pocket.id]?.rolloverEligible == true,
             )
@@ -566,6 +626,7 @@ class RoomPocketLedger(
                 convertForTarget(rollover),
             )
         }
+        validatePeriodTotals(next, nextAllocations, emptyList())
         dao.putAllocations(nextAllocations)
         if (pending != null) dao.clearPendingCurrencyChange()
         return next
@@ -662,8 +723,10 @@ class RoomPocketLedger(
                 val pocketEntity = pocketsById[snapshot.pocketId] ?: return@mapNotNull null
                 val allocation = periodAllocations[pocketEntity.id]
                 val pocketMovements = periodMovements.filter { it.pocketId == pocketEntity.id }
-                val expenses = pocketMovements.filter { it.type == MovementType.EXPENSE }.sumOf { it.accountingAmountMinor }
-                val refunds = pocketMovements.filter { it.type == MovementType.REFUND }.sumOf { it.accountingAmountMinor }
+                val expenses = pocketMovements.filter { it.type == MovementType.EXPENSE }
+                    .map { it.accountingAmountMinor }.sumMoneyExact()
+                val refunds = pocketMovements.filter { it.type == MovementType.REFUND }
+                    .map { it.accountingAmountMinor }.sumMoneyExact()
                 val math = PocketMath.summary(allocation?.budgetMinor ?: 0, allocation?.rolloverMinor ?: 0, expenses, refunds)
                 PocketPeriodSummary(
                     pocket = pocketEntity.toModel(),
@@ -686,9 +749,11 @@ class RoomPocketLedger(
         val summaries = allSummaries.getValue(current.id)
         val previous = periods.filter { it.start < current.start }.maxByOrNull { it.start }
         val previousSpendInPreviousCurrency = previous?.let { period ->
-            movements.filter { it.periodId == period.id }.sumOf {
-                if (it.type == MovementType.EXPENSE) it.accountingAmountMinor else -it.accountingAmountMinor
-            }
+            val periodMovements = movements.filter { it.periodId == period.id }
+            Math.subtractExact(
+                periodMovements.filter { it.type == MovementType.EXPENSE }.map { it.accountingAmountMinor }.sumMoneyExact(),
+                periodMovements.filter { it.type == MovementType.REFUND }.map { it.accountingAmountMinor }.sumMoneyExact(),
+            )
         }
         val currentEntity = periodEntities.first { it.id == current.id }
         val previousSpend = previous?.let { previousPeriod ->
@@ -712,7 +777,7 @@ class RoomPocketLedger(
         val elapsed = ((today.coerceAtMost(current.endExclusive.minusDays(1)).toEpochDay() - current.start.toEpochDay()) + 1)
             .toInt().coerceAtLeast(1)
         val totalDays = (current.endExclusive.toEpochDay() - current.start.toEpochDay()).toInt()
-        val netSpend = summaries.sumOf { it.netSpendMinor }
+        val netSpend = summaries.map { it.netSpendMinor }.sumMoneyExact()
         return LedgerState(
             periods = periods,
             currentPeriod = current,
@@ -731,11 +796,11 @@ class RoomPocketLedger(
                     SupportedCurrency.fromCode(it.inputCurrencyCode),
                 )
             },
-            unallocatedMinor = current.newFundsMinor - summaries.sumOf { it.budgetMinor },
+            unallocatedMinor = Math.subtractExact(current.newFundsMinor, summaries.map { it.budgetMinor }.sumMoneyExact()),
             newFundsMinor = current.newFundsMinor,
-            rolloverTotalMinor = summaries.sumOf { it.rolloverMinor },
+            rolloverTotalMinor = summaries.map { it.rolloverMinor }.sumMoneyExact(),
             netSpendMinor = netSpend,
-            trackedAvailabilityMinor = summaries.sumOf { it.availabilityMinor },
+            trackedAvailabilityMinor = summaries.map { it.availabilityMinor }.sumMoneyExact(),
             previousPeriodNetSpendMinor = previousSpend,
             comparisonMode = comparisonMode,
             previousPeriodComparisonMinor = previousComparison,

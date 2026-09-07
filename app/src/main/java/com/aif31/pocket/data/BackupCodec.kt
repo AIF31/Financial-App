@@ -2,7 +2,9 @@ package com.aif31.pocket.data
 
 import androidx.room.withTransaction
 import com.aif31.pocket.domain.FrozenRate
+import com.aif31.pocket.domain.PocketMath
 import com.aif31.pocket.domain.SupportedCurrency
+import com.aif31.pocket.domain.sumMoneyExact
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
 import java.util.Locale
@@ -305,6 +307,33 @@ internal object BackupCodec {
                     originalAmountIsValid && rateIsValid && provenanceIsValid
                 }.getOrDefault(false)
         }) { "Relación de movimiento inválida" }
+        payload.periods.forEach { period ->
+            val periodAllocations = payload.allocations.filter { it.periodId == period.id }
+            val periodMovements = payload.movements.filter { it.periodId == period.id }
+            val summaries = (periodAllocations.map { it.pocketId } + periodMovements.map { it.pocketId })
+                .distinct()
+                .map { pocketId ->
+                    val allocation = periodAllocations.firstOrNull { it.pocketId == pocketId }
+                    val pocketMovements = periodMovements.filter { it.pocketId == pocketId }
+                    PocketMath.summary(
+                        budgetMinor = allocation?.budgetMinor ?: 0,
+                        rolloverMinor = allocation?.rolloverMinor ?: 0,
+                        expensesMinor = pocketMovements.filter { it.type == MovementType.EXPENSE.name }
+                            .map { it.accountingAmountMinor }.sumMoneyExact(),
+                        refundsMinor = pocketMovements.filter { it.type == MovementType.REFUND.name }
+                            .map { it.accountingAmountMinor }.sumMoneyExact(),
+                    )
+                }
+            periodMovements.filter { it.type == MovementType.EXPENSE.name }
+                .map { it.accountingAmountMinor }.sumMoneyExact()
+            periodMovements.filter { it.type == MovementType.REFUND.name }
+                .map { it.accountingAmountMinor }.sumMoneyExact()
+            summaries.map { it.rolloverMinor }.sumMoneyExact()
+            summaries.map { it.availabilityMinor }.sumMoneyExact()
+            val netSpend = summaries.map { it.netSpendMinor }.sumMoneyExact()
+            val totalDays = Math.toIntExact(Math.subtractExact(period.endExclusive, period.start))
+            PocketMath.project(netSpend, elapsedDays = 1, totalDays = totalDays)
+        }
         require(payload.templates.all {
             it.name.isNotBlank() && it.amountMinor > 0 && it.pocketId in pocketIds &&
                 (it.paymentMethodId == null || it.paymentMethodId in methodIds) &&

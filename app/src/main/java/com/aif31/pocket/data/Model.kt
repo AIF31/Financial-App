@@ -225,9 +225,11 @@ sealed interface LedgerCommand {
 
 sealed interface LedgerResult {
     data object Success : LedgerResult
-    data class Rejected(val message: String) : LedgerResult
+    data class Rejected(val message: String, val kind: RejectionKind = RejectionKind.VALIDATION) : LedgerResult
     data class Deleted(val movement: Movement) : LedgerResult
 }
+
+enum class RejectionKind { VALIDATION, PERSISTENCE }
 
 interface PocketLedger {
     val state: kotlinx.coroutines.flow.Flow<LedgerState>

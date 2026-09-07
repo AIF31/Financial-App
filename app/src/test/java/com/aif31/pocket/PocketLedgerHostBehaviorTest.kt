@@ -10,6 +10,7 @@ import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerPreferencesEntity
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.MovementType
+import com.aif31.pocket.data.MovementEntity
 import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.data.PeriodPocketEntity
 import com.aif31.pocket.data.RolloverReleaseEntity
@@ -61,6 +62,105 @@ class PocketLedgerHostBehaviorTest {
             assertTrue(ledger.restoreBackup(invalid) is LedgerResult.Rejected)
             assertEquals(before.decodeToString(), ledger.exportBackup().decodeToString())
             assertEquals(period, ledger.state.first().currentPeriod)
+        }
+    }
+
+    @Test
+    fun overflowing_expense_aggregate_is_rejected_without_mutating_the_ledger() = runTest {
+        val lastDayClock = Clock.fixed(Instant.parse("2026-03-24T09:00:00Z"), zone)
+        val ledger = RoomPocketLedger(database, lastDayClock, zone)
+        ledger.execute(LedgerCommand.Initialize(Long.MAX_VALUE))
+        val state = ledger.state.first { !it.needsOnboarding }
+        val pocketId = state.pockets.first().pocket.id
+        val period = state.currentPeriod!!
+
+        assertEquals(
+            LedgerResult.Success,
+            ledger.execute(LedgerCommand.AddMovement(
+                pocketId = pocketId,
+                type = MovementType.EXPENSE,
+                accountingAmountMinor = Long.MAX_VALUE,
+                occurredAtUtcMillis = lastDayClock.millis(),
+                localDate = LocalDate.of(2026, 3, 24),
+            )),
+        )
+        assertTrue(ledger.execute(LedgerCommand.AddMovement(
+            pocketId = pocketId,
+            type = MovementType.EXPENSE,
+            accountingAmountMinor = 1,
+            occurredAtUtcMillis = lastDayClock.millis() + 1,
+            localDate = LocalDate.of(2026, 3, 24),
+        )) is LedgerResult.Rejected)
+
+        assertEquals(1, database.financeDao().movements().size)
+        assertEquals(Long.MAX_VALUE, ledger.state.first().movements.single().accountingAmountMinor)
+        assertEquals(period, ledger.state.first().currentPeriod)
+    }
+
+    @Test
+    fun allocation_and_currency_conversion_overflow_leave_existing_periods_unchanged() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(Long.MAX_VALUE))
+        val state = ledger.state.first { !it.needsOnboarding }
+        val period = state.currentPeriod!!
+        val pockets = state.pockets.take(2)
+        assertEquals(LedgerResult.Success, ledger.execute(
+            LedgerCommand.SetAllocation(period.id, pockets[0].pocket.id, Long.MAX_VALUE)
+        ))
+        assertTrue(ledger.execute(
+            LedgerCommand.SetAllocation(period.id, pockets[1].pocket.id, 1)
+        ) is LedgerResult.Rejected)
+        assertEquals(Long.MAX_VALUE, database.financeDao().allocations().sumOf { it.budgetMinor })
+
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ScheduleCurrencyChange(
+            targetCurrency = SupportedCurrency.USD,
+            rate = "2",
+            effectiveDate = period.endExclusive,
+            source = "OVERFLOW_TEST",
+        )))
+        assertTrue(ledger.execute(LedgerCommand.CreateNextPeriod()) is LedgerResult.Rejected)
+        assertEquals(1, database.financeDao().periods().size)
+    }
+
+    @Test
+    fun backup_with_overflowing_movement_totals_is_rejected_before_replacement() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(100_000))
+        val before = ledger.exportBackup()
+        val source = FinanceDatabase.inMemory(ApplicationProvider.getApplicationContext<Context>())
+        try {
+            val sourceLedger = RoomPocketLedger(source, clock, zone)
+            sourceLedger.execute(LedgerCommand.Initialize(Long.MAX_VALUE))
+            val dao = source.financeDao()
+            val period = dao.periods().single()
+            val pocket = dao.pockets().first()
+            fun movement(id: String, amount: Long) = MovementEntity(
+                id = id,
+                periodId = period.id,
+                pocketId = pocket.id,
+                type = MovementType.EXPENSE.name,
+                accountingAmountMinor = amount,
+                occurredAtUtcMillis = clock.millis(),
+                localEpochDay = LocalDate.of(2026, 2, 26).toEpochDay(),
+                zoneId = zone.id,
+                merchant = null,
+                note = null,
+                paymentMethodId = null,
+                originalAmountMinor = null,
+                originalCurrencyCode = SupportedCurrency.SAR.name,
+                conversionStatus = ConversionStatus.CONFIRMED.name,
+                rate = null,
+                conversionEffectiveEpochDay = null,
+                conversionSource = null,
+            )
+            dao.putMovements(listOf(movement("max", Long.MAX_VALUE), movement("overflow", 1)))
+            val invalid = sourceLedger.exportBackup()
+
+            assertFalse(ledger.previewBackup(invalid).valid)
+            assertTrue(ledger.restoreBackup(invalid) is LedgerResult.Rejected)
+            assertEquals(before.decodeToString(), ledger.exportBackup().decodeToString())
+        } finally {
+            source.close()
         }
     }
 
