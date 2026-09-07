@@ -29,7 +29,15 @@ data class Money(val minor: Long, val currencyCode: String) {
 
     companion object {
         fun parse(value: String, currencyCode: String): Money =
-            fromMajor(value, currencyCode, RoundingMode.UNNECESSARY)
+            fromMajor(normalizeUserInput(value), currencyCode, RoundingMode.UNNECESSARY)
+
+        private fun normalizeUserInput(value: String): String {
+            val trimmed = value.trim()
+            require(trimmed.matches(Regex("[+-]?[0-9]+(?:[.,][0-9]{1,2})?"))) {
+                "Formato monetario no válido"
+            }
+            return trimmed.replace(',', '.')
+        }
 
         fun fromMajor(
             value: String,

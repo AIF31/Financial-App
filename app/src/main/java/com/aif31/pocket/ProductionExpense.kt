@@ -110,6 +110,7 @@ internal fun ProductionMovementScreen(
                 ?: suggestion?.let { minorNumberForForm(it.amountMinor) }.orEmpty()
         )
     }
+    var amountEdited by rememberSaveable(stateKey) { mutableStateOf(false) }
     var selectedPocket by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.pocketId) }
     var refund by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.type == MovementType.REFUND) }
     var merchant by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.merchant ?: suggestion?.merchant.orEmpty()) }
@@ -145,6 +146,7 @@ internal fun ProductionMovementScreen(
     val inputCurrency = SupportedCurrency.fromCode(currency)
     val parsedDateForQuote = runCatching { LocalDate.parse(localDate) }.getOrNull()
     val parsedInputMinor = runCatching { Money.parse(amount, inputCurrency.name).minor }.getOrNull()
+    val amountIsInvalid = amountEdited && (parsedInputMinor == null || parsedInputMinor <= 0)
     val holder = remember(exchangeRates, initialMovement, initialAccountingCurrency, templateGeneration) {
         ExpenseEntryStateHolder(exchangeRates, initialMovement.takeIf { templateGeneration == 0 }, initialAccountingCurrency)
     }
@@ -323,16 +325,17 @@ internal fun ProductionMovementScreen(
                 OutlinedTextField(
                     value = amount,
                     onValueChange = {
-                        amount = it.filter { character -> character.isDigit() || character == '.' }
+                        amount = it
+                        amountEdited = true
                         if (error == "Escribe un importe válido") error = null
                     },
                     prefix = { Text(inputCurrency.name, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary) },
-                    supportingText = if (error == "Escribe un importe válido") {
-                        { Text(error.orEmpty()) }
+                    supportingText = if (amountIsInvalid || error == "Escribe un importe válido") {
+                        { Text("Escribe un importe válido") }
                     } else {
                         null
                     },
-                    isError = error == "Escribe un importe válido",
+                    isError = amountIsInvalid || error == "Escribe un importe válido",
                     singleLine = true,
                     textStyle = MaterialTheme.typography.displaySmall.copy(fontFamily = FontFamily.Monospace),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),

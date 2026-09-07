@@ -77,6 +77,22 @@ class ExpenseWorkflowHostTest {
         assertEquals(1_000L, runBlocking { ledger.state.first().movements.single().accountingAmountMinor })
     }
 
+    @Test fun comma_decimal_is_saved_and_a_negative_sign_is_never_discarded() {
+        compose.setContent {
+            ProductionMovementScreen(state, ledger, {}, {}, ledger.movementDefaults())
+        }
+        compose.onNodeWithTag("movement_amount").performTextInput("12,50")
+        compose.onNodeWithTag("movement_pocket_Supermercado").performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitUntilExactlyOneExists(hasText("Guardar gasto · SAR 12.50"), 5_000)
+        compose.onNodeWithTag("movement_save").assertIsEnabled()
+
+        compose.onNodeWithTag("movement_amount").performTextReplacement("-12,50")
+
+        compose.onNodeWithTag("movement_amount").assertTextContains("-12,50")
+        compose.onNodeWithText("Escribe un importe válido").assertIsDisplayed()
+        compose.onNodeWithTag("movement_save").assertIsNotEnabled()
+    }
+
     @Test fun applying_a_matching_template_requotes_instead_of_reusing_the_saved_conversion() {
         runBlocking {
             ledger.execute(LedgerCommand.AddMovement(

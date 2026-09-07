@@ -18,6 +18,19 @@ class DomainRulesTest {
     }
 
     @Test
+    fun `money uses one explicit decimal input policy without changing signs`() {
+        assertEquals(Money(1_250, "SAR"), Money.parse("12.50", "SAR"))
+        assertEquals(Money(1_250, "SAR"), Money.parse("12,50", "SAR"))
+        assertEquals(Money(-1_250, "SAR"), Money.parse("-12,50", "SAR"))
+
+        listOf("", "12..50", "12,5.0", "1 234.50", "1,234.50", "١٢٫٥٠").forEach { value ->
+            assertThrows(IllegalArgumentException::class.java) {
+                Money.parse(value, "SAR")
+            }
+        }
+    }
+
+    @Test
     fun `supported currencies normalize known codes and reject unsupported codes`() {
         assertEquals(SupportedCurrency.SAR, SupportedCurrency.fromCode("SAR"))
         assertEquals(SupportedCurrency.MXN, SupportedCurrency.fromCode("mxn"))
