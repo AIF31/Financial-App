@@ -3,17 +3,17 @@ package com.aif31.pocket
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.AtomicFile
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.activity.viewModels
 import androidx.lifecycle.lifecycleScope
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.ui.PocketTheme
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -22,9 +22,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
-    private var restoreCandidate by mutableStateOf<ByteArray?>(null)
-    private var operationMessage by mutableStateOf<String?>(null)
-    private var retryOperation by mutableStateOf<DocumentOperation?>(null)
+    private val recovery by viewModels<RecoveryViewModel>()
 
     private val createBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri == null) showOperationMessage("Creación de backup cancelada.")
@@ -41,7 +39,7 @@ class MainActivity : ComponentActivity() {
             val target = uri
             lifecycleScope.launch {
                 try {
-                    restoreCandidate = withContext(Dispatchers.IO) {
+                    val bytes = withContext(Dispatchers.IO) {
                         val input = contentResolver.openInputStream(target)
                             ?: throw IOException("The selected backup could not be opened")
                         input.use {
@@ -57,7 +55,8 @@ class MainActivity : ComponentActivity() {
                             output.toByteArray()
                         }
                     }
-                    retryOperation = null
+                    recovery.setRestoreCandidate(bytes)
+                    recovery.showOperationMessage(null)
                 } catch (error: Exception) {
                     if (error is CancellationException) throw error
                     showOperationMessage(
@@ -72,8 +71,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        operationMessage = savedInstanceState?.getString(STATE_OPERATION_MESSAGE)
-        retryOperation = savedInstanceState?.getString(STATE_RETRY_OPERATION)?.let(DocumentOperation::valueOf)
         enableEdgeToEdge()
         catchUpPeriods()
         val openExpense = intent?.action == ACTION_NEW_EXPENSE
@@ -85,13 +82,14 @@ class MainActivity : ComponentActivity() {
                     exchangeRates = (application as PocketApplication).exchangeRates,
                     reminderScheduler = (application as PocketApplication).reminderScheduler,
                     openNewExpense = openExpense,
-                    restoreCandidate = restoreCandidate,
-                    onRestoreCandidateHandled = { restoreCandidate = null },
-                    operationMessage = operationMessage,
-                    operationRetryLabel = retryOperation?.let { "Reintentar" },
+                    restoreCandidate = recovery.restoreCandidate,
+                    onRestoreCandidateHandled = recovery::clearRestoreCandidate,
+                    operationMessage = recovery.operationMessage,
+                    operationRetryLabel = recovery.retryOperation?.let { "Reintentar" },
                     onOperationMessageHandled = { showOperationMessage(null) },
                     onRetryOperation = ::retryDocumentOperation,
                     onCreateBackup = { launchDocumentOperation(DocumentOperation.BACKUP) },
+                    onShareBackup = { launchDocumentOperation(DocumentOperation.SHARE) },
                     onCreateCsv = { launchDocumentOperation(DocumentOperation.CSV) },
                     onPickBackup = { launchDocumentOperation(DocumentOperation.RESTORE) },
                     onSuccessfulRestore = {
@@ -104,12 +102,6 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
-    }
-
-    override fun onSaveInstanceState(outState: Bundle) {
-        operationMessage?.let { outState.putString(STATE_OPERATION_MESSAGE, it) }
-        retryOperation?.let { outState.putString(STATE_RETRY_OPERATION, it.name) }
-        super.onSaveInstanceState(outState)
     }
 
     override fun onResume() {
@@ -125,22 +117,68 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun launchDocumentOperation(operation: DocumentOperation) {
+    internal fun launchDocumentOperation(operation: DocumentOperation) {
         showOperationMessage(null)
         when (operation) {
             DocumentOperation.BACKUP -> createBackup.launch("pocket-${java.time.LocalDate.now()}.pocketbackup")
+            DocumentOperation.SHARE -> shareBackup()
             DocumentOperation.CSV -> createCsv.launch("pocket-movimientos-${java.time.LocalDate.now()}.csv")
             DocumentOperation.RESTORE -> openBackup.launch(arrayOf("application/octet-stream", "application/json", "*/*"))
         }
     }
 
     private fun retryDocumentOperation() {
-        retryOperation?.let(::launchDocumentOperation)
+        recovery.retryOperation?.let { operation ->
+            if (operation == DocumentOperation.SHARE) shareExistingBackup() else launchDocumentOperation(operation)
+        }
     }
 
     private fun showOperationMessage(message: String?, retry: DocumentOperation? = null) {
-        operationMessage = message
-        retryOperation = retry
+        recovery.showOperationMessage(message, retry)
+    }
+
+    private fun shareBackup() {
+        lifecycleScope.launch {
+            try {
+                val file = withContext(Dispatchers.IO) {
+                    val bytes = (application as PocketApplication).ledger.exportBackup()
+                    val directory = File(cacheDir, SHARED_BACKUP_DIRECTORY).apply { mkdirs() }
+                    val target = AtomicFile(File(directory, "pocket-${java.time.LocalDate.now()}.pocketbackup"))
+                    val output = target.startWrite()
+                    try {
+                        output.write(bytes)
+                        target.finishWrite(output)
+                    } catch (error: Exception) {
+                        target.failWrite(output)
+                        throw error
+                    }
+                    target.baseFile
+                }
+                BackupShareLauncher.share(this@MainActivity, file)
+                showOperationMessage("Selector para compartir abierto.")
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                showOperationMessage(
+                    "No se pudo compartir el backup. Comprueba las aplicaciones disponibles y vuelve a intentarlo.",
+                    DocumentOperation.SHARE,
+                )
+            }
+        }
+    }
+
+    private fun shareExistingBackup() {
+        showOperationMessage(null)
+        try {
+            val file = File(cacheDir, SHARED_BACKUP_DIRECTORY).listFiles()?.maxByOrNull { it.lastModified() }
+                ?: throw IOException("No prepared backup is available")
+            BackupShareLauncher.share(this, file)
+            showOperationMessage("Selector para compartir abierto.")
+        } catch (_: Exception) {
+            showOperationMessage(
+                "No se pudo compartir el backup. Comprueba las aplicaciones disponibles y vuelve a intentarlo.",
+                DocumentOperation.SHARE,
+            )
+        }
     }
 
     private fun writeExport(uri: Uri, operation: DocumentOperation) {
@@ -169,9 +207,6 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val ACTION_NEW_EXPENSE = "com.aif31.pocket.NEW_EXPENSE"
         private const val MAX_BACKUP_BYTES = 10 * 1024 * 1024
-        private const val STATE_OPERATION_MESSAGE = "operation_message"
-        private const val STATE_RETRY_OPERATION = "retry_operation"
+        private const val SHARED_BACKUP_DIRECTORY = "shared_backups"
     }
 }
-
-private enum class DocumentOperation { BACKUP, CSV, RESTORE }

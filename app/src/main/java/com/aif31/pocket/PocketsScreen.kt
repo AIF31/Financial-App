@@ -553,13 +553,9 @@ private fun PocketManagementDialog(
         confirmButton = {
             Button(onClick = {
                 scope.launch {
-                    val parsed = if (amount.text.isBlank()) {
-                        0L
-                    } else {
-                        runCatching { Money.parse(amount.text, currency.name).minor }.getOrNull() ?: run {
-                            error = "Escribe un presupuesto válido"
-                            return@launch
-                        }
+                    val parsed = runCatching { Money.parse(amount.text, currency.name).minor }.getOrNull() ?: run {
+                        error = "Escribe un presupuesto válido"
+                        return@launch
                     }
                     when (val result = ledger.execute(LedgerCommand.SetAllocation(periodId, summary.pocket.id, parsed))) {
                         LedgerResult.Success -> onDismiss()

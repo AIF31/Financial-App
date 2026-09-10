@@ -15,6 +15,7 @@ import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.data.PeriodPocketEntity
 import com.aif31.pocket.data.RolloverReleaseEntity
 import com.aif31.pocket.data.RecurringTemplateEntity
+import com.aif31.pocket.data.RejectionKind
 import com.aif31.pocket.data.RoomPocketLedger
 import com.aif31.pocket.domain.SupportedCurrency
 import java.time.Clock
@@ -95,6 +96,72 @@ class PocketLedgerHostBehaviorTest {
         assertEquals(1, database.financeDao().movements().size)
         assertEquals(Long.MAX_VALUE, ledger.state.first().movements.single().accountingAmountMinor)
         assertEquals(period, ledger.state.first().currentPeriod)
+    }
+
+    @Test
+    fun overflowing_refund_aggregate_is_rejected_without_mutating_the_ledger() = runTest {
+        val lastDayClock = Clock.fixed(Instant.parse("2026-03-24T09:00:00Z"), zone)
+        val ledger = RoomPocketLedger(database, lastDayClock, zone)
+        ledger.execute(LedgerCommand.Initialize(Long.MAX_VALUE))
+        val pocketId = ledger.state.first { !it.needsOnboarding }.pockets.first().pocket.id
+
+        assertEquals(
+            LedgerResult.Success,
+            ledger.execute(LedgerCommand.AddMovement(
+                id = "max-refund",
+                pocketId = pocketId,
+                type = MovementType.REFUND,
+                accountingAmountMinor = Long.MAX_VALUE,
+                occurredAtUtcMillis = lastDayClock.millis(),
+                localDate = LocalDate.of(2026, 3, 24),
+            )),
+        )
+        assertTrue(ledger.execute(LedgerCommand.AddMovement(
+            id = "overflow-refund",
+            pocketId = pocketId,
+            type = MovementType.REFUND,
+            accountingAmountMinor = 1,
+            occurredAtUtcMillis = lastDayClock.millis() + 1,
+            localDate = LocalDate.of(2026, 3, 24),
+        )) is LedgerResult.Rejected)
+
+        assertEquals(listOf("max-refund"), database.financeDao().movements().map { it.id })
+        assertEquals(Long.MAX_VALUE, ledger.state.first().movements.single().accountingAmountMinor)
+    }
+
+    @Test
+    fun deleting_a_refund_is_rejected_when_the_prospective_projection_overflows() = runTest {
+        val lastDayClock = Clock.fixed(Instant.parse("2026-03-24T09:00:00Z"), zone)
+        val setupLedger = RoomPocketLedger(database, lastDayClock, zone)
+        setupLedger.execute(LedgerCommand.Initialize(Long.MAX_VALUE))
+        val pocketId = setupLedger.state.first { !it.needsOnboarding }.pockets.first().pocket.id
+        assertEquals(LedgerResult.Success, setupLedger.execute(LedgerCommand.AddMovement(
+            id = "near-limit-expense",
+            pocketId = pocketId,
+            type = MovementType.EXPENSE,
+            accountingAmountMinor = Long.MAX_VALUE,
+            occurredAtUtcMillis = lastDayClock.millis(),
+            localDate = LocalDate.of(2026, 3, 24),
+        )))
+        assertEquals(LedgerResult.Success, setupLedger.execute(LedgerCommand.AddMovement(
+            id = "balancing-refund",
+            pocketId = pocketId,
+            type = MovementType.REFUND,
+            accountingAmountMinor = Long.MAX_VALUE - 1,
+            occurredAtUtcMillis = lastDayClock.millis() + 1,
+            localDate = LocalDate.of(2026, 3, 24),
+        )))
+        val ledger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone),
+            zone,
+        )
+        val before = ledger.exportBackup()
+
+        assertTrue(ledger.execute(LedgerCommand.DeleteMovement("balancing-refund")) is LedgerResult.Rejected)
+
+        assertEquals(before.decodeToString(), ledger.exportBackup().decodeToString())
+        assertEquals(setOf("near-limit-expense", "balancing-refund"), ledger.state.first().movements.mapTo(mutableSetOf()) { it.id })
     }
 
     @Test
@@ -191,6 +258,59 @@ class PocketLedgerHostBehaviorTest {
         } finally {
             sourceDatabase.close()
         }
+    }
+
+    @Test
+    fun restore_preflight_rejects_catch_up_conversion_overflow_and_preserves_the_current_ledger() = runTest {
+        val sourceDatabase = FinanceDatabase.inMemory(ApplicationProvider.getApplicationContext<Context>())
+        val backup = try {
+            val source = RoomPocketLedger(sourceDatabase, clock, zone)
+            source.execute(LedgerCommand.Initialize(Long.MAX_VALUE))
+            val period = source.state.first { !it.needsOnboarding }.currentPeriod!!
+            source.execute(LedgerCommand.ScheduleCurrencyChange(
+                targetCurrency = SupportedCurrency.USD,
+                rate = "2",
+                effectiveDate = period.endExclusive,
+                source = "OVERFLOW_TEST",
+            ))
+            source.exportBackup()
+        } finally {
+            sourceDatabase.close()
+        }
+        val restoreClock = Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone)
+        val target = RoomPocketLedger(database, restoreClock, zone)
+        target.execute(LedgerCommand.Initialize(10_000))
+        val before = target.exportBackup()
+
+        assertFalse(target.previewBackup(backup).valid)
+        assertTrue(target.restoreBackup(backup) is LedgerResult.Rejected)
+        assertEquals(before.decodeToString(), target.exportBackup().decodeToString())
+        assertEquals(10_000L, target.state.first().newFundsMinor)
+    }
+
+    @Test
+    fun restore_commit_failure_is_classified_as_persistence_and_rolls_back_replacement() = runTest {
+        val sourceDatabase = FinanceDatabase.inMemory(ApplicationProvider.getApplicationContext<Context>())
+        val backup = try {
+            val source = RoomPocketLedger(sourceDatabase, clock, zone)
+            source.execute(LedgerCommand.Initialize(75_000))
+            source.exportBackup()
+        } finally {
+            sourceDatabase.close()
+        }
+        val target = RoomPocketLedger(database, clock, zone)
+        target.execute(LedgerCommand.Initialize(10_000))
+        val before = target.exportBackup()
+        database.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER fail_restore BEFORE INSERT ON periods " +
+                "BEGIN SELECT RAISE(ABORT, 'forced restore failure'); END",
+        )
+
+        val result = target.restoreBackup(backup) as LedgerResult.Rejected
+
+        assertEquals(RejectionKind.PERSISTENCE, result.kind)
+        assertEquals(before.decodeToString(), target.exportBackup().decodeToString())
+        assertEquals(10_000L, target.state.first().newFundsMinor)
     }
 
     @Test

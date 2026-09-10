@@ -27,6 +27,7 @@ This is a single-context repository. See `docs/agents/domain.md`.
 
 ### Model delegation
 
+- Before spawning an agent, read `.agents/skills/handoff/SKILL.md` and use its guidance to prepare the delegated context.
+
+### For gpt-6-astra model:
 - Delegate documentation changes to `gpt-5.6-luna max`.
-- Delegate code changes to `gpt-5.6-sol medium`.
-- The primary agent owns orchestration and validation.

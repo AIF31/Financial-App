@@ -78,6 +78,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import com.aif31.pocket.fx.ExchangeRateRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 @Serializable
 private enum class RootScreen(val label: String, val icon: ImageVector) {
@@ -112,6 +115,7 @@ fun PocketApp(
     onOperationMessageHandled: () -> Unit = {},
     onRetryOperation: () -> Unit = {},
     onCreateBackup: () -> Unit = {},
+    onShareBackup: () -> Unit = {},
     onCreateCsv: () -> Unit = {},
     onPickBackup: () -> Unit = {},
     onRequestNotificationPermission: () -> Unit = {},
@@ -124,12 +128,12 @@ fun PocketApp(
     val preferenceState by preferencesFlow.collectAsStateWithLifecycle(initialValue = AppPreferences())
     var backupPreview by remember { mutableStateOf<com.aif31.pocket.data.BackupPreview?>(null) }
     var restoreError by rememberSaveable { mutableStateOf<String?>(null) }
-    var restoreInProgress by rememberSaveable { mutableStateOf(false) }
+    var restoreInProgress by remember { mutableStateOf(false) }
     LaunchedEffect(restoreCandidate) {
         restoreError = null
         backupPreview = restoreCandidate?.let { ledger.previewBackup(it) }
     }
-    operationMessage?.let { message ->
+    operationMessage?.takeIf { observedState?.needsOnboarding != true }?.let { message ->
         AlertDialog(
             onDismissRequest = onOperationMessageHandled,
             title = { Text(if (operationRetryLabel == null) "Operación de documentos" else "La operación falló") },
@@ -177,32 +181,36 @@ fun PocketApp(
                     onClick = {
                     restoreInProgress = true
                     scope.launch {
-                        when (val result = ledger.restoreBackup(restoreCandidate)) {
-                            LedgerResult.Success -> {
-                                runCatching { onSuccessfulRestore() }
-                                val restored = ledger.state.first { !it.needsOnboarding }
-                                val latest = restored.periods.maxByOrNull { it.start }
-                                val preferredStartDay = latest?.configuredStartDay ?: preferenceState.futurePeriodStartDay
-                                preferences?.setFuturePeriodStartDay(preferredStartDay)
-                                when (val catchUp = ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay))) {
-                                    LedgerResult.Success -> {
-                                        ledger.state.first { it.currentPeriod != null }
-                                        onRestoreCompleted(
-                                            "Backup restaurado: ${preview.periods} periodos, " +
-                                                "${preview.pockets} Pockets y ${preview.movements} movimientos.",
-                                        )
-                                        onRestoreCandidateHandled()
-                                        backupPreview = null
-                                        restoreError = null
+                        try {
+                            when (val result = ledger.restoreBackup(restoreCandidate)) {
+                                LedgerResult.Success -> withContext(NonCancellable) {
+                                    val restored = ledger.state.first { it.currentPeriod != null }
+                                    val preferredStartDay = restored.periods.maxBy { it.start }.configuredStartDay
+                                    val preferenceWarning = try {
+                                        preferences?.setFuturePeriodStartDay(preferredStartDay)
+                                        null
+                                    } catch (_: Exception) {
+                                        " No se pudo actualizar el día preferido; puedes cambiarlo en Ajustes."
                                     }
-                                    is LedgerResult.Rejected -> restoreError = catchUp.message
-                                    is LedgerResult.Deleted -> Unit
+                                    runCatching { onSuccessfulRestore() }
+                                    onRestoreCompleted(
+                                        "Backup restaurado: ${preview.periods} periodos, " +
+                                            "${preview.pockets} Pockets y ${preview.movements} movimientos." +
+                                            preferenceWarning.orEmpty(),
+                                    )
+                                    onRestoreCandidateHandled()
+                                    backupPreview = null
+                                    restoreError = null
                                 }
+                                is LedgerResult.Rejected -> restoreError = result.message
+                                is LedgerResult.Deleted -> Unit
                             }
-                            is LedgerResult.Rejected -> restoreError = result.message
-                            is LedgerResult.Deleted -> Unit
+                        } catch (error: CancellationException) {
+                            restoreError = "Restauración cancelada. No se modificaron los datos."
+                            throw error
+                        } finally {
+                            restoreInProgress = false
                         }
-                        restoreInProgress = false
                     }
                 }) { Text(if (restoreInProgress) "Restaurando…" else if (observedState?.needsOnboarding == false) "Restaurar y reemplazar" else "Restaurar") }
             },
@@ -220,7 +228,15 @@ fun PocketApp(
         return
     }
     if (state.needsOnboarding) {
-        OnboardingScreen(ledger, preferences, onPickBackup)
+        OnboardingScreen(
+            ledger = ledger,
+            preferences = preferences,
+            onPickBackup = onPickBackup,
+            operationMessage = operationMessage,
+            operationRetryLabel = operationRetryLabel,
+            onOperationMessageHandled = onOperationMessageHandled,
+            onRetryOperation = onRetryOperation,
+        )
         return
     }
     if (state.currentPeriod == null) {
@@ -370,6 +386,7 @@ fun PocketApp(
                         exchangeRates = exchangeRates,
                         reminderScheduler = reminderScheduler,
                         onCreateBackup = onCreateBackup,
+                        onShareBackup = onShareBackup,
                         onCreateCsv = onCreateCsv,
                         onPickBackup = onPickBackup,
                         onRequestNotificationPermission = onRequestNotificationPermission,
@@ -390,7 +407,15 @@ fun PocketApp(
 }
 
 @Composable
-private fun OnboardingScreen(ledger: PocketLedger, preferences: PreferencesStore?, onPickBackup: () -> Unit) {
+private fun OnboardingScreen(
+    ledger: PocketLedger,
+    preferences: PreferencesStore?,
+    onPickBackup: () -> Unit,
+    operationMessage: String?,
+    operationRetryLabel: String?,
+    onOperationMessageHandled: () -> Unit,
+    onRetryOperation: () -> Unit,
+) {
     var funds by rememberSaveable { mutableStateOf("") }
     var startDay by rememberSaveable { mutableStateOf("25") }
     var accountingCurrency by rememberSaveable { mutableStateOf(SupportedCurrency.SAR) }
@@ -420,6 +445,28 @@ private fun OnboardingScreen(ledger: PocketLedger, preferences: PreferencesStore
                     "Empieza con tus fondos del periodo. Después podrás repartirlos entre Pockets.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                operationMessage?.let { message ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                if (operationRetryLabel == null) "Operación de documentos" else "La operación falló",
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(message)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (operationRetryLabel != null) {
+                                    Button(onClick = onRetryOperation) { Text(operationRetryLabel) }
+                                }
+                                TextButton(onClick = onOperationMessageHandled) {
+                                    Text(if (operationRetryLabel == null) "Aceptar" else "Cerrar")
+                                }
+                            }
+                        }
+                    }
+                }
                 Card(Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier.padding(20.dp),

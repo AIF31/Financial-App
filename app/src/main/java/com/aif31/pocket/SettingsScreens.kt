@@ -43,6 +43,7 @@ internal fun SettingsScreen(
     exchangeRates: ExchangeRateRepository? = null,
     reminderScheduler: ReminderScheduler?,
     onCreateBackup: () -> Unit,
+    onShareBackup: () -> Unit = {},
     onCreateCsv: () -> Unit,
     onPickBackup: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
@@ -86,6 +87,7 @@ internal fun SettingsScreen(
         preferencesStore = preferencesStore,
         reminderScheduler = reminderScheduler,
         onCreateBackup = onCreateBackup,
+        onShareBackup = onShareBackup,
         onCreateCsv = onCreateCsv,
         onPickBackup = onPickBackup,
         onRequestNotificationPermission = onRequestNotificationPermission,
@@ -211,6 +213,7 @@ private fun SettingsDetailScreen(
     preferencesStore: PreferencesStore?,
     reminderScheduler: ReminderScheduler?,
     onCreateBackup: () -> Unit,
+    onShareBackup: () -> Unit,
     onCreateCsv: () -> Unit,
     onPickBackup: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
@@ -262,7 +265,12 @@ private fun SettingsDetailScreen(
                     }) { Text(if (period.id == selectedFundsPeriodId) "✓ ${period.start}" else period.start.toString()) }
                 }
             }
-            OutlinedTextField(funds, { funds = it }, label = { Text("Fondos nuevos ${selectedFundsCurrency.name}") })
+            OutlinedTextField(
+                funds,
+                { funds = it },
+                label = { Text("Fondos nuevos ${selectedFundsCurrency.name}") },
+                modifier = Modifier.testTag("period_funds"),
+            )
             Button(onClick = {
                 scope.launch {
                     val value = runCatching { Money.parse(funds, selectedFundsCurrency.name).minor }.getOrNull() ?: run {
@@ -498,9 +506,10 @@ private fun SettingsDetailScreen(
             item {
                 Text("Portabilidad", style = MaterialTheme.typography.titleLarge)
             Button(onClick = onCreateBackup) { Text("Crear backup completo") }
+            OutlinedButton(onClick = onShareBackup) { Text("Compartir backup") }
             OutlinedButton(onClick = onPickBackup) { Text("Restaurar backup") }
             OutlinedButton(onClick = onCreateCsv) { Text("Exportar CSV") }
-                Text("El CSV no está cifrado y no sirve para restaurar.")
+                Text("El backup y el CSV no están cifrados. El CSV no sirve para restaurar.")
             }
         }
     }

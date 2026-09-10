@@ -2,12 +2,12 @@ package com.aif31.pocket.data
 
 import androidx.room.withTransaction
 import com.aif31.pocket.domain.FrozenRate
-import com.aif31.pocket.domain.PocketMath
 import com.aif31.pocket.domain.SupportedCurrency
-import com.aif31.pocket.domain.sumMoneyExact
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
+import java.time.ZoneId
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNames
@@ -95,22 +95,24 @@ internal object BackupCodec {
         return json.encodeToString(BackupPayload.serializer(), payload).toByteArray(StandardCharsets.UTF_8)
     }
 
-    fun preview(bytes: ByteArray, today: LocalDate): BackupPreview = try {
-        val payload = decodeAndValidate(bytes, today)
+    fun preview(bytes: ByteArray, today: LocalDate, zoneId: ZoneId): BackupPreview = try {
+        val payload = decodeValidateAndPlan(bytes, today, zoneId).payload
         BackupPreview(payload.version, payload.periods.size, payload.pockets.size, payload.movements.size, valid = true)
     } catch (error: Exception) {
         BackupPreview(0, 0, 0, 0, valid = false, message = error.message ?: "Backup inválido")
     }
 
-    suspend fun restore(database: FinanceDatabase, bytes: ByteArray, today: LocalDate): LedgerResult {
-        val payload = try {
-            decodeAndValidate(bytes, today)
+    suspend fun restore(database: FinanceDatabase, bytes: ByteArray, today: LocalDate, zoneId: ZoneId): LedgerResult {
+        val restored = try {
+            decodeValidateAndPlan(bytes, today, zoneId)
         } catch (error: Exception) {
+            if (error is CancellationException) throw error
             return LedgerResult.Rejected(error.message ?: "Backup inválido")
         }
         return try {
             database.withTransaction {
                 val dao = database.financeDao()
+                val payload = restored.payload
                 dao.clearPendingCurrencyChange()
                 dao.clearLedgerPreferences()
                 dao.clearMovementSuggestions()
@@ -122,15 +124,15 @@ internal object BackupCodec {
                 dao.clearPaymentMethods()
                 dao.clearPockets()
                 dao.clearPeriods()
-                dao.putPeriodEntities(payload.periods.map { it.toEntity() })
+                dao.putPeriodEntities(restored.catchUp.periods)
                 dao.putPockets(payload.pockets.map { it.toEntity() })
                 dao.putPaymentMethods(payload.paymentMethods.map { it.toEntity() })
-                dao.putPeriodPockets(payload.periodPockets.map { it.toEntity() })
-                dao.putAllocations(payload.allocations.map { it.toEntity() })
-                dao.putRolloverReleases(payload.rolloverReleases.map { it.toEntity() })
+                dao.putPeriodPockets(restored.catchUp.periodPockets)
+                dao.putAllocations(restored.catchUp.allocations)
+                dao.putRolloverReleases(restored.catchUp.rolloverReleases)
                 dao.putMovements(payload.movements.map { it.toEntity() })
                 dao.putTemplates(payload.templates.map { it.toEntity() })
-                payload.pendingCurrencyChange?.let { dao.putPendingCurrencyChange(it.toEntity()) }
+                restored.catchUp.pendingCurrencyChange?.let { dao.putPendingCurrencyChange(it) }
                 val restoredPreferences = payload.ledgerPreferences ?: LedgerPreferencesDto(
                     payload.paymentMethods.firstOrNull {
                         !it.archived && it.name.equals("Tarjeta", ignoreCase = true)
@@ -140,8 +142,36 @@ internal object BackupCodec {
             }
             LedgerResult.Success
         } catch (error: Exception) {
-            LedgerResult.Rejected(error.message ?: "No se pudo restaurar el backup")
+            if (error is CancellationException) throw error
+            LedgerResult.Rejected(
+                error.message ?: "No se pudo restaurar el backup",
+                RejectionKind.PERSISTENCE,
+            )
         }
+    }
+
+    private fun decodeValidateAndPlan(bytes: ByteArray, today: LocalDate, zoneId: ZoneId): RestoredLedger {
+        val payload = decodeAndValidate(bytes, today)
+        val periods = payload.periods.map { it.toEntity() }
+        val pockets = payload.pockets.map { it.toEntity() }
+        val allocations = payload.allocations.map { it.toEntity() }
+        val periodPockets = payload.periodPockets.map { it.toEntity() }
+        val releases = payload.rolloverReleases.map { it.toEntity() }
+        val movements = payload.movements.map { it.toEntity() }
+        val latest = periods.maxBy { it.startEpochDay }
+        val catchUp = PeriodLedgerRules.catchUp(
+            periods = periods,
+            pockets = pockets,
+            allocations = allocations,
+            periodPockets = periodPockets,
+            rolloverReleases = releases,
+            movements = movements,
+            pendingCurrencyChange = payload.pendingCurrencyChange?.toEntity(),
+            preferredStartDay = latest.configuredStartDay,
+            today = today,
+            zoneId = zoneId,
+        )
+        return RestoredLedger(payload, catchUp)
     }
 
     suspend fun csv(database: FinanceDatabase): ByteArray {
@@ -310,38 +340,12 @@ internal object BackupCodec {
                     originalAmountIsValid && rateIsValid && provenanceIsValid
                 }.getOrDefault(false)
         }) { "Relación de movimiento inválida" }
-        payload.periods.forEach { period ->
-            val periodAllocations = payload.allocations.filter { it.periodId == period.id }
-            val periodMovements = payload.movements.filter { it.periodId == period.id }
-            val summaries = (periodAllocations.map { it.pocketId } + periodMovements.map { it.pocketId })
-                .distinct()
-                .map { pocketId ->
-                    val allocation = periodAllocations.firstOrNull { it.pocketId == pocketId }
-                    val pocketMovements = periodMovements.filter { it.pocketId == pocketId }
-                    PocketMath.summary(
-                        budgetMinor = allocation?.budgetMinor ?: 0,
-                        rolloverMinor = allocation?.rolloverMinor ?: 0,
-                        expensesMinor = pocketMovements.filter { it.type == MovementType.EXPENSE.name }
-                            .map { it.accountingAmountMinor }.sumMoneyExact(),
-                        refundsMinor = pocketMovements.filter { it.type == MovementType.REFUND.name }
-                            .map { it.accountingAmountMinor }.sumMoneyExact(),
-                    )
-                }
-            periodMovements.filter { it.type == MovementType.EXPENSE.name }
-                .map { it.accountingAmountMinor }.sumMoneyExact()
-            periodMovements.filter { it.type == MovementType.REFUND.name }
-                .map { it.accountingAmountMinor }.sumMoneyExact()
-            summaries.map { it.rolloverMinor }.sumMoneyExact()
-            summaries.map { it.availabilityMinor }.sumMoneyExact()
-            val releasedRollover = payload.rolloverReleases.filter { it.periodId == period.id }
-                .map { it.amountMinor }.sumMoneyExact()
-            Math.addExact(
-                Math.subtractExact(period.newFundsMinor, periodAllocations.map { it.budgetMinor }.sumMoneyExact()),
-                releasedRollover,
-            )
-            val netSpend = summaries.map { it.netSpendMinor }.sumMoneyExact()
-            val totalDays = Math.toIntExact(Math.subtractExact(period.endExclusive, period.start))
-            PocketMath.project(netSpend, elapsedDays = 1, totalDays = totalDays)
+        val periodEntities = payload.periods.map { it.toEntity() }
+        val allocationEntities = payload.allocations.map { it.toEntity() }
+        val movementEntities = payload.movements.map { it.toEntity() }
+        val releaseEntities = payload.rolloverReleases.map { it.toEntity() }
+        periodEntities.forEach { period ->
+            PeriodLedgerRules.validateTotals(period, allocationEntities, movementEntities, releaseEntities, today)
         }
         require(payload.templates.all {
             it.name.isNotBlank() && it.amountMinor > 0 && it.pocketId in pocketIds &&
@@ -381,7 +385,9 @@ internal object BackupCodec {
     private val CSV_FORMULA_PREFIXES = setOf('=', '+', '-', '@')
 }
 
-private suspend fun FinanceDao.putPeriodEntities(values: List<PeriodEntity>) {
+private data class RestoredLedger(val payload: BackupPayload, val catchUp: CatchUpPlan)
+
+internal suspend fun FinanceDao.putPeriodEntities(values: List<PeriodEntity>) {
     values.forEach { putPeriod(it) }
 }
 

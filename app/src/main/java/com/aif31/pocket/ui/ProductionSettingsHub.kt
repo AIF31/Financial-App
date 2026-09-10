@@ -35,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.Serializable
 
@@ -88,7 +89,7 @@ internal fun ProductionSettingsHub(
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize().testTag("settings_hub"),
         contentPadding = PaddingValues(
             start = 16.dp,
             top = contentPadding.calculateTopPadding() + 16.dp,
