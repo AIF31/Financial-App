@@ -29,7 +29,15 @@ data class Money(val minor: Long, val currencyCode: String) {
 
     companion object {
         fun parse(value: String, currencyCode: String): Money =
-            fromMajor(value, currencyCode, RoundingMode.UNNECESSARY)
+            fromMajor(normalizeUserInput(value), currencyCode, RoundingMode.UNNECESSARY)
+
+        private fun normalizeUserInput(value: String): String {
+            val trimmed = value.trim()
+            require(trimmed.matches(Regex("[+-]?[0-9]+(?:[.,][0-9]{1,2})?"))) {
+                "Formato monetario no válido"
+            }
+            return trimmed.replace(',', '.')
+        }
 
         fun fromMajor(
             value: String,
@@ -143,6 +151,8 @@ data class PocketSummary(
 
 data class SpendProjection(val amountMinor: Long, val estimated: Boolean = true)
 
+internal fun Iterable<Long>.sumMoneyExact(): Long = fold(0L, Math::addExact)
+
 object PocketMath {
     fun summary(
         budgetMinor: Long,
@@ -155,21 +165,24 @@ object PocketMath {
         val netSpend = Math.subtractExact(expensesMinor, refundsMinor)
         val availability = Math.subtractExact(availableBudget, netSpend)
         val consumed = when {
-            availableBudget == 0L && netSpend <= 0L -> 0
-            availableBudget == 0L -> 100
+            availableBudget == 0L && netSpend <= 0L -> BigInteger.ZERO
+            availableBudget == 0L -> BigInteger.valueOf(100)
             else -> BigInteger.valueOf(netSpend)
                 .multiply(BigInteger.valueOf(100))
                 .divide(BigInteger.valueOf(availableBudget))
-                .toInt()
         }
+        require(consumed in BigInteger.valueOf(Int.MIN_VALUE.toLong())..BigInteger.valueOf(Int.MAX_VALUE.toLong())) {
+            "El porcentaje supera el rango admitido"
+        }
+        val consumedPercent = consumed.toInt()
         return PocketSummary(
             budgetMinor = budgetMinor,
             rolloverMinor = rolloverMinor,
             netSpendMinor = netSpend,
             availabilityMinor = availability,
-            consumedPercent = consumed,
-            atRisk = consumed >= 80,
-            exhausted = consumed >= 100,
+            consumedPercent = consumedPercent,
+            atRisk = consumedPercent >= 80,
+            exhausted = consumedPercent >= 100,
         )
     }
 

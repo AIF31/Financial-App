@@ -43,6 +43,7 @@ internal fun SettingsScreen(
     exchangeRates: ExchangeRateRepository? = null,
     reminderScheduler: ReminderScheduler?,
     onCreateBackup: () -> Unit,
+    onShareBackup: () -> Unit = {},
     onCreateCsv: () -> Unit,
     onPickBackup: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
@@ -70,6 +71,15 @@ internal fun SettingsScreen(
         )
         return
     }
+    if (selectedSection == SettingsSection.NOTIFICATION_ASSISTANCE) {
+        NotificationAssistanceSettings(
+            preferences = preferences,
+            preferencesStore = preferencesStore,
+            padding = padding,
+            onBack = { onSectionChange(null) },
+        )
+        return
+    }
     SettingsDetailScreen(
         state = state,
         ledger = ledger,
@@ -77,6 +87,7 @@ internal fun SettingsScreen(
         preferencesStore = preferencesStore,
         reminderScheduler = reminderScheduler,
         onCreateBackup = onCreateBackup,
+        onShareBackup = onShareBackup,
         onCreateCsv = onCreateCsv,
         onPickBackup = onPickBackup,
         onRequestNotificationPermission = onRequestNotificationPermission,
@@ -202,6 +213,7 @@ private fun SettingsDetailScreen(
     preferencesStore: PreferencesStore?,
     reminderScheduler: ReminderScheduler?,
     onCreateBackup: () -> Unit,
+    onShareBackup: () -> Unit,
     onCreateCsv: () -> Unit,
     onPickBackup: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
@@ -220,7 +232,7 @@ private fun SettingsDetailScreen(
     var templateAmount by rememberSaveable { mutableStateOf("") }
     var templatePocketId by rememberSaveable { mutableStateOf<String?>(null) }
     var templateMethodId by rememberSaveable { mutableStateOf<String?>(null) }
-    var templateInputCurrency by rememberSaveable { mutableStateOf(SupportedCurrency.SAR) }
+    var templateInputCurrency by rememberSaveable { mutableStateOf(preferences.defaultExpenseCurrency) }
     var editingTemplate by rememberSaveable { mutableStateOf<String?>(null) }
     var message by rememberSaveable { mutableStateOf<String?>(null) }
     var reminderPermissionRationaleVisible by rememberSaveable { mutableStateOf(false) }
@@ -253,7 +265,12 @@ private fun SettingsDetailScreen(
                     }) { Text(if (period.id == selectedFundsPeriodId) "✓ ${period.start}" else period.start.toString()) }
                 }
             }
-            OutlinedTextField(funds, { funds = it }, label = { Text("Fondos nuevos ${selectedFundsCurrency.name}") })
+            OutlinedTextField(
+                funds,
+                { funds = it },
+                label = { Text("Fondos nuevos ${selectedFundsCurrency.name}") },
+                modifier = Modifier.testTag("period_funds"),
+            )
             Button(onClick = {
                 scope.launch {
                     val value = runCatching { Money.parse(funds, selectedFundsCurrency.name).minor }.getOrNull() ?: run {
@@ -405,6 +422,13 @@ private fun SettingsDetailScreen(
                 Text("Plantillas recurrentes", style = MaterialTheme.typography.titleLarge)
             Text("Solo precargan el formulario; nunca crean gastos automáticamente.")
             OutlinedTextField(templateName, { templateName = it }, label = { Text("Nombre de plantilla") })
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SupportedCurrency.entries.forEach { currency ->
+                    OutlinedButton(onClick = { templateInputCurrency = currency }) {
+                        Text(if (templateInputCurrency == currency) "✓ ${currency.name}" else currency.name)
+                    }
+                }
+            }
             OutlinedTextField(
                 templateAmount,
                 { templateAmount = it },
@@ -450,7 +474,7 @@ private fun SettingsDetailScreen(
                     )) {
                         LedgerResult.Success -> {
                             templateName = ""; templateAmount = ""; templatePocketId = null; templateMethodId = null
-                            templateInputCurrency = SupportedCurrency.SAR
+                            templateInputCurrency = preferences.defaultExpenseCurrency
                             editingTemplate = null; message = "Plantilla guardada"
                         }
                         is LedgerResult.Rejected -> message = result.message
@@ -482,12 +506,13 @@ private fun SettingsDetailScreen(
             item {
                 Text("Portabilidad", style = MaterialTheme.typography.titleLarge)
             Button(onClick = onCreateBackup) { Text("Crear backup completo") }
+            OutlinedButton(onClick = onShareBackup) { Text("Compartir backup") }
             OutlinedButton(onClick = onPickBackup) { Text("Restaurar backup") }
             OutlinedButton(onClick = onCreateCsv) { Text("Exportar CSV") }
-                Text("El CSV no está cifrado y no sirve para restaurar.")
+                Text("El backup y el CSV no están cifrados. El CSV no sirve para restaurar.")
             }
         }
     }
 }
 
-private fun minorNumber(minor: Long): String = MoneyText.grouped(minor)
+private fun minorNumber(minor: Long): String = MoneyText.editable(minor)

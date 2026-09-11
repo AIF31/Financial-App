@@ -95,6 +95,15 @@ data class Movement(
     val conversionSource: String?,
 )
 
+data class MovementSuggestion(
+    val id: String,
+    val amountMinor: Long,
+    val currency: SupportedCurrency,
+    val effectiveAtUtcMillis: Long,
+    val sourcePackage: String,
+    val merchant: String?,
+)
+
 data class PaymentMethod(val id: String, val name: String, val archived: Boolean)
 
 data class RecurringTemplate(
@@ -146,6 +155,7 @@ data class LedgerState(
     val currentInstantMillis: Long = 0,
     val pendingCurrencyChange: PendingCurrencyChange? = null,
     val defaultPaymentMethodId: String? = null,
+    val movementSuggestions: List<MovementSuggestion> = emptyList(),
 ) {
     val needsOnboarding: Boolean get() = periods.isEmpty()
 }
@@ -184,6 +194,8 @@ sealed interface LedgerCommand {
         val conversionSource: String? = null,
         val accountingCurrency: SupportedCurrency? = null,
     ) : LedgerCommand
+    data class ConfirmSuggestion(val suggestionId: String, val movement: AddMovement) : LedgerCommand
+    data class RejectSuggestion(val suggestionId: String) : LedgerCommand
     data class DeleteMovement(val movementId: String) : LedgerCommand
     data class RestoreMovement(val movement: Movement) : LedgerCommand
     data class CreateNextPeriod(val startDay: Int? = null) : LedgerCommand
@@ -213,9 +225,11 @@ sealed interface LedgerCommand {
 
 sealed interface LedgerResult {
     data object Success : LedgerResult
-    data class Rejected(val message: String) : LedgerResult
+    data class Rejected(val message: String, val kind: RejectionKind = RejectionKind.VALIDATION) : LedgerResult
     data class Deleted(val movement: Movement) : LedgerResult
 }
+
+enum class RejectionKind { VALIDATION, PERSISTENCE }
 
 interface PocketLedger {
     val state: kotlinx.coroutines.flow.Flow<LedgerState>

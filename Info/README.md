@@ -9,6 +9,7 @@ This directory is the human-oriented operational knowledge base for Pocket. It s
 - [Windows, Android Studio, and physical-device testing](windows-android-studio-device-testing.md): working environment, build commands, ADB workflow, and device-test precautions.
 - [Release signing and recovery](release-signing-and-recovery.md): permanent key handling, signed builds, verification, backup, uninstall, and restore.
 - [Release verification](verification/release-verification.md): retained test evidence and known coverage gaps.
+- [License](../LICENSE.md): PolyForm Noncommercial License 1.0.0 terms for Pocket.
 
 ## Authority and maintenance
 

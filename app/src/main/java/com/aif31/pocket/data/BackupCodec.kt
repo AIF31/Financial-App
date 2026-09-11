@@ -5,7 +5,9 @@ import com.aif31.pocket.domain.FrozenRate
 import com.aif31.pocket.domain.SupportedCurrency
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
+import java.time.ZoneId
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNames
@@ -93,24 +95,27 @@ internal object BackupCodec {
         return json.encodeToString(BackupPayload.serializer(), payload).toByteArray(StandardCharsets.UTF_8)
     }
 
-    fun preview(bytes: ByteArray): BackupPreview = try {
-        val payload = decodeAndValidate(bytes)
+    fun preview(bytes: ByteArray, today: LocalDate, zoneId: ZoneId): BackupPreview = try {
+        val payload = decodeValidateAndPlan(bytes, today, zoneId).payload
         BackupPreview(payload.version, payload.periods.size, payload.pockets.size, payload.movements.size, valid = true)
     } catch (error: Exception) {
         BackupPreview(0, 0, 0, 0, valid = false, message = error.message ?: "Backup inválido")
     }
 
-    suspend fun restore(database: FinanceDatabase, bytes: ByteArray): LedgerResult {
-        val payload = try {
-            decodeAndValidate(bytes)
+    suspend fun restore(database: FinanceDatabase, bytes: ByteArray, today: LocalDate, zoneId: ZoneId): LedgerResult {
+        val restored = try {
+            decodeValidateAndPlan(bytes, today, zoneId)
         } catch (error: Exception) {
+            if (error is CancellationException) throw error
             return LedgerResult.Rejected(error.message ?: "Backup inválido")
         }
         return try {
             database.withTransaction {
                 val dao = database.financeDao()
+                val payload = restored.payload
                 dao.clearPendingCurrencyChange()
                 dao.clearLedgerPreferences()
+                dao.clearMovementSuggestions()
                 dao.clearTemplates()
                 dao.clearMovements()
                 dao.clearRolloverReleases()
@@ -119,15 +124,15 @@ internal object BackupCodec {
                 dao.clearPaymentMethods()
                 dao.clearPockets()
                 dao.clearPeriods()
-                dao.putPeriodEntities(payload.periods.map { it.toEntity() })
+                dao.putPeriodEntities(restored.catchUp.periods)
                 dao.putPockets(payload.pockets.map { it.toEntity() })
                 dao.putPaymentMethods(payload.paymentMethods.map { it.toEntity() })
-                dao.putPeriodPockets(payload.periodPockets.map { it.toEntity() })
-                dao.putAllocations(payload.allocations.map { it.toEntity() })
-                dao.putRolloverReleases(payload.rolloverReleases.map { it.toEntity() })
+                dao.putPeriodPockets(restored.catchUp.periodPockets)
+                dao.putAllocations(restored.catchUp.allocations)
+                dao.putRolloverReleases(restored.catchUp.rolloverReleases)
                 dao.putMovements(payload.movements.map { it.toEntity() })
                 dao.putTemplates(payload.templates.map { it.toEntity() })
-                payload.pendingCurrencyChange?.let { dao.putPendingCurrencyChange(it.toEntity()) }
+                restored.catchUp.pendingCurrencyChange?.let { dao.putPendingCurrencyChange(it) }
                 val restoredPreferences = payload.ledgerPreferences ?: LedgerPreferencesDto(
                     payload.paymentMethods.firstOrNull {
                         !it.archived && it.name.equals("Tarjeta", ignoreCase = true)
@@ -137,8 +142,36 @@ internal object BackupCodec {
             }
             LedgerResult.Success
         } catch (error: Exception) {
-            LedgerResult.Rejected(error.message ?: "No se pudo restaurar el backup")
+            if (error is CancellationException) throw error
+            LedgerResult.Rejected(
+                error.message ?: "No se pudo restaurar el backup",
+                RejectionKind.PERSISTENCE,
+            )
         }
+    }
+
+    private fun decodeValidateAndPlan(bytes: ByteArray, today: LocalDate, zoneId: ZoneId): RestoredLedger {
+        val payload = decodeAndValidate(bytes, today)
+        val periods = payload.periods.map { it.toEntity() }
+        val pockets = payload.pockets.map { it.toEntity() }
+        val allocations = payload.allocations.map { it.toEntity() }
+        val periodPockets = payload.periodPockets.map { it.toEntity() }
+        val releases = payload.rolloverReleases.map { it.toEntity() }
+        val movements = payload.movements.map { it.toEntity() }
+        val latest = periods.maxBy { it.startEpochDay }
+        val catchUp = PeriodLedgerRules.catchUp(
+            periods = periods,
+            pockets = pockets,
+            allocations = allocations,
+            periodPockets = periodPockets,
+            rolloverReleases = releases,
+            movements = movements,
+            pendingCurrencyChange = payload.pendingCurrencyChange?.toEntity(),
+            preferredStartDay = latest.configuredStartDay,
+            today = today,
+            zoneId = zoneId,
+        )
+        return RestoredLedger(payload, catchUp)
     }
 
     suspend fun csv(database: FinanceDatabase): ByteArray {
@@ -171,7 +204,7 @@ internal object BackupCodec {
         return rows.toByteArray(StandardCharsets.UTF_8)
     }
 
-    private fun decodeAndValidate(bytes: ByteArray): BackupPayload {
+    private fun decodeAndValidate(bytes: ByteArray, today: LocalDate): BackupPayload {
         require(bytes.isNotEmpty() && bytes.size <= 10 * 1024 * 1024) { "Tamaño de backup inválido" }
         val decoded = json.decodeFromString(BackupPayload.serializer(), bytes.toString(StandardCharsets.UTF_8))
         require(decoded.version in 1..VERSION) { "Versión de backup incompatible" }
@@ -196,7 +229,14 @@ internal object BackupCodec {
         val pocketIds = payload.pockets.mapTo(mutableSetOf()) { it.id }
         val methodIds = payload.paymentMethods.mapTo(mutableSetOf()) { it.id }
         require(payload.periods.all { it.start < it.endExclusive && it.newFundsMinor >= 0 && it.startDay in 1..31 }) { "Periodo inválido" }
+        require(payload.periods.all {
+            it.start in LocalDate.MIN.toEpochDay()..LocalDate.MAX.toEpochDay() &&
+                it.endExclusive in LocalDate.MIN.toEpochDay()..LocalDate.MAX.toEpochDay()
+        }) { "Fecha de periodo inválida" }
         val orderedPeriods = payload.periods.sortedBy { it.start }
+        require(orderedPeriods.first().start <= today.toEpochDay()) {
+            "El backup empieza después de la fecha actual"
+        }
         require(orderedPeriods.all { runCatching { SupportedCurrency.fromCode(it.accountingCurrencyCode) }.isSuccess }) {
             "Moneda de periodo inválida"
         }
@@ -300,6 +340,13 @@ internal object BackupCodec {
                     originalAmountIsValid && rateIsValid && provenanceIsValid
                 }.getOrDefault(false)
         }) { "Relación de movimiento inválida" }
+        val periodEntities = payload.periods.map { it.toEntity() }
+        val allocationEntities = payload.allocations.map { it.toEntity() }
+        val movementEntities = payload.movements.map { it.toEntity() }
+        val releaseEntities = payload.rolloverReleases.map { it.toEntity() }
+        periodEntities.forEach { period ->
+            PeriodLedgerRules.validateTotals(period, allocationEntities, movementEntities, releaseEntities, today)
+        }
         require(payload.templates.all {
             it.name.isNotBlank() && it.amountMinor > 0 && it.pocketId in pocketIds &&
                 (it.paymentMethodId == null || it.paymentMethodId in methodIds) &&
@@ -338,7 +385,9 @@ internal object BackupCodec {
     private val CSV_FORMULA_PREFIXES = setOf('=', '+', '-', '@')
 }
 
-private suspend fun FinanceDao.putPeriodEntities(values: List<PeriodEntity>) {
+private data class RestoredLedger(val payload: BackupPayload, val catchUp: CatchUpPlan)
+
+internal suspend fun FinanceDao.putPeriodEntities(values: List<PeriodEntity>) {
     values.forEach { putPeriod(it) }
 }
 

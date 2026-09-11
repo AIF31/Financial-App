@@ -78,6 +78,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import com.aif31.pocket.fx.ExchangeRateRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 @Serializable
 private enum class RootScreen(val label: String, val icon: ImageVector) {
@@ -93,7 +96,7 @@ private sealed interface PocketRoute : NavKey
 private data class RootRoute(val screen: RootScreen) : PocketRoute
 
 @Serializable
-private data class MovementRoute(val movementId: String? = null) : PocketRoute
+private data class MovementRoute(val movementId: String? = null, val suggestionId: String? = null) : PocketRoute
 
 @Serializable
 private data class SettingsDetailRoute(val section: SettingsSection) : PocketRoute
@@ -108,11 +111,16 @@ fun PocketApp(
     restoreCandidate: ByteArray? = null,
     onRestoreCandidateHandled: () -> Unit = {},
     operationMessage: String? = null,
+    operationRetryLabel: String? = null,
     onOperationMessageHandled: () -> Unit = {},
+    onRetryOperation: () -> Unit = {},
     onCreateBackup: () -> Unit = {},
+    onShareBackup: () -> Unit = {},
     onCreateCsv: () -> Unit = {},
     onPickBackup: () -> Unit = {},
     onRequestNotificationPermission: () -> Unit = {},
+    onSuccessfulRestore: () -> Unit = {},
+    onRestoreCompleted: (String) -> Unit = {},
     undoWindowMillis: Long = 5_000,
 ) {
     val observedState by ledger.state.collectAsStateWithLifecycle(initialValue = null)
@@ -120,15 +128,37 @@ fun PocketApp(
     val preferenceState by preferencesFlow.collectAsStateWithLifecycle(initialValue = AppPreferences())
     var backupPreview by remember { mutableStateOf<com.aif31.pocket.data.BackupPreview?>(null) }
     var restoreError by rememberSaveable { mutableStateOf<String?>(null) }
+    var restoreInProgress by remember { mutableStateOf(false) }
     LaunchedEffect(restoreCandidate) {
         restoreError = null
         backupPreview = restoreCandidate?.let { ledger.previewBackup(it) }
+    }
+    operationMessage?.takeIf { observedState?.needsOnboarding != true }?.let { message ->
+        AlertDialog(
+            onDismissRequest = onOperationMessageHandled,
+            title = { Text(if (operationRetryLabel == null) "Operación de documentos" else "La operación falló") },
+            text = { Text(message) },
+            confirmButton = {
+                if (operationRetryLabel == null) {
+                    TextButton(onClick = onOperationMessageHandled) { Text("Aceptar") }
+                } else {
+                    Button(onClick = onRetryOperation) { Text(operationRetryLabel) }
+                }
+            },
+            dismissButton = if (operationRetryLabel == null) null else {
+                { TextButton(onClick = onOperationMessageHandled) { Text("Cerrar") } }
+            },
+        )
     }
     if (restoreCandidate != null && backupPreview != null) {
         val preview = backupPreview!!
         val scope = rememberCoroutineScope()
         AlertDialog(
-            onDismissRequest = { onRestoreCandidateHandled(); backupPreview = null; restoreError = null },
+            onDismissRequest = {
+                if (!restoreInProgress) {
+                    onRestoreCandidateHandled(); backupPreview = null; restoreError = null
+                }
+            },
             title = { Text(if (restoreError != null) "No se pudo restaurar" else if (preview.valid) "Confirmar restauración" else "Backup inválido") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -146,39 +176,50 @@ fun PocketApp(
                 }
             },
             confirmButton = {
-                if (preview.valid) Button(onClick = {
+                if (preview.valid) Button(
+                    enabled = !restoreInProgress,
+                    onClick = {
+                    restoreInProgress = true
                     scope.launch {
-                        when (val result = ledger.restoreBackup(restoreCandidate)) {
-                            LedgerResult.Success -> {
-                                val restored = ledger.state.first { !it.needsOnboarding }
-                                val latest = restored.periods.maxByOrNull { it.start }
-                                val preferredStartDay = latest?.configuredStartDay ?: preferenceState.futurePeriodStartDay
-                                preferences?.setFuturePeriodStartDay(preferredStartDay)
-                                val today = ledger.movementDefaults().localDate
-                                if (restored.periods.none { today >= it.start && today < it.endExclusive } &&
-                                    today < restored.periods.minOf { it.start }
-                                ) {
-                                    restoreError = "El backup empieza después de la fecha actual"
-                                } else {
-                                    when (val catchUp = ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay))) {
-                                        LedgerResult.Success -> {
-                                            ledger.state.first { it.currentPeriod != null }
-                                            onRestoreCandidateHandled()
-                                            backupPreview = null
-                                            restoreError = null
-                                        }
-                                        is LedgerResult.Rejected -> restoreError = catchUp.message
-                                        is LedgerResult.Deleted -> Unit
+                        try {
+                            when (val result = ledger.restoreBackup(restoreCandidate)) {
+                                LedgerResult.Success -> withContext(NonCancellable) {
+                                    val restored = ledger.state.first { it.currentPeriod != null }
+                                    val preferredStartDay = restored.periods.maxBy { it.start }.configuredStartDay
+                                    val preferenceWarning = try {
+                                        preferences?.setFuturePeriodStartDay(preferredStartDay)
+                                        null
+                                    } catch (_: Exception) {
+                                        " No se pudo actualizar el día preferido; puedes cambiarlo en Ajustes."
                                     }
+                                    runCatching { onSuccessfulRestore() }
+                                    onRestoreCompleted(
+                                        "Backup restaurado: ${preview.periods} periodos, " +
+                                            "${preview.pockets} Pockets y ${preview.movements} movimientos." +
+                                            preferenceWarning.orEmpty(),
+                                    )
+                                    onRestoreCandidateHandled()
+                                    backupPreview = null
+                                    restoreError = null
                                 }
+                                is LedgerResult.Rejected -> restoreError = result.message
+                                is LedgerResult.Deleted -> Unit
                             }
-                            is LedgerResult.Rejected -> restoreError = result.message
-                            is LedgerResult.Deleted -> Unit
+                        } catch (error: CancellationException) {
+                            restoreError = "Restauración cancelada. No se modificaron los datos."
+                            throw error
+                        } finally {
+                            restoreInProgress = false
                         }
                     }
-                }) { Text(if (observedState?.needsOnboarding == false) "Restaurar y reemplazar" else "Restaurar") }
+                }) { Text(if (restoreInProgress) "Restaurando…" else if (observedState?.needsOnboarding == false) "Restaurar y reemplazar" else "Restaurar") }
             },
-            dismissButton = { TextButton(onClick = { onRestoreCandidateHandled(); backupPreview = null; restoreError = null }) { Text("Cancelar") } },
+            dismissButton = {
+                TextButton(
+                    enabled = !restoreInProgress,
+                    onClick = { onRestoreCandidateHandled(); backupPreview = null; restoreError = null },
+                ) { Text("Cancelar") }
+            },
         )
     }
     val state = observedState
@@ -187,7 +228,15 @@ fun PocketApp(
         return
     }
     if (state.needsOnboarding) {
-        OnboardingScreen(ledger, preferences, onPickBackup)
+        OnboardingScreen(
+            ledger = ledger,
+            preferences = preferences,
+            onPickBackup = onPickBackup,
+            operationMessage = operationMessage,
+            operationRetryLabel = operationRetryLabel,
+            onOperationMessageHandled = onOperationMessageHandled,
+            onRetryOperation = onRetryOperation,
+        )
         return
     }
     if (state.currentPeriod == null) {
@@ -203,13 +252,6 @@ fun PocketApp(
     val snackbar = remember { SnackbarHostState() }
     val appScope = rememberCoroutineScope()
 
-    LaunchedEffect(operationMessage) {
-        operationMessage?.let {
-            snackbar.showSnackbar(it)
-            onOperationMessageHandled()
-        }
-    }
-
     fun navigateRoot(destination: RootScreen) {
         backStack.clear()
         backStack.add(RootRoute(destination))
@@ -223,7 +265,19 @@ fun PocketApp(
 
     if (movementRoute != null) {
         val movementBeingEdited = state.movements.firstOrNull { it.id == movementRoute.movementId }
+        val suggestion = state.movementSuggestions.firstOrNull { it.id == movementRoute.suggestionId }
         BackHandler { backStack.removeLastOrNull() }
+        if (movementRoute.suggestionId != null && suggestion == null) {
+            AlertDialog(
+                onDismissRequest = { backStack.removeLastOrNull() },
+                title = { Text("Sugerencia no disponible") },
+                text = { Text("Esta sugerencia ya fue revisada o expiró.") },
+                confirmButton = {
+                    TextButton(onClick = { backStack.removeLastOrNull() }) { Text("Cerrar") }
+                },
+            )
+            return
+        }
         MovementDialog(
             state = state,
             ledger = ledger,
@@ -242,6 +296,7 @@ fun PocketApp(
                 }
             },
             initialMovement = movementBeingEdited,
+            suggestion = suggestion,
         )
         return
     }
@@ -320,6 +375,7 @@ fun PocketApp(
                         undoWindowMillis = undoWindowMillis,
                         onRecordExpense = { backStack.add(MovementRoute()) },
                         onEditMovement = { backStack.add(MovementRoute(it.id)) },
+                        onReviewSuggestion = { backStack.add(MovementRoute(suggestionId = it)) },
                     )
                     RootScreen.POCKETS -> PocketsScreen(state, ledger, padding)
                     RootScreen.SETTINGS -> SettingsScreen(
@@ -330,6 +386,7 @@ fun PocketApp(
                         exchangeRates = exchangeRates,
                         reminderScheduler = reminderScheduler,
                         onCreateBackup = onCreateBackup,
+                        onShareBackup = onShareBackup,
                         onCreateCsv = onCreateCsv,
                         onPickBackup = onPickBackup,
                         onRequestNotificationPermission = onRequestNotificationPermission,
@@ -350,7 +407,15 @@ fun PocketApp(
 }
 
 @Composable
-private fun OnboardingScreen(ledger: PocketLedger, preferences: PreferencesStore?, onPickBackup: () -> Unit) {
+private fun OnboardingScreen(
+    ledger: PocketLedger,
+    preferences: PreferencesStore?,
+    onPickBackup: () -> Unit,
+    operationMessage: String?,
+    operationRetryLabel: String?,
+    onOperationMessageHandled: () -> Unit,
+    onRetryOperation: () -> Unit,
+) {
     var funds by rememberSaveable { mutableStateOf("") }
     var startDay by rememberSaveable { mutableStateOf("25") }
     var accountingCurrency by rememberSaveable { mutableStateOf(SupportedCurrency.SAR) }
@@ -380,6 +445,28 @@ private fun OnboardingScreen(ledger: PocketLedger, preferences: PreferencesStore
                     "Empieza con tus fondos del periodo. Después podrás repartirlos entre Pockets.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                operationMessage?.let { message ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                if (operationRetryLabel == null) "Operación de documentos" else "La operación falló",
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(message)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (operationRetryLabel != null) {
+                                    Button(onClick = onRetryOperation) { Text(operationRetryLabel) }
+                                }
+                                TextButton(onClick = onOperationMessageHandled) {
+                                    Text(if (operationRetryLabel == null) "Aceptar" else "Cerrar")
+                                }
+                            }
+                        }
+                    }
+                }
                 Card(Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier.padding(20.dp),
@@ -473,6 +560,7 @@ private fun MovementDialog(
     onDismiss: () -> Unit,
     onSaved: () -> Unit,
     initialMovement: Movement? = null,
+    suggestion: com.aif31.pocket.data.MovementSuggestion? = null,
 ) {
     ProductionMovementScreen(
         state = state,
@@ -481,6 +569,7 @@ private fun MovementDialog(
         onSaved = onSaved,
         movementDefaults = ledger.movementDefaults(),
         initialMovement = initialMovement,
+        suggestion = suggestion,
         defaultExpenseCurrency = defaultExpenseCurrency,
         onlineFxEnabled = onlineFxEnabled,
         exchangeRates = exchangeRates,

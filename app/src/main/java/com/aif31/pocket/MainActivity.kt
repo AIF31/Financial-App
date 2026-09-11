@@ -3,17 +3,17 @@ package com.aif31.pocket
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.AtomicFile
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.activity.viewModels
 import androidx.lifecycle.lifecycleScope
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.ui.PocketTheme
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -22,20 +22,24 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
-    private var restoreCandidate by mutableStateOf<ByteArray?>(null)
-    private var operationMessage by mutableStateOf<String?>(null)
+    private val recovery by viewModels<RecoveryViewModel>()
 
     private val createBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        uri?.let { writeExport(it, backup = true) }
+        if (uri == null) showOperationMessage("Creación de backup cancelada.")
+        else writeExport(uri, DocumentOperation.BACKUP)
     }
     private val createCsv = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
-        uri?.let { writeExport(it, backup = false) }
+        if (uri == null) showOperationMessage("Exportación CSV cancelada.")
+        else writeExport(uri, DocumentOperation.CSV)
     }
     private val openBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { target ->
+        if (uri == null) {
+            showOperationMessage("Selección de backup cancelada.")
+        } else {
+            val target = uri
             lifecycleScope.launch {
                 try {
-                    restoreCandidate = withContext(Dispatchers.IO) {
+                    val bytes = withContext(Dispatchers.IO) {
                         val input = contentResolver.openInputStream(target)
                             ?: throw IOException("The selected backup could not be opened")
                         input.use {
@@ -51,9 +55,14 @@ class MainActivity : ComponentActivity() {
                             output.toByteArray()
                         }
                     }
+                    recovery.setRestoreCandidate(bytes)
+                    recovery.showOperationMessage(null)
                 } catch (error: Exception) {
                     if (error is CancellationException) throw error
-                    operationMessage = "No se pudo leer el backup. Comprueba el archivo y vuelve a intentarlo."
+                    showOperationMessage(
+                        "No se pudo leer el backup. Comprueba el archivo y vuelve a intentarlo.",
+                        DocumentOperation.RESTORE,
+                    )
                 }
             }
         }
@@ -73,13 +82,20 @@ class MainActivity : ComponentActivity() {
                     exchangeRates = (application as PocketApplication).exchangeRates,
                     reminderScheduler = (application as PocketApplication).reminderScheduler,
                     openNewExpense = openExpense,
-                    restoreCandidate = restoreCandidate,
-                    onRestoreCandidateHandled = { restoreCandidate = null },
-                    operationMessage = operationMessage,
-                    onOperationMessageHandled = { operationMessage = null },
-                    onCreateBackup = { createBackup.launch("pocket-${java.time.LocalDate.now()}.pocketbackup") },
-                    onCreateCsv = { createCsv.launch("pocket-movimientos-${java.time.LocalDate.now()}.csv") },
-                    onPickBackup = { openBackup.launch(arrayOf("application/octet-stream", "application/json", "*/*")) },
+                    restoreCandidate = recovery.restoreCandidate,
+                    onRestoreCandidateHandled = recovery::clearRestoreCandidate,
+                    operationMessage = recovery.operationMessage,
+                    operationRetryLabel = recovery.retryOperation?.let { "Reintentar" },
+                    onOperationMessageHandled = { showOperationMessage(null) },
+                    onRetryOperation = ::retryDocumentOperation,
+                    onCreateBackup = { launchDocumentOperation(DocumentOperation.BACKUP) },
+                    onShareBackup = { launchDocumentOperation(DocumentOperation.SHARE) },
+                    onCreateCsv = { launchDocumentOperation(DocumentOperation.CSV) },
+                    onPickBackup = { launchDocumentOperation(DocumentOperation.RESTORE) },
+                    onSuccessfulRestore = {
+                        runCatching { (application as PocketApplication).notificationBetaMetrics.reset() }
+                    },
+                    onRestoreCompleted = { showOperationMessage(it) },
                     onRequestNotificationPermission = {
                         if (android.os.Build.VERSION.SDK_INT >= 33) requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                     },
@@ -101,24 +117,89 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun writeExport(uri: Uri, backup: Boolean) {
+    internal fun launchDocumentOperation(operation: DocumentOperation) {
+        showOperationMessage(null)
+        when (operation) {
+            DocumentOperation.BACKUP -> createBackup.launch("pocket-${java.time.LocalDate.now()}.pocketbackup")
+            DocumentOperation.SHARE -> shareBackup()
+            DocumentOperation.CSV -> createCsv.launch("pocket-movimientos-${java.time.LocalDate.now()}.csv")
+            DocumentOperation.RESTORE -> openBackup.launch(arrayOf("application/octet-stream", "application/json", "*/*"))
+        }
+    }
+
+    private fun retryDocumentOperation() {
+        recovery.retryOperation?.let { operation ->
+            if (operation == DocumentOperation.SHARE) shareExistingBackup() else launchDocumentOperation(operation)
+        }
+    }
+
+    private fun showOperationMessage(message: String?, retry: DocumentOperation? = null) {
+        recovery.showOperationMessage(message, retry)
+    }
+
+    private fun shareBackup() {
+        lifecycleScope.launch {
+            try {
+                val file = withContext(Dispatchers.IO) {
+                    val bytes = (application as PocketApplication).ledger.exportBackup()
+                    val directory = File(cacheDir, SHARED_BACKUP_DIRECTORY).apply { mkdirs() }
+                    val target = AtomicFile(File(directory, "pocket-${java.time.LocalDate.now()}.pocketbackup"))
+                    val output = target.startWrite()
+                    try {
+                        output.write(bytes)
+                        target.finishWrite(output)
+                    } catch (error: Exception) {
+                        target.failWrite(output)
+                        throw error
+                    }
+                    target.baseFile
+                }
+                BackupShareLauncher.share(this@MainActivity, file)
+                showOperationMessage("Selector para compartir abierto.")
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                showOperationMessage(
+                    "No se pudo compartir el backup. Comprueba las aplicaciones disponibles y vuelve a intentarlo.",
+                    DocumentOperation.SHARE,
+                )
+            }
+        }
+    }
+
+    private fun shareExistingBackup() {
+        showOperationMessage(null)
+        try {
+            val file = File(cacheDir, SHARED_BACKUP_DIRECTORY).listFiles()?.maxByOrNull { it.lastModified() }
+                ?: throw IOException("No prepared backup is available")
+            BackupShareLauncher.share(this, file)
+            showOperationMessage("Selector para compartir abierto.")
+        } catch (_: Exception) {
+            showOperationMessage(
+                "No se pudo compartir el backup. Comprueba las aplicaciones disponibles y vuelve a intentarlo.",
+                DocumentOperation.SHARE,
+            )
+        }
+    }
+
+    private fun writeExport(uri: Uri, operation: DocumentOperation) {
         lifecycleScope.launch {
             try {
                 withContext(Dispatchers.IO) {
                     val ledger = (application as PocketApplication).ledger
-                    val bytes = if (backup) ledger.exportBackup() else ledger.exportCsv()
+                    val bytes = if (operation == DocumentOperation.BACKUP) ledger.exportBackup() else ledger.exportCsv()
                     val output = contentResolver.openOutputStream(uri, "wt")
                         ?: throw IOException("The selected document could not be opened")
                     output.use { it.write(bytes) }
                 }
-                operationMessage = if (backup) "Backup creado." else "CSV exportado."
+                showOperationMessage(if (operation == DocumentOperation.BACKUP) "Backup creado." else "CSV exportado.")
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
-                operationMessage = if (backup) {
+                val message = if (operation == DocumentOperation.BACKUP) {
                     "No se pudo crear el backup. Comprueba el destino y vuelve a intentarlo."
                 } else {
                     "No se pudo exportar el CSV. Comprueba el destino y vuelve a intentarlo."
                 }
+                showOperationMessage(message, operation)
             }
         }
     }
@@ -126,5 +207,6 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val ACTION_NEW_EXPENSE = "com.aif31.pocket.NEW_EXPENSE"
         private const val MAX_BACKUP_BYTES = 10 * 1024 * 1024
+        private const val SHARED_BACKUP_DIRECTORY = "shared_backups"
     }
 }

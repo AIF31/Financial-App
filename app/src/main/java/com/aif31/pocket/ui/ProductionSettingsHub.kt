@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.CurrencyExchange
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Card
@@ -34,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.Serializable
 
@@ -57,6 +59,11 @@ internal enum class SettingsSection(
         "Recordatorio diario",
         "Horario diario y privacidad en la pantalla bloqueada",
         Icons.Default.Notifications,
+    ),
+    NOTIFICATION_ASSISTANCE(
+        "Captura desde notificaciones",
+        "Sugerencias experimentales de apps que tú elijas",
+        Icons.Default.NotificationsActive,
     ),
     PAYMENT_METHODS(
         "Métodos de pago",
@@ -82,7 +89,7 @@ internal fun ProductionSettingsHub(
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize().testTag("settings_hub"),
         contentPadding = PaddingValues(
             start = 16.dp,
             top = contentPadding.calculateTopPadding() + 16.dp,

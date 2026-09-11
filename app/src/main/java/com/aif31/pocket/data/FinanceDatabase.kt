@@ -194,6 +194,18 @@ data class FxRateCacheEntity(
     @ColumnInfo(name = "cached_at_utc_millis") val cachedAtUtcMillis: Long,
 )
 
+@Entity(tableName = "movement_suggestions")
+data class MovementSuggestionEntity(
+    @androidx.room.PrimaryKey @ColumnInfo(name = "identity_hash") val identityHash: String,
+    @ColumnInfo(name = "amount_minor") val amountMinor: Long?,
+    @ColumnInfo(name = "currency_code") val currencyCode: String?,
+    @ColumnInfo(name = "effective_at_utc_millis") val effectiveAtUtcMillis: Long?,
+    @ColumnInfo(name = "source_package") val sourcePackage: String?,
+    val merchant: String?,
+    val status: String,
+    @ColumnInfo(name = "expires_at_utc_millis") val expiresAtUtcMillis: Long,
+)
+
 @Dao
 interface FinanceDao {
     @Query("SELECT * FROM periods ORDER BY start_epoch_day") fun observePeriods(): Flow<List<PeriodEntity>>
@@ -206,6 +218,7 @@ interface FinanceDao {
     @Query("SELECT * FROM recurring_templates ORDER BY name") fun observeTemplates(): Flow<List<RecurringTemplateEntity>>
     @Query("SELECT * FROM pending_currency_change WHERE id = 1") fun observePendingCurrencyChange(): Flow<PendingCurrencyChangeEntity?>
     @Query("SELECT * FROM ledger_preferences WHERE id = 1") fun observeLedgerPreferences(): Flow<LedgerPreferencesEntity?>
+    @Query("SELECT * FROM movement_suggestions WHERE status = 'PENDING' ORDER BY effective_at_utc_millis DESC") fun observeMovementSuggestions(): Flow<List<MovementSuggestionEntity>>
 
     @Query("SELECT * FROM periods ORDER BY start_epoch_day") suspend fun periods(): List<PeriodEntity>
     @Query("SELECT * FROM pockets ORDER BY sort_order, name") suspend fun pockets(): List<PocketEntity>
@@ -217,6 +230,7 @@ interface FinanceDao {
     @Query("SELECT * FROM recurring_templates ORDER BY name") suspend fun templates(): List<RecurringTemplateEntity>
     @Query("SELECT * FROM pending_currency_change WHERE id = 1") suspend fun pendingCurrencyChange(): PendingCurrencyChangeEntity?
     @Query("SELECT * FROM ledger_preferences WHERE id = 1") suspend fun ledgerPreferences(): LedgerPreferencesEntity?
+    @Query("SELECT * FROM movement_suggestions WHERE identity_hash = :identityHash") suspend fun movementSuggestion(identityHash: String): MovementSuggestionEntity?
     @Query("SELECT COUNT(*) FROM periods") suspend fun periodCount(): Int
     @Query("SELECT * FROM periods WHERE id = :id") suspend fun period(id: String): PeriodEntity?
     @Query("SELECT * FROM movements WHERE id = :id") suspend fun movement(id: String): MovementEntity?
@@ -252,6 +266,7 @@ interface FinanceDao {
     @Upsert suspend fun putPendingCurrencyChange(value: PendingCurrencyChangeEntity)
     @Upsert suspend fun putLedgerPreferences(value: LedgerPreferencesEntity)
     @Upsert suspend fun putFxRate(value: FxRateCacheEntity)
+    @Upsert suspend fun putMovementSuggestion(value: MovementSuggestionEntity)
 
     @Update suspend fun updatePeriod(value: PeriodEntity)
     @Query("DELETE FROM movements WHERE id = :id") suspend fun deleteMovement(id: String)
@@ -271,6 +286,8 @@ interface FinanceDao {
     @Query("DELETE FROM payment_methods") suspend fun clearPaymentMethods()
     @Query("DELETE FROM pockets") suspend fun clearPockets()
     @Query("DELETE FROM periods") suspend fun clearPeriods()
+    @Query("DELETE FROM movement_suggestions WHERE expires_at_utc_millis <= :nowUtcMillis") suspend fun deleteExpiredMovementSuggestions(nowUtcMillis: Long)
+    @Query("DELETE FROM movement_suggestions") suspend fun clearMovementSuggestions()
 }
 
 @Database(
@@ -286,8 +303,9 @@ interface FinanceDao {
         PendingCurrencyChangeEntity::class,
         LedgerPreferencesEntity::class,
         FxRateCacheEntity::class,
+        MovementSuggestionEntity::class,
     ],
-    version = 6,
+    version = 7,
     autoMigrations = [AutoMigration(from = 1, to = 2)],
     exportSchema = true,
 )
@@ -297,7 +315,7 @@ abstract class FinanceDatabase : RoomDatabase() {
     companion object {
         fun open(context: Context): FinanceDatabase =
             Room.databaseBuilder(context.applicationContext, FinanceDatabase::class.java, "pocket.db")
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .build()
 
         fun inMemory(context: Context): FinanceDatabase =
@@ -323,6 +341,17 @@ abstract class FinanceDatabase : RoomDatabase() {
                         )
                     }
                 }
+            }
+        }
+
+        internal val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS movement_suggestions (" +
+                        "identity_hash TEXT NOT NULL, amount_minor INTEGER, currency_code TEXT, " +
+                        "effective_at_utc_millis INTEGER, source_package TEXT, merchant TEXT, " +
+                        "status TEXT NOT NULL, expires_at_utc_millis INTEGER NOT NULL, PRIMARY KEY(identity_hash))"
+                )
             }
         }
 

@@ -60,6 +60,7 @@ import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.Movement
 import com.aif31.pocket.data.MovementDefaults
 import com.aif31.pocket.data.MovementType
+import com.aif31.pocket.data.MovementSuggestion
 import com.aif31.pocket.data.PocketLedger
 import com.aif31.pocket.domain.Money
 import com.aif31.pocket.domain.SupportedCurrency
@@ -86,37 +87,42 @@ internal fun ProductionMovementScreen(
     onSaved: () -> Unit,
     movementDefaults: MovementDefaults,
     initialMovement: Movement? = null,
+    suggestion: MovementSuggestion? = null,
     defaultExpenseCurrency: SupportedCurrency = SupportedCurrency.SAR,
     onlineFxEnabled: Boolean = false,
     exchangeRates: ExchangeRateRepository? = null,
 ) {
-    val stateKey = initialMovement?.id
+    val stateKey = initialMovement?.id ?: suggestion?.id
     val initialAccountingCurrency = state.periods.firstOrNull { it.id == initialMovement?.periodId }?.accountingCurrency
         ?: state.currentPeriod?.accountingCurrency
         ?: SupportedCurrency.SAR
     var localDate by rememberSaveable(stateKey) {
-        mutableStateOf((initialMovement?.localDate ?: movementDefaults.localDate).toString())
+        mutableStateOf((initialMovement?.localDate ?: suggestion?.effectiveAtUtcMillis?.let {
+            Instant.ofEpochMilli(it).atZone(ZoneId.of("Asia/Riyadh")).toLocalDate()
+        } ?: movementDefaults.localDate).toString())
     }
     val accountingCurrency = runCatching { LocalDate.parse(localDate) }.getOrNull()?.let { enteredDate ->
         state.periods.firstOrNull { enteredDate >= it.start && enteredDate < it.endExclusive }?.accountingCurrency
     } ?: initialAccountingCurrency
     var amount by rememberSaveable(stateKey) {
         mutableStateOf(
-            initialMovement?.let { minorNumberForForm(it.originalAmountMinor ?: it.accountingAmountMinor) }.orEmpty()
+            initialMovement?.let { minorNumberForForm(it.originalAmountMinor ?: it.accountingAmountMinor) }
+                ?: suggestion?.let { minorNumberForForm(it.amountMinor) }.orEmpty()
         )
     }
+    var amountEdited by rememberSaveable(stateKey) { mutableStateOf(false) }
     var selectedPocket by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.pocketId) }
     var refund by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.type == MovementType.REFUND) }
-    var merchant by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.merchant.orEmpty()) }
+    var merchant by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.merchant ?: suggestion?.merchant.orEmpty()) }
     var note by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.note.orEmpty()) }
     var paymentMethod by rememberSaveable(stateKey) {
         mutableStateOf(if (initialMovement != null) initialMovement.paymentMethodId else state.defaultPaymentMethodId)
     }
     var currency by rememberSaveable(stateKey) {
-        mutableStateOf(initialMovement?.originalCurrencyCode ?: defaultExpenseCurrency.name)
+        mutableStateOf(initialMovement?.originalCurrencyCode ?: suggestion?.currency?.name ?: defaultExpenseCurrency.name)
     }
     var localTime by rememberSaveable(stateKey) {
-        val instant = initialMovement?.occurredAtUtcMillis ?: movementDefaults.instantMillis
+        val instant = initialMovement?.occurredAtUtcMillis ?: suggestion?.effectiveAtUtcMillis ?: movementDefaults.instantMillis
         val zone = ZoneId.of(initialMovement?.zoneId ?: "Asia/Riyadh")
         mutableStateOf(
             Instant.ofEpochMilli(instant)
@@ -140,6 +146,7 @@ internal fun ProductionMovementScreen(
     val inputCurrency = SupportedCurrency.fromCode(currency)
     val parsedDateForQuote = runCatching { LocalDate.parse(localDate) }.getOrNull()
     val parsedInputMinor = runCatching { Money.parse(amount, inputCurrency.name).minor }.getOrNull()
+    val amountIsInvalid = amountEdited && (parsedInputMinor == null || parsedInputMinor <= 0)
     val holder = remember(exchangeRates, initialMovement, initialAccountingCurrency, templateGeneration) {
         ExpenseEntryStateHolder(exchangeRates, initialMovement.takeIf { templateGeneration == 0 }, initialAccountingCurrency)
     }
@@ -204,31 +211,27 @@ internal fun ProductionMovementScreen(
             val conversion = readyConversion
             val parsedOriginal = parsedInputMinor?.takeIf { inputCurrency != savingAccountingCurrency }
             val movementZone = ZoneId.of(initialMovement?.zoneId ?: "Asia/Riyadh")
-            when (
-                val result = ledger.execute(
-                    LedgerCommand.AddMovement(
-                        pocketId = pocketId,
-                        id = initialMovement?.id,
-                        type = if (refund) MovementType.REFUND else MovementType.EXPENSE,
-                        accountingAmountMinor = parsedAmount,
-                        accountingCurrency = savingAccountingCurrency,
-                        occurredAtUtcMillis = parsedDate.atTime(parsedTime)
-                            .atZone(movementZone)
-                            .toInstant()
-                            .toEpochMilli(),
-                        localDate = parsedDate,
-                        merchant = merchant,
-                        note = note,
-                        paymentMethodId = paymentMethod,
-                        originalAmountMinor = parsedOriginal,
-                        originalCurrencyCode = currency,
-                        conversionStatus = conversion.status,
-                        rate = conversion.rate,
-                        conversionEffectiveDate = conversion.effectiveDate,
-                        conversionSource = conversion.source,
-                    ),
-                )
-            ) {
+            val movement = LedgerCommand.AddMovement(
+                pocketId = pocketId,
+                id = initialMovement?.id,
+                type = if (refund) MovementType.REFUND else MovementType.EXPENSE,
+                accountingAmountMinor = parsedAmount,
+                accountingCurrency = savingAccountingCurrency,
+                occurredAtUtcMillis = parsedDate.atTime(parsedTime).atZone(movementZone).toInstant().toEpochMilli(),
+                localDate = parsedDate,
+                merchant = merchant,
+                note = note,
+                paymentMethodId = paymentMethod,
+                originalAmountMinor = parsedOriginal,
+                originalCurrencyCode = currency,
+                conversionStatus = conversion.status,
+                rate = conversion.rate,
+                conversionEffectiveDate = conversion.effectiveDate,
+                conversionSource = conversion.source,
+            )
+            when (val result = ledger.execute(
+                suggestion?.let { LedgerCommand.ConfirmSuggestion(it.id, movement) } ?: movement,
+            )) {
                 LedgerResult.Success -> onSaved()
                 is LedgerResult.Rejected -> error = result.message
                 is LedgerResult.Deleted -> Unit
@@ -322,16 +325,17 @@ internal fun ProductionMovementScreen(
                 OutlinedTextField(
                     value = amount,
                     onValueChange = {
-                        amount = it.filter { character -> character.isDigit() || character == '.' }
+                        amount = it
+                        amountEdited = true
                         if (error == "Escribe un importe válido") error = null
                     },
                     prefix = { Text(inputCurrency.name, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary) },
-                    supportingText = if (error == "Escribe un importe válido") {
-                        { Text(error.orEmpty()) }
+                    supportingText = if (amountIsInvalid || error == "Escribe un importe válido") {
+                        { Text("Escribe un importe válido") }
                     } else {
                         null
                     },
-                    isError = error == "Escribe un importe válido",
+                    isError = amountIsInvalid || error == "Escribe un importe válido",
                     singleLine = true,
                     textStyle = MaterialTheme.typography.displaySmall.copy(fontFamily = FontFamily.Monospace),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),

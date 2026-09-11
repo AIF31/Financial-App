@@ -11,6 +11,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.aif31.pocket.domain.SupportedCurrency
 import java.time.LocalTime
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 data class AppPreferences(
@@ -19,6 +20,7 @@ data class AppPreferences(
     val reminderTime: LocalTime = LocalTime.of(21, 0),
     val onlineFxEnabled: Boolean = false,
     val defaultExpenseCurrency: SupportedCurrency = SupportedCurrency.SAR,
+    val notificationSourcePackages: Set<String> = emptySet(),
 )
 
 interface PreferencesStore {
@@ -27,6 +29,12 @@ interface PreferencesStore {
     suspend fun setReminder(enabled: Boolean, time: LocalTime)
     suspend fun setOnlineFxEnabled(enabled: Boolean)
     suspend fun setDefaultExpenseCurrency(currency: SupportedCurrency)
+    suspend fun setNotificationSourcePackages(packages: Set<String>) {}
+    suspend fun setNotificationSourcePackage(packageName: String, selected: Boolean) {
+        val packages = state.first().notificationSourcePackages.toMutableSet()
+        if (selected) packages += packageName else packages -= packageName
+        setNotificationSourcePackages(packages)
+    }
 }
 private val Context.pocketPreferences by preferencesDataStore("pocket_preferences")
 
@@ -44,6 +52,7 @@ class DataStorePreferences internal constructor(
             defaultExpenseCurrency = values[DEFAULT_EXPENSE_CURRENCY]
                 ?.let { runCatching { SupportedCurrency.fromCode(it) }.getOrNull() }
                 ?: SupportedCurrency.SAR,
+            notificationSourcePackages = values[NOTIFICATION_SOURCE_PACKAGES] ?: emptySet(),
         )
     }
 
@@ -68,6 +77,18 @@ class DataStorePreferences internal constructor(
         dataStore.edit { it[DEFAULT_EXPENSE_CURRENCY] = currency.name }
     }
 
+    override suspend fun setNotificationSourcePackages(packages: Set<String>) {
+        dataStore.edit { it[NOTIFICATION_SOURCE_PACKAGES] = packages }
+    }
+
+    override suspend fun setNotificationSourcePackage(packageName: String, selected: Boolean) {
+        dataStore.edit { values ->
+            val packages = (values[NOTIFICATION_SOURCE_PACKAGES] ?: emptySet()).toMutableSet()
+            if (selected) packages += packageName else packages -= packageName
+            values[NOTIFICATION_SOURCE_PACKAGES] = packages
+        }
+    }
+
     private companion object {
         val START_DAY = intPreferencesKey("future_period_start_day")
         val REMINDER_ENABLED = booleanPreferencesKey("reminder_enabled")
@@ -75,5 +96,6 @@ class DataStorePreferences internal constructor(
         val REMINDER_MINUTE = intPreferencesKey("reminder_minute")
         val ONLINE_FX_ENABLED = booleanPreferencesKey("online_fx_enabled")
         val DEFAULT_EXPENSE_CURRENCY = stringPreferencesKey("default_expense_currency")
+        val NOTIFICATION_SOURCE_PACKAGES = androidx.datastore.preferences.core.stringSetPreferencesKey("notification_source_packages")
     }
 }

@@ -1,7 +1,10 @@
 package com.aif31.pocket
 
+import android.app.Activity
+import android.app.Instrumentation.ActivityResult
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -26,6 +29,9 @@ import androidx.compose.ui.test.waitUntilDoesNotExist
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
+import androidx.test.espresso.intent.Intents
+import androidx.test.espresso.intent.Intents.intending
+import androidx.test.espresso.intent.matcher.IntentMatchers.hasAction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.MediumTest
 import androidx.test.filters.SdkSuppress
@@ -340,6 +346,89 @@ class PocketAppFlowTest {
             }
         } finally {
             application.database.clearAllTables()
+        }
+    }
+
+    @Test
+    fun main_activity_reports_onboarding_restore_provider_failure() {
+        val application = ApplicationProvider.getApplicationContext<PocketApplication>()
+        runBlocking { application.database.clearAllTables() }
+        Intents.init()
+        try {
+            intending(hasAction(Intent.ACTION_OPEN_DOCUMENT)).respondWith(
+                ActivityResult(
+                    Activity.RESULT_OK,
+                    Intent().setData(Uri.parse("content://missing-provider/backup.pocketbackup")),
+                ),
+            )
+            ActivityScenario.launch<MainActivity>(Intent(application, MainActivity::class.java)).use {
+                compose.waitUntilExactlyOneExists(hasText("Restaurar backup"), 5_000)
+                compose.onNodeWithText("Restaurar backup").performClick()
+
+                compose.waitUntilExactlyOneExists(
+                    hasText("No se pudo leer el backup. Comprueba el archivo y vuelve a intentarlo."),
+                    5_000,
+                )
+                compose.onNodeWithText("Configura tu primer periodo").assertIsDisplayed()
+            }
+        } finally {
+            Intents.release()
+            runBlocking { application.database.clearAllTables() }
+        }
+    }
+
+    @Test
+    fun main_activity_reports_restore_picker_cancellation_without_failure_retry() {
+        val application = ApplicationProvider.getApplicationContext<PocketApplication>()
+        runBlocking { application.database.clearAllTables() }
+        Intents.init()
+        try {
+            intending(hasAction(Intent.ACTION_OPEN_DOCUMENT)).respondWith(ActivityResult(Activity.RESULT_CANCELED, null))
+            ActivityScenario.launch<MainActivity>(Intent(application, MainActivity::class.java)).use {
+                compose.waitUntilExactlyOneExists(hasText("Restaurar backup"), 5_000)
+                compose.onNodeWithText("Restaurar backup").performClick()
+
+                compose.waitUntilExactlyOneExists(hasText("Selección de backup cancelada."), 5_000)
+                compose.onNodeWithText("Operación de documentos").assertIsDisplayed()
+                compose.onAllNodesWithText("Reintentar").assertCountEquals(0)
+            }
+        } finally {
+            Intents.release()
+            runBlocking { application.database.clearAllTables() }
+        }
+    }
+
+    @Test
+    fun main_activity_no_period_export_failure_survives_rotation() {
+        val application = ApplicationProvider.getApplicationContext<PocketApplication>()
+        runBlocking { application.database.clearAllTables() }
+        Intents.init()
+        try {
+            intending(hasAction(Intent.ACTION_CREATE_DOCUMENT)).respondWith(
+                ActivityResult(
+                    Activity.RESULT_OK,
+                    Intent().setData(Uri.parse("content://missing-provider/backup.pocketbackup")),
+                ),
+            )
+            ActivityScenario.launch<MainActivity>(Intent(application, MainActivity::class.java)).use { scenario ->
+                compose.waitUntilExactlyOneExists(hasText("Configura tu primer periodo"), 5_000)
+                scenario.onActivity { it.launchDocumentOperation(DocumentOperation.BACKUP) }
+                compose.waitUntilExactlyOneExists(
+                    hasText("No se pudo crear el backup. Comprueba el destino y vuelve a intentarlo."),
+                    5_000,
+                )
+
+                scenario.recreate()
+
+                compose.waitUntilExactlyOneExists(
+                    hasText("No se pudo crear el backup. Comprueba el destino y vuelve a intentarlo."),
+                    5_000,
+                )
+                compose.onNodeWithText("Reintentar").assertIsDisplayed()
+            }
+        } finally {
+            Intents.release()
+            runBlocking { application.database.clearAllTables() }
         }
     }
 
