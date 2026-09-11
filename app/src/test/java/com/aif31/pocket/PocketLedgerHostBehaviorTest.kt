@@ -130,6 +130,101 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
+    fun moving_an_expense_rejects_an_overflowing_source_period_without_mutation() = runTest {
+        val firstClock = Clock.fixed(Instant.parse("2026-03-24T09:00:00Z"), zone)
+        val firstLedger = RoomPocketLedger(database, firstClock, zone)
+        firstLedger.execute(LedgerCommand.Initialize(1))
+        val first = firstLedger.state.first { !it.needsOnboarding }
+        val pocketId = first.pockets.first().pocket.id
+        val periodId = first.currentPeriod!!.id
+        assertEquals(LedgerResult.Success, firstLedger.execute(LedgerCommand.SetAllocation(periodId, pocketId, 1)))
+        val seededExpense = MovementEntity(
+            id = "balanced-expense",
+            periodId = periodId,
+            pocketId = pocketId,
+            type = MovementType.EXPENSE.name,
+            accountingAmountMinor = Long.MAX_VALUE,
+            occurredAtUtcMillis = firstClock.millis(),
+            localEpochDay = LocalDate.of(2026, 3, 24).toEpochDay(),
+            zoneId = zone.id,
+            merchant = null,
+            note = null,
+            paymentMethodId = null,
+            originalAmountMinor = null,
+            originalCurrencyCode = SupportedCurrency.SAR.name,
+            conversionStatus = ConversionStatus.CONFIRMED.name,
+            rate = null,
+            conversionEffectiveEpochDay = null,
+            conversionSource = null,
+        )
+        database.financeDao().putMovement(seededExpense)
+        database.financeDao().putMovement(
+            seededExpense.copy(
+                id = "balanced-refund",
+                type = MovementType.REFUND.name,
+                occurredAtUtcMillis = firstClock.millis() + 1,
+            ),
+        )
+        assertEquals(LedgerResult.Success, firstLedger.execute(LedgerCommand.CreateNextPeriod()))
+        val secondLedger = RoomPocketLedger(
+            database,
+            Clock.fixed(Instant.parse("2026-04-24T09:00:00Z"), zone),
+            zone,
+        )
+        val secondPeriodId = database.financeDao().periods().maxBy { it.startEpochDay }.id
+        assertEquals(
+            LedgerResult.Success,
+            secondLedger.execute(LedgerCommand.UpdatePeriodFunds(secondPeriodId, Long.MAX_VALUE)),
+        )
+        assertEquals(
+            LedgerResult.Success,
+            secondLedger.execute(LedgerCommand.SetAllocation(secondPeriodId, pocketId, Long.MAX_VALUE)),
+        )
+        val before = firstLedger.exportBackup()
+
+        val result = secondLedger.execute(LedgerCommand.AddMovement(
+            id = "balanced-expense",
+            pocketId = pocketId,
+            type = MovementType.EXPENSE,
+            accountingAmountMinor = Long.MAX_VALUE,
+            occurredAtUtcMillis = Instant.parse("2026-04-24T09:00:00Z").toEpochMilli(),
+            localDate = LocalDate.of(2026, 4, 24),
+        ))
+
+        assertTrue(result is LedgerResult.Rejected)
+        assertEquals(before.decodeToString(), secondLedger.exportBackup().decodeToString())
+    }
+
+    @Test
+    fun a_currency_boundary_rejects_previous_spend_that_cannot_be_compared() = runTest {
+        val clock = Clock.fixed(Instant.parse("2026-03-24T09:00:00Z"), zone)
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(0))
+        val state = ledger.state.first { !it.needsOnboarding }
+        val period = state.currentPeriod!!
+        ledger.execute(LedgerCommand.AddMovement(
+            id = "comparison-overflow",
+            pocketId = state.pockets.first().pocket.id,
+            type = MovementType.EXPENSE,
+            accountingAmountMinor = Long.MAX_VALUE / 64,
+            occurredAtUtcMillis = clock.millis(),
+            localDate = LocalDate.of(2026, 3, 24),
+        ))
+        ledger.execute(LedgerCommand.ScheduleCurrencyChange(
+            targetCurrency = SupportedCurrency.USD,
+            rate = "128",
+            effectiveDate = period.endExclusive,
+            source = "COMPARISON_OVERFLOW_TEST",
+        ))
+        val before = ledger.exportBackup()
+
+        val result = ledger.execute(LedgerCommand.CreateNextPeriod())
+
+        assertTrue(result is LedgerResult.Rejected)
+        assertEquals(before.decodeToString(), ledger.exportBackup().decodeToString())
+    }
+
+    @Test
     fun deleting_a_refund_is_rejected_when_the_prospective_projection_overflows() = runTest {
         val lastDayClock = Clock.fixed(Instant.parse("2026-03-24T09:00:00Z"), zone)
         val setupLedger = RoomPocketLedger(database, lastDayClock, zone)

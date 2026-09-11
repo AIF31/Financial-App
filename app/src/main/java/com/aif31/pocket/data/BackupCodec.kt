@@ -175,13 +175,15 @@ internal object BackupCodec {
     }
 
     suspend fun csv(database: FinanceDatabase): ByteArray {
-        val dao = database.financeDao()
-        val pockets = dao.pockets().associateBy { it.id }
-        val periods = dao.periods().associateBy { it.id }
-        val methods = dao.paymentMethods().associateBy { it.id }
-        val rows = buildString {
-            appendLine("id,tipo,fecha,zona,pocket,importe_contable,moneda_contable,moneda_original,importe_original,conversion,metodo,comercio,nota")
-            dao.movements().sortedBy { it.occurredAtUtcMillis }.forEach { movement ->
+        val rows = database.withTransaction {
+            val dao = database.financeDao()
+            val pockets = dao.pockets().associateBy { it.id }
+            val periods = dao.periods().associateBy { it.id }
+            val methods = dao.paymentMethods().associateBy { it.id }
+            val movements = dao.movements().sortedBy { it.occurredAtUtcMillis }
+            buildString {
+                appendLine("id,tipo,fecha,zona,pocket,importe_contable,moneda_contable,moneda_original,importe_original,conversion,metodo,comercio,nota")
+                movements.forEach { movement ->
                 appendLine(
                     listOf(
                         movement.id,
@@ -199,6 +201,7 @@ internal object BackupCodec {
                         movement.note.orEmpty(),
                     ).joinToString(",", transform = ::csvCell)
                 )
+                }
             }
         }
         return rows.toByteArray(StandardCharsets.UTF_8)

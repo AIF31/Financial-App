@@ -17,7 +17,7 @@ import java.util.UUID
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -32,41 +32,47 @@ class RoomPocketLedger(
     private val dao = database.financeDao()
     private val restoreMutex = Mutex()
 
-    private val budgetData = combine(
-        dao.observePeriods(),
-        dao.observePockets(),
-        dao.observeAllocations(),
-        dao.observePeriodPockets(),
-        dao.observeRolloverReleases(),
-    ) { periods, pockets, allocations, periodPockets, rolloverReleases ->
-        BudgetData(periods, pockets, allocations, periodPockets, rolloverReleases)
-    }
-
-    private val activityData = combine(
-        dao.observePaymentMethods(),
-        dao.observeMovements(),
-        dao.observeTemplates(),
-    ) { methods, movements, templates -> Triple(methods, movements, templates) }
-
-    override val state: Flow<LedgerState> = combine(
-        budgetData,
-        activityData,
-        dao.observePendingCurrencyChange(),
-        dao.observeLedgerPreferences(),
-        dao.observeMovementSuggestions(),
-    ) { budget, activity, pendingCurrencyChange, ledgerPreferences, suggestions ->
+    override val state: Flow<LedgerState> = database.invalidationTracker.createFlow(
+        "periods",
+        "pockets",
+        "allocations",
+        "period_pockets",
+        "rollover_releases",
+        "payment_methods",
+        "movements",
+        "recurring_templates",
+        "pending_currency_change",
+        "ledger_preferences",
+        "movement_suggestions",
+        emitInitialState = true,
+    ).map {
+        val snapshot = database.withTransaction {
+            LedgerSnapshot(
+                periods = dao.periods(),
+                pockets = dao.pockets(),
+                allocations = dao.allocations(),
+                periodPockets = dao.periodPockets(),
+                rolloverReleases = dao.rolloverReleases(),
+                paymentMethods = dao.paymentMethods(),
+                movements = dao.movements(),
+                templates = dao.templates(),
+                pendingCurrencyChange = dao.pendingCurrencyChange(),
+                ledgerPreferences = dao.ledgerPreferences(),
+                suggestions = dao.pendingMovementSuggestions(),
+            )
+        }
         buildState(
-            periodEntities = budget.periods,
-            pocketEntities = budget.pockets,
-            allocations = budget.allocations,
-            periodPockets = budget.periodPockets,
-            rolloverReleases = budget.rolloverReleases,
-            methodEntities = activity.first,
-            movementEntities = activity.second,
-            templateEntities = activity.third,
-            pendingCurrencyChangeEntity = pendingCurrencyChange,
-            ledgerPreferencesEntity = ledgerPreferences,
-            suggestionEntities = suggestions,
+            periodEntities = snapshot.periods,
+            pocketEntities = snapshot.pockets,
+            allocations = snapshot.allocations,
+            periodPockets = snapshot.periodPockets,
+            rolloverReleases = snapshot.rolloverReleases,
+            methodEntities = snapshot.paymentMethods,
+            movementEntities = snapshot.movements,
+            templateEntities = snapshot.templates,
+            pendingCurrencyChangeEntity = snapshot.pendingCurrencyChange,
+            ledgerPreferencesEntity = snapshot.ledgerPreferences,
+            suggestionEntities = snapshot.suggestions,
         )
     }
 
@@ -337,7 +343,17 @@ class RoomPocketLedger(
         require(snapshot != null && (!snapshot.retired || editsSamePocket)) { "El Pocket no está activo en este periodo" }
         val updated = command.toEntity(period.id, zoneId.id, originalCurrency.name)
         val movements = dao.movements().filterNot { it.id == updated.id } + updated
-        validatePeriodTotals(period, dao.allocations(), movements, dao.rolloverReleases())
+        val allocations = dao.allocations()
+        val releases = dao.rolloverReleases()
+        listOfNotNull(existing?.periodId, period.id).distinct().forEach { affectedPeriodId ->
+            validatePeriodTotals(
+                periods.first { it.id == affectedPeriodId },
+                allocations,
+                movements,
+                releases,
+            )
+        }
+        PeriodLedgerRules.validateHistoricalComparisons(periods, movements)
         dao.putMovement(updated)
         val sourcePeriodId = listOfNotNull(existing?.periodId, period.id)
             .minBy { id -> periods.first { it.id == id }.startEpochDay }
@@ -377,12 +393,14 @@ class RoomPocketLedger(
         val entity = requireNotNull(dao.movement(command.movementId)) { "Movimiento inexistente" }
         val movement = entity.toModel(dao.pockets().associateBy { it.id }, dao.paymentMethods().associateBy { it.id })
         val period = requireNotNull(dao.period(entity.periodId)) { "Periodo inexistente" }
+        val prospectiveMovements = dao.movements().filterNot { it.id == entity.id }
         validatePeriodTotals(
             period,
             dao.allocations(),
-            dao.movements().filterNot { it.id == entity.id },
+            prospectiveMovements,
             dao.rolloverReleases(),
         )
+        PeriodLedgerRules.validateHistoricalComparisons(dao.periods(), prospectiveMovements)
         dao.deleteMovement(entity.id)
         recalculateRolloverFrom(entity.periodId)
         LedgerResult.Deleted(movement)
@@ -391,12 +409,14 @@ class RoomPocketLedger(
     private suspend fun restoreMovement(command: LedgerCommand.RestoreMovement): LedgerResult = database.withTransaction {
         val entity = command.movement.toEntity()
         val period = requireNotNull(dao.period(entity.periodId)) { "Periodo inexistente" }
+        val prospectiveMovements = dao.movements().filterNot { it.id == entity.id } + entity
         validatePeriodTotals(
             period,
             dao.allocations(),
-            dao.movements().filterNot { it.id == entity.id } + entity,
+            prospectiveMovements,
             dao.rolloverReleases(),
         )
+        PeriodLedgerRules.validateHistoricalComparisons(dao.periods(), prospectiveMovements)
         dao.putMovement(entity)
         recalculateRolloverFrom(entity.periodId)
         LedgerResult.Success
@@ -405,6 +425,7 @@ class RoomPocketLedger(
     private suspend fun createNextPeriod(requestedStartDay: Int?): LedgerResult = database.withTransaction {
         val previous = requireNotNull(dao.periods().maxByOrNull { it.startEpochDay }) { "No existe un periodo anterior" }
         createPeriodAfter(previous, requestedStartDay ?: previous.configuredStartDay, needsReview = false)
+        PeriodLedgerRules.validateHistoricalComparisons(dao.periods(), dao.movements())
         LedgerResult.Success
     }
 
@@ -849,12 +870,18 @@ class RoomPocketLedger(
         )
     }
 
-    private data class BudgetData(
+    private data class LedgerSnapshot(
         val periods: List<PeriodEntity>,
         val pockets: List<PocketEntity>,
         val allocations: List<AllocationEntity>,
         val periodPockets: List<PeriodPocketEntity>,
         val rolloverReleases: List<RolloverReleaseEntity>,
+        val paymentMethods: List<PaymentMethodEntity>,
+        val movements: List<MovementEntity>,
+        val templates: List<RecurringTemplateEntity>,
+        val pendingCurrencyChange: PendingCurrencyChangeEntity?,
+        val ledgerPreferences: LedgerPreferencesEntity?,
+        val suggestions: List<MovementSuggestionEntity>,
     )
 }
 
@@ -910,7 +937,7 @@ private fun PendingCurrencyChangeEntity.toModel() = PendingCurrencyChange(
     )
 )
 
-private fun PeriodEntity.frozenRateFrom(source: SupportedCurrency): FrozenRate? {
+internal fun PeriodEntity.frozenRateFrom(source: SupportedCurrency): FrozenRate? {
     val storedRate = priorBoundaryRate ?: return null
     val storedFrom = priorBoundaryFromCurrencyCode ?: return null
     return runCatching {

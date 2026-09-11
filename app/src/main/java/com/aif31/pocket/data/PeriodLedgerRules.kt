@@ -58,6 +58,28 @@ internal object PeriodLedgerRules {
         PocketMath.project(netSpend, elapsed, totalDays)
     }
 
+    fun validateHistoricalComparisons(
+        periods: List<PeriodEntity>,
+        movements: List<MovementEntity>,
+    ) {
+        periods.sortedBy { it.startEpochDay }.zipWithNext().forEach { (source, target) ->
+            val sourceCurrency = SupportedCurrency.fromCode(source.accountingCurrencyCode)
+            val targetCurrency = SupportedCurrency.fromCode(target.accountingCurrencyCode)
+            if (sourceCurrency != targetCurrency) {
+                val sourceMovements = movements.filter { it.periodId == source.id }
+                val netSpend = Math.subtractExact(
+                    sourceMovements.filter { it.type == MovementType.EXPENSE.name }
+                        .map { it.accountingAmountMinor }.sumMoneyExact(),
+                    sourceMovements.filter { it.type == MovementType.REFUND.name }
+                        .map { it.accountingAmountMinor }.sumMoneyExact(),
+                )
+                requireNotNull(target.frozenRateFrom(sourceCurrency)) {
+                    "Falta la conversión para comparar periodos"
+                }.convertMinor(netSpend)
+            }
+        }
+    }
+
     fun catchUp(
         periods: List<PeriodEntity>,
         pockets: List<PocketEntity>,
@@ -167,6 +189,7 @@ internal object PeriodLedgerRules {
                 else -> period
             }
         }
+        validateHistoricalComparisons(finalPeriods, movements)
         return CatchUpPlan(
             periods = finalPeriods,
             allocations = plannedAllocations.values.toList(),
