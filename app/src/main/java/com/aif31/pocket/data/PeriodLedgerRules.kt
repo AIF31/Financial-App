@@ -11,6 +11,17 @@ import java.time.ZoneId
 import java.util.UUID
 
 internal object PeriodLedgerRules {
+    fun validateLedgerProjection(
+        periods: List<PeriodEntity>,
+        allocations: List<AllocationEntity>,
+        movements: List<MovementEntity>,
+        rolloverReleases: List<RolloverReleaseEntity>,
+        today: LocalDate,
+    ) {
+        periods.forEach { validateTotals(it, allocations, movements, rolloverReleases, today) }
+        validateHistoricalComparisons(periods, movements)
+    }
+
     fun validateTotals(
         period: PeriodEntity,
         allocations: List<AllocationEntity>,
@@ -189,7 +200,13 @@ internal object PeriodLedgerRules {
                 else -> period
             }
         }
-        validateHistoricalComparisons(finalPeriods, movements)
+        validateLedgerProjection(
+            finalPeriods,
+            plannedAllocations.values.toList(),
+            movements,
+            plannedReleases,
+            today,
+        )
         return CatchUpPlan(
             periods = finalPeriods,
             allocations = plannedAllocations.values.toList(),

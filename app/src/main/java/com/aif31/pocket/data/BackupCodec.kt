@@ -347,9 +347,13 @@ internal object BackupCodec {
         val allocationEntities = payload.allocations.map { it.toEntity() }
         val movementEntities = payload.movements.map { it.toEntity() }
         val releaseEntities = payload.rolloverReleases.map { it.toEntity() }
-        periodEntities.forEach { period ->
-            PeriodLedgerRules.validateTotals(period, allocationEntities, movementEntities, releaseEntities, today)
-        }
+        PeriodLedgerRules.validateLedgerProjection(
+            periodEntities,
+            allocationEntities,
+            movementEntities,
+            releaseEntities,
+            today,
+        )
         require(payload.templates.all {
             it.name.isNotBlank() && it.amountMinor > 0 && it.pocketId in pocketIds &&
                 (it.paymentMethodId == null || it.paymentMethodId in methodIds) &&
