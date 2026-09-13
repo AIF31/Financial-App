@@ -91,6 +91,11 @@ class ExpenseWorkflowHostTest {
         compose.onNodeWithTag("movement_amount").assertTextContains("-12,50")
         compose.onNodeWithText("Escribe un importe válido").assertIsDisplayed()
         compose.onNodeWithTag("movement_save").assertIsNotEnabled()
+
+        compose.onNodeWithTag("movement_amount").performTextReplacement("12.50")
+        compose.onNodeWithTag("movement_save").assertIsEnabled().performClick()
+        compose.waitUntil(5_000) { runBlocking { ledger.state.first().movements.size == 1 } }
+        assertEquals(1_250L, runBlocking { ledger.state.first().movements.single().accountingAmountMinor })
     }
 
     @Test fun applying_a_matching_template_requotes_instead_of_reusing_the_saved_conversion() {
