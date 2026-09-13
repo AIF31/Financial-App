@@ -682,6 +682,7 @@ class PocketLedgerHostBehaviorTest {
 
         state = ledger.state.first { it.pockets.any { summary -> summary.pocket.id == pocket.id && summary.retiredThisPeriod } }
         val retired = state.pockets.single { it.pocket.id == pocket.id }
+        assertEquals(35_000L, state.unallocatedMinorByPeriod.getValue(current.id))
         assertEquals(35_000L, state.unallocatedMinor)
         assertEquals(30_000L, state.newFundsMinor)
         assertEquals(0L, retired.budgetMinor)

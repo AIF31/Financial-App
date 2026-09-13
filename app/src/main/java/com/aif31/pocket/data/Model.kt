@@ -140,6 +140,7 @@ data class LedgerState(
     val movements: List<Movement> = emptyList(),
     val paymentMethods: List<PaymentMethod> = emptyList(),
     val templates: List<RecurringTemplate> = emptyList(),
+    val unallocatedMinorByPeriod: Map<String, Long> = emptyMap(),
     val unallocatedMinor: Long = 0,
     val newFundsMinor: Long = 0,
     val rolloverTotalMinor: Long = 0,

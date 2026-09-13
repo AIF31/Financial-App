@@ -867,6 +867,13 @@ class RoomPocketLedger(
             }
         }
         val allSummaries = periods.associate { it.id to summariesFor(it.id) }
+        val unallocatedByPeriod = periods.associate { period ->
+            val periodSummaries = allSummaries.getValue(period.id)
+            period.id to Math.addExact(
+                Math.subtractExact(period.newFundsMinor, periodSummaries.map { it.budgetMinor }.sumMoneyExact()),
+                periodSummaries.map { it.rolloverReleasedMinor }.sumMoneyExact(),
+            )
+        }
         val summaries = allSummaries.getValue(current.id)
         val previous = periods.filter { it.start < current.start }.maxByOrNull { it.start }
         val previousSpendInPreviousCurrency = previous?.let { period ->
@@ -899,7 +906,6 @@ class RoomPocketLedger(
             .toInt().coerceAtLeast(1)
         val totalDays = (current.endExclusive.toEpochDay() - current.start.toEpochDay()).toInt()
         val netSpend = summaries.map { it.netSpendMinor }.sumMoneyExact()
-        val releasedRollover = summaries.map { it.rolloverReleasedMinor }.sumMoneyExact()
         return LedgerState(
             periods = periods,
             currentPeriod = current,
@@ -918,10 +924,8 @@ class RoomPocketLedger(
                     SupportedCurrency.fromCode(it.inputCurrencyCode),
                 )
             },
-            unallocatedMinor = Math.addExact(
-                Math.subtractExact(current.newFundsMinor, summaries.map { it.budgetMinor }.sumMoneyExact()),
-                releasedRollover,
-            ),
+            unallocatedMinorByPeriod = unallocatedByPeriod,
+            unallocatedMinor = unallocatedByPeriod.getValue(current.id),
             newFundsMinor = current.newFundsMinor,
             rolloverTotalMinor = summaries.map { it.rolloverMinor }.sumMoneyExact(),
             netSpendMinor = netSpend,
