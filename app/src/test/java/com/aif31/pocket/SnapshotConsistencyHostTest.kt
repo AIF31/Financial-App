@@ -23,6 +23,7 @@ import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
@@ -162,21 +163,28 @@ class SnapshotConsistencyHostTest {
     }
 
     @Test
-    fun failed_write_exposes_only_the_rolled_back_snapshot() = runTest {
+    fun failed_and_canceled_writes_expose_only_the_rolled_back_snapshot() = runTest {
         val ledger = RoomPocketLedger(database, clock, zone)
         val (periodId, pocketId) = seedVersion(database, ledger, 10_000, "Before")
         ledger.state.first { !it.needsOnboarding }
 
-        val state = readDuringPausedWrite("select * from pockets", rollbackAfterPause = true, write = {
-            val dao = database.financeDao()
-            dao.updatePeriod(dao.period(periodId)!!.copy(newFundsMinor = 20_000))
-            dao.putPocket(dao.pockets().single { it.id == pocketId }.copy(name = "Never committed"))
-        }) {
-            ledger.state.first { !it.needsOnboarding }
-        }
+        listOf(false, true).forEach { cancelAfterPause ->
+            val state = readDuringPausedWrite(
+                "select * from pockets",
+                rollbackAfterPause = !cancelAfterPause,
+                cancelAfterPause = cancelAfterPause,
+                write = {
+                    val dao = database.financeDao()
+                    dao.updatePeriod(dao.period(periodId)!!.copy(newFundsMinor = 20_000))
+                    dao.putPocket(dao.pockets().single { it.id == pocketId }.copy(name = "Never committed"))
+                },
+            ) {
+                ledger.state.first { !it.needsOnboarding }
+            }
 
-        assertCompleteVersion(state, pocketId, 10_000 to "Before")
-        assertCompleteVersion(ledger.state.first { !it.needsOnboarding }, pocketId, 10_000 to "Before")
+            assertCompleteVersion(state, pocketId, 10_000 to "Before")
+            assertCompleteVersion(ledger.state.first { !it.needsOnboarding }, pocketId, 10_000 to "Before")
+        }
     }
 
     @Test
@@ -264,11 +272,13 @@ class SnapshotConsistencyHostTest {
     private suspend fun <T> TestScope.readDuringPausedWrite(
         secondReadFragment: String,
         rollbackAfterPause: Boolean = false,
+        cancelAfterPause: Boolean = false,
         write: suspend () -> Unit,
         read: suspend () -> T,
     ): T {
+        require(!rollbackAfterPause || !cancelAfterPause)
         val writerPaused = CountDownLatch(1)
-        val allowWriter = CountDownLatch(1)
+        val allowWriter = CompletableDeferred<Unit>()
         val writerDone = CountDownLatch(1)
         val writer = backgroundScope.launch(Dispatchers.IO) {
             try {
@@ -276,8 +286,8 @@ class SnapshotConsistencyHostTest {
                     database.withTransaction {
                         write()
                         writerPaused.countDown()
-                        check(allowWriter.await(10, TimeUnit.SECONDS))
-                        if (rollbackAfterPause) throw ExpectedRollback
+                        allowWriter.await()
+                        if (rollbackAfterPause) throw ExpectedRollbackException()
                     }
                 } catch (error: ExpectedRollbackException) {
                     check(rollbackAfterPause)
@@ -290,24 +300,27 @@ class SnapshotConsistencyHostTest {
             "Writer did not reach its in-flight pause",
             withContext(Dispatchers.IO) { writerPaused.await(10, TimeUnit.SECONDS) },
         )
-        queryGate.arm(secondReadFragment, allowWriter, writerDone)
+        queryGate.arm(
+            secondReadFragment,
+            releaseWriter = { if (cancelAfterPause) writer.cancel() else allowWriter.complete(Unit) },
+            writerDone = writerDone,
+        )
         return try {
             read()
         } finally {
-            allowWriter.countDown()
+            if (cancelAfterPause) writer.cancel() else allowWriter.complete(Unit)
             writer.join()
             queryGate.disarm()
         }
     }
 
-    private object ExpectedRollback : ExpectedRollbackException()
-    private open class ExpectedRollbackException : RuntimeException()
+    private class ExpectedRollbackException : RuntimeException()
 
     private class InFlightWriteQueryGate : RoomDatabase.QueryCallback {
         private val active = AtomicReference<Gate?>()
 
-        fun arm(secondReadFragment: String, allowWriter: CountDownLatch, writerDone: CountDownLatch) {
-            check(active.compareAndSet(null, Gate(secondReadFragment, allowWriter, writerDone)))
+        fun arm(secondReadFragment: String, releaseWriter: () -> Unit, writerDone: CountDownLatch) {
+            check(active.compareAndSet(null, Gate(secondReadFragment, releaseWriter, writerDone)))
         }
 
         fun disarm() {
@@ -318,14 +331,14 @@ class SnapshotConsistencyHostTest {
             val gate = active.get() ?: return
             val sql = sqlQuery.lowercase()
             if ((sql.startsWith("begin ") || sql.contains(gate.secondReadFragment)) && gate.triggered.compareAndSet(false, true)) {
-                gate.allowWriter.countDown()
+                gate.releaseWriter()
                 check(gate.writerDone.await(10, TimeUnit.SECONDS)) { "In-flight writer did not finish" }
             }
         }
 
         private data class Gate(
             val secondReadFragment: String,
-            val allowWriter: CountDownLatch,
+            val releaseWriter: () -> Unit,
             val writerDone: CountDownLatch,
             val triggered: AtomicBoolean = AtomicBoolean(),
         )
