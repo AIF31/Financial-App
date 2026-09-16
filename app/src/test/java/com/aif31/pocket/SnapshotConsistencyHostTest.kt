@@ -12,6 +12,7 @@ import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.RoomPocketLedger
+import com.aif31.pocket.domain.SupportedCurrency
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -110,7 +111,7 @@ class SnapshotConsistencyHostTest {
             dao.updatePeriod(dao.period(periodId)!!.copy(newFundsMinor = 20_000))
             dao.putPocket(dao.pockets().single { it.id == pocketId }.copy(name = "Middle"))
         }
-        val repeated = readDuringPausedWrite("select * from pockets", write = {
+        val stateAfterRepeatedInvalidation = readDuringPausedWrite("select * from pockets", write = {
             val dao = database.financeDao()
             dao.updatePeriod(dao.period(periodId)!!.copy(newFundsMinor = 30_000))
             dao.putPocket(dao.pockets().single { it.id == pocketId }.copy(name = "After"))
@@ -120,13 +121,26 @@ class SnapshotConsistencyHostTest {
         }
 
         collector.cancelAndJoin()
-        assertCompleteVersion(repeated, pocketId, 20_000 to "Middle", 30_000 to "After")
+        assertCompleteVersion(stateAfterRepeatedInvalidation, pocketId, 30_000 to "After")
     }
 
     @Test
     fun catch_up_state_is_pre_write_or_post_write_while_the_write_is_in_flight() = runTest {
         val setup = RoomPocketLedger(database, clock, zone)
         setup.execute(LedgerCommand.Initialize(10_000))
+        val initialPeriod = setup.state.first { !it.needsOnboarding }.currentPeriod!!
+        assertEquals(
+            LedgerResult.Success,
+            setup.execute(
+                LedgerCommand.ScheduleCurrencyChange(
+                    targetCurrency = SupportedCurrency.USD,
+                    rate = "0.2666",
+                    effectiveDate = initialPeriod.endExclusive,
+                    source = "Snapshot test",
+                    quoteEffectiveDate = LocalDate.of(2026, 2, 26),
+                )
+            ),
+        )
         val later = RoomPocketLedger(
             database,
             Clock.fixed(Instant.parse("2026-05-01T09:00:00Z"), zone),
@@ -140,9 +154,29 @@ class SnapshotConsistencyHostTest {
             later.state.first { it.periods.isNotEmpty() }
         }
 
-        val preWrite = state.periods.size == 1 && state.currentPeriod == null
-        val postWrite = state.periods.size == 3 && state.currentPeriod?.start == LocalDate.of(2026, 4, 25)
+        val preWrite = state.periods.size == 1 && state.currentPeriod == null && state.pendingCurrencyChange != null
+        val postWrite = state.periods.size == 3 &&
+            state.currentPeriod?.start == LocalDate.of(2026, 4, 25) &&
+            state.pendingCurrencyChange == null
         assertTrue("Expected a complete pre-catch-up or post-catch-up state", preWrite || postWrite)
+    }
+
+    @Test
+    fun failed_write_exposes_only_the_rolled_back_snapshot() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        val (periodId, pocketId) = seedVersion(database, ledger, 10_000, "Before")
+        ledger.state.first { !it.needsOnboarding }
+
+        val state = readDuringPausedWrite("select * from pockets", rollbackAfterPause = true, write = {
+            val dao = database.financeDao()
+            dao.updatePeriod(dao.period(periodId)!!.copy(newFundsMinor = 20_000))
+            dao.putPocket(dao.pockets().single { it.id == pocketId }.copy(name = "Never committed"))
+        }) {
+            ledger.state.first { !it.needsOnboarding }
+        }
+
+        assertCompleteVersion(state, pocketId, 10_000 to "Before")
+        assertCompleteVersion(ledger.state.first { !it.needsOnboarding }, pocketId, 10_000 to "Before")
     }
 
     @Test
@@ -229,6 +263,7 @@ class SnapshotConsistencyHostTest {
 
     private suspend fun <T> TestScope.readDuringPausedWrite(
         secondReadFragment: String,
+        rollbackAfterPause: Boolean = false,
         write: suspend () -> Unit,
         read: suspend () -> T,
     ): T {
@@ -237,10 +272,15 @@ class SnapshotConsistencyHostTest {
         val writerDone = CountDownLatch(1)
         val writer = backgroundScope.launch(Dispatchers.IO) {
             try {
-                database.withTransaction {
-                    write()
-                    writerPaused.countDown()
-                    check(allowWriter.await(10, TimeUnit.SECONDS))
+                try {
+                    database.withTransaction {
+                        write()
+                        writerPaused.countDown()
+                        check(allowWriter.await(10, TimeUnit.SECONDS))
+                        if (rollbackAfterPause) throw ExpectedRollback
+                    }
+                } catch (error: ExpectedRollbackException) {
+                    check(rollbackAfterPause)
                 }
             } finally {
                 writerDone.countDown()
@@ -259,6 +299,9 @@ class SnapshotConsistencyHostTest {
             queryGate.disarm()
         }
     }
+
+    private object ExpectedRollback : ExpectedRollbackException()
+    private open class ExpectedRollbackException : RuntimeException()
 
     private class InFlightWriteQueryGate : RoomDatabase.QueryCallback {
         private val active = AtomicReference<Gate?>()
