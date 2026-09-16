@@ -20,8 +20,6 @@ import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -49,9 +47,9 @@ import org.robolectric.annotation.Config
 class SnapshotConsistencyHostTest {
     private lateinit var context: Context
     private lateinit var database: FinanceDatabase
+    private lateinit var writerDatabase: FinanceDatabase
     private lateinit var databaseName: String
     private lateinit var queryGate: InFlightWriteQueryGate
-    private lateinit var transactionExecutor: GatedTransactionExecutor
     private val zone = ZoneId.of("Asia/Riyadh")
     private val clock = Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone)
 
@@ -60,19 +58,21 @@ class SnapshotConsistencyHostTest {
         context = ApplicationProvider.getApplicationContext()
         databaseName = "snapshot-consistency-${UUID.randomUUID()}.db"
         queryGate = InFlightWriteQueryGate()
-        transactionExecutor = GatedTransactionExecutor(queryGate)
         database = Room.databaseBuilder(context, FinanceDatabase::class.java, databaseName)
             .allowMainThreadQueries()
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
             .setQueryCallback(queryGate, Executor { command -> command.run() })
-            .setTransactionExecutor(transactionExecutor)
+            .build()
+        writerDatabase = Room.databaseBuilder(context, FinanceDatabase::class.java, databaseName)
+            .allowMainThreadQueries()
+            .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
             .build()
     }
 
     @After
     fun tearDown() {
+        writerDatabase.close()
         database.close()
-        transactionExecutor.close()
         context.deleteDatabase(databaseName)
     }
 
@@ -83,7 +83,7 @@ class SnapshotConsistencyHostTest {
         ledger.state.first { !it.needsOnboarding } // Prime Room's invalidation triggers before arming the gate.
 
         val state = readDuringPausedWrite("select * from pockets", write = {
-            val dao = database.financeDao()
+            val dao = writerDatabase.financeDao()
             dao.updatePeriod(dao.period(periodId)!!.copy(newFundsMinor = 20_000))
             dao.putPocket(dao.pockets().single { it.id == pocketId }.copy(name = "After"))
         }) {
@@ -119,7 +119,7 @@ class SnapshotConsistencyHostTest {
             dao.putPocket(dao.pockets().single { it.id == pocketId }.copy(name = "Middle"))
         }
         val stateAfterRepeatedInvalidation = readDuringPausedWrite("select * from pockets", write = {
-            val dao = database.financeDao()
+            val dao = writerDatabase.financeDao()
             dao.updatePeriod(dao.period(periodId)!!.copy(newFundsMinor = 30_000))
             dao.putPocket(dao.pockets().single { it.id == pocketId }.copy(name = "After"))
         }) {
@@ -153,10 +153,15 @@ class SnapshotConsistencyHostTest {
             Clock.fixed(Instant.parse("2026-05-01T09:00:00Z"), zone),
             zone,
         )
+        val writer = RoomPocketLedger(
+            writerDatabase,
+            Clock.fixed(Instant.parse("2026-05-01T09:00:00Z"), zone),
+            zone,
+        )
         later.state.first { it.periods.isNotEmpty() }
 
         val state = readDuringPausedWrite("select * from pockets", write = {
-            assertEquals(LedgerResult.Success, later.execute(LedgerCommand.CatchUpPeriods(25)))
+            assertEquals(LedgerResult.Success, writer.execute(LedgerCommand.CatchUpPeriods(25)))
         }) {
             later.state.first { it.periods.isNotEmpty() }
         }
@@ -180,7 +185,7 @@ class SnapshotConsistencyHostTest {
                 rollbackAfterPause = !cancelAfterPause,
                 cancelAfterPause = cancelAfterPause,
                 write = {
-                    val dao = database.financeDao()
+                    val dao = writerDatabase.financeDao()
                     dao.updatePeriod(dao.period(periodId)!!.copy(newFundsMinor = 20_000))
                     dao.putPocket(dao.pockets().single { it.id == pocketId }.copy(name = "Never committed"))
                 },
@@ -196,6 +201,7 @@ class SnapshotConsistencyHostTest {
     @Test
     fun restore_state_is_one_complete_snapshot_while_restore_is_in_flight() = runTest {
         val target = RoomPocketLedger(database, clock, zone)
+        val writerTarget = RoomPocketLedger(writerDatabase, clock, zone)
         seedVersion(database, target, 10_000, "Before restore")
         target.state.first { !it.needsOnboarding }
 
@@ -209,7 +215,7 @@ class SnapshotConsistencyHostTest {
         }
 
         val state = readDuringPausedWrite("select * from pockets", write = {
-            assertEquals(LedgerResult.Success, target.restoreBackup(backup))
+            assertEquals(LedgerResult.Success, writerTarget.restoreBackup(backup))
         }) {
             target.state.first { !it.needsOnboarding }
         }
@@ -238,7 +244,7 @@ class SnapshotConsistencyHostTest {
         )
 
         val csv = readDuringPausedWrite("select * from periods", write = {
-            val dao = database.financeDao()
+            val dao = writerDatabase.financeDao()
             dao.updatePeriod(dao.period(periodId)!!.copy(accountingCurrencyCode = "USD"))
             dao.putPocket(dao.pockets().single { it.id == pocketId }.copy(name = "After"))
         }) {
@@ -289,7 +295,7 @@ class SnapshotConsistencyHostTest {
         val writer = backgroundScope.launch(Dispatchers.IO) {
             try {
                 try {
-                    database.withTransaction {
+                    writerDatabase.withTransaction {
                         write()
                         writerPaused.countDown()
                         allowWriter.await()
@@ -336,15 +342,10 @@ class SnapshotConsistencyHostTest {
         override fun onQuery(sqlQuery: String, bindArgs: List<Any?>) {
             val gate = active.get() ?: return
             val sql = sqlQuery.lowercase()
-            if (sql.contains(gate.secondReadFragment) && gate.triggered.compareAndSet(false, true)) {
+            if ((sql.startsWith("begin ") || sql.contains(gate.secondReadFragment)) && gate.triggered.compareAndSet(false, true)) {
                 gate.releaseWriter()
                 check(gate.writerDone.await(10, TimeUnit.SECONDS)) { "In-flight writer did not finish" }
             }
-        }
-
-        fun onTransactionSubmitted() {
-            val gate = active.get() ?: return
-            if (gate.triggered.compareAndSet(false, true)) gate.releaseWriter()
         }
 
         private data class Gate(
@@ -353,19 +354,5 @@ class SnapshotConsistencyHostTest {
             val writerDone: CountDownLatch,
             val triggered: AtomicBoolean = AtomicBoolean(),
         )
-    }
-
-    private class GatedTransactionExecutor(
-        private val gate: InFlightWriteQueryGate,
-        private val delegate: ExecutorService = Executors.newSingleThreadExecutor(),
-    ) : Executor, AutoCloseable {
-        override fun execute(command: Runnable) {
-            gate.onTransactionSubmitted()
-            delegate.execute(command)
-        }
-
-        override fun close() {
-            delegate.shutdownNow()
-        }
     }
 }
