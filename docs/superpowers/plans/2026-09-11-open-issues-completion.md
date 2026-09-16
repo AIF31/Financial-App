@@ -252,7 +252,7 @@ private suspend fun assertRejectedWithoutLedgerMutation(operation: suspend (Room
 }
 ```
 
-Use it for aggregate expense overflow, aggregate refund overflow, delete/undo overflow, Movement transfer between periods, allocation-cap overflow, rollover conversion overflow, historical-comparison overflow, and percentage overflow.
+Use it for aggregate expense overflow, aggregate refund overflow, delete/undo overflow, moving/editing a Movement between budget periods, allocation-cap overflow, rollover conversion overflow, historical-comparison overflow, and percentage overflow.
 
 - [ ] **Step 2: Run the new cases and observe RED for any uncovered path**
 
