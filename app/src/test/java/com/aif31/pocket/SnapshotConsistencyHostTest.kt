@@ -20,6 +20,8 @@ import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -49,6 +51,7 @@ class SnapshotConsistencyHostTest {
     private lateinit var database: FinanceDatabase
     private lateinit var databaseName: String
     private lateinit var queryGate: InFlightWriteQueryGate
+    private lateinit var transactionExecutor: GatedTransactionExecutor
     private val zone = ZoneId.of("Asia/Riyadh")
     private val clock = Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone)
 
@@ -57,16 +60,19 @@ class SnapshotConsistencyHostTest {
         context = ApplicationProvider.getApplicationContext()
         databaseName = "snapshot-consistency-${UUID.randomUUID()}.db"
         queryGate = InFlightWriteQueryGate()
+        transactionExecutor = GatedTransactionExecutor(queryGate)
         database = Room.databaseBuilder(context, FinanceDatabase::class.java, databaseName)
             .allowMainThreadQueries()
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
             .setQueryCallback(queryGate, Executor { command -> command.run() })
+            .setTransactionExecutor(transactionExecutor)
             .build()
     }
 
     @After
     fun tearDown() {
         database.close()
+        transactionExecutor.close()
         context.deleteDatabase(databaseName)
     }
 
@@ -330,10 +336,15 @@ class SnapshotConsistencyHostTest {
         override fun onQuery(sqlQuery: String, bindArgs: List<Any?>) {
             val gate = active.get() ?: return
             val sql = sqlQuery.lowercase()
-            if ((sql.startsWith("begin ") || sql.contains(gate.secondReadFragment)) && gate.triggered.compareAndSet(false, true)) {
+            if (sql.contains(gate.secondReadFragment) && gate.triggered.compareAndSet(false, true)) {
                 gate.releaseWriter()
                 check(gate.writerDone.await(10, TimeUnit.SECONDS)) { "In-flight writer did not finish" }
             }
+        }
+
+        fun onTransactionSubmitted() {
+            val gate = active.get() ?: return
+            if (gate.triggered.compareAndSet(false, true)) gate.releaseWriter()
         }
 
         private data class Gate(
@@ -342,5 +353,19 @@ class SnapshotConsistencyHostTest {
             val writerDone: CountDownLatch,
             val triggered: AtomicBoolean = AtomicBoolean(),
         )
+    }
+
+    private class GatedTransactionExecutor(
+        private val gate: InFlightWriteQueryGate,
+        private val delegate: ExecutorService = Executors.newSingleThreadExecutor(),
+    ) : Executor, AutoCloseable {
+        override fun execute(command: Runnable) {
+            gate.onTransactionSubmitted()
+            delegate.execute(command)
+        }
+
+        override fun close() {
+            delegate.shutdownNow()
+        }
     }
 }
