@@ -9,6 +9,7 @@ import com.aif31.pocket.data.ComparisonMode
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerPreferencesEntity
 import com.aif31.pocket.data.LedgerResult
+import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.MovementEntity
 import com.aif31.pocket.data.PocketIconKey
@@ -22,8 +23,14 @@ import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -1777,6 +1784,50 @@ class PocketLedgerHostBehaviorTest {
 
         assertEquals(LocalDate.of(2026, 2, 27), ledger.movementDefaults().localDate)
         assertEquals(mutableClock.millis(), ledger.movementDefaults().instantMillis)
+    }
+
+    @Test
+    fun date_refresh_rebuilds_an_active_state_collection_without_a_ledger_change() = runTest {
+        val mutableClock = MutableClock(Instant.parse("2026-02-26T20:59:00Z"), zone)
+        val ledger = RoomPocketLedger(database, mutableClock, zone)
+        ledger.execute(LedgerCommand.Initialize(28_000))
+        val seeded = ledger.state.first { !it.needsOnboarding }
+        ledger.execute(
+            LedgerCommand.AddMovement(
+                id = "midnight-spend",
+                pocketId = seeded.pockets.first().pocket.id,
+                type = MovementType.EXPENSE,
+                accountingAmountMinor = 2_800,
+                occurredAtUtcMillis = mutableClock.millis(),
+                localDate = LocalDate.of(2026, 2, 26),
+            ),
+        )
+        val states = Channel<LedgerState>(Channel.UNLIMITED)
+        val collector = backgroundScope.launch(Dispatchers.IO) {
+            ledger.state.collect { states.send(it) }
+        }
+        val testWaitDispatcher = Dispatchers.Default.limitedParallelism(1)
+        val before = withContext(testWaitDispatcher) { withTimeout(10_000) { states.receive() } }
+        val backupBefore = ledger.exportBackup()
+
+        mutableClock.value = Instant.parse("2026-02-26T21:01:00Z")
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.CatchUpPeriods(25)))
+        val after = withContext(testWaitDispatcher) {
+            withTimeout(10_000) {
+                var state: LedgerState
+                do state = states.receive()
+                while (state.currentLocalDate != LocalDate.of(2026, 2, 27))
+                state
+            }
+        }
+
+        collector.cancelAndJoin()
+        assertEquals(LocalDate.of(2026, 2, 26), before.currentLocalDate)
+        assertEquals(LocalDate.of(2026, 2, 27), after.currentLocalDate)
+        assertEquals(2, before.elapsedDays)
+        assertEquals(3, after.elapsedDays)
+        assertTrue(after.projectionMinor < before.projectionMinor)
+        assertTrue(backupBefore.contentEquals(ledger.exportBackup()))
     }
 
     @Test

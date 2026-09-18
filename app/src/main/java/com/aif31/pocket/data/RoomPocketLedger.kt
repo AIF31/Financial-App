@@ -17,7 +17,9 @@ import java.util.UUID
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -31,20 +33,24 @@ class RoomPocketLedger(
 ) : PocketLedger {
     private val dao = database.financeDao()
     private val restoreMutex = Mutex()
+    private val dateRefreshes = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
-    override val state: Flow<LedgerState> = database.invalidationTracker.createFlow(
-        "periods",
-        "pockets",
-        "allocations",
-        "period_pockets",
-        "rollover_releases",
-        "payment_methods",
-        "movements",
-        "recurring_templates",
-        "pending_currency_change",
-        "ledger_preferences",
-        "movement_suggestions",
-        emitInitialState = true,
+    override val state: Flow<LedgerState> = merge(
+        database.invalidationTracker.createFlow(
+            "periods",
+            "pockets",
+            "allocations",
+            "period_pockets",
+            "rollover_releases",
+            "payment_methods",
+            "movements",
+            "recurring_templates",
+            "pending_currency_change",
+            "ledger_preferences",
+            "movement_suggestions",
+            emitInitialState = true,
+        ).map { Unit },
+        dateRefreshes,
     ).map {
         val snapshot = database.withTransaction {
             LedgerSnapshot(
@@ -482,27 +488,40 @@ class RoomPocketLedger(
         LedgerResult.Success
     }
 
-    private suspend fun catchUpPeriods(preferredStartDay: Int): LedgerResult = database.withTransaction {
-        val plan = PeriodLedgerRules.catchUp(
-            periods = dao.periods(),
-            pockets = dao.pockets(),
-            allocations = dao.allocations(),
-            periodPockets = dao.periodPockets(),
-            rolloverReleases = dao.rolloverReleases(),
-            movements = dao.movements(),
-            pendingCurrencyChange = dao.pendingCurrencyChange(),
-            preferredStartDay = preferredStartDay,
-            today = today(),
-            zoneId = zoneId,
-        )
-        dao.deleteExpiredMovementSuggestions(clock.millis())
-        dao.putPeriodEntities(plan.periods)
-        dao.putPeriodPockets(plan.periodPockets)
-        dao.putAllocations(plan.allocations)
-        dao.putRolloverReleases(plan.rolloverReleases)
-        if (plan.pendingCurrencyChange == null) dao.clearPendingCurrencyChange()
-        else dao.putPendingCurrencyChange(plan.pendingCurrencyChange)
-        LedgerResult.Success
+    private suspend fun catchUpPeriods(preferredStartDay: Int): LedgerResult {
+        database.withTransaction {
+            val periods = dao.periods()
+            val allocations = dao.allocations()
+            val periodPockets = dao.periodPockets()
+            val rolloverReleases = dao.rolloverReleases()
+            val pendingCurrencyChange = dao.pendingCurrencyChange()
+            val plan = PeriodLedgerRules.catchUp(
+                periods = periods,
+                pockets = dao.pockets(),
+                allocations = allocations,
+                periodPockets = periodPockets,
+                rolloverReleases = rolloverReleases,
+                movements = dao.movements(),
+                pendingCurrencyChange = pendingCurrencyChange,
+                preferredStartDay = preferredStartDay,
+                today = today(),
+                zoneId = zoneId,
+            )
+            val now = clock.millis()
+            if (dao.pendingMovementSuggestions().any { it.expiresAtUtcMillis <= now }) {
+                dao.deleteExpiredMovementSuggestions(now)
+            }
+            if (plan.periods != periods) dao.putPeriodEntities(plan.periods)
+            if (plan.periodPockets != periodPockets) dao.putPeriodPockets(plan.periodPockets)
+            if (plan.allocations != allocations) dao.putAllocations(plan.allocations)
+            if (plan.rolloverReleases != rolloverReleases) dao.putRolloverReleases(plan.rolloverReleases)
+            if (plan.pendingCurrencyChange != pendingCurrencyChange) {
+                if (plan.pendingCurrencyChange == null) dao.clearPendingCurrencyChange()
+                else dao.putPendingCurrencyChange(plan.pendingCurrencyChange)
+            }
+        }
+        dateRefreshes.emit(Unit)
+        return LedgerResult.Success
     }
 
     private suspend fun markPeriodReviewed(periodId: String): LedgerResult = database.withTransaction {

@@ -9,20 +9,26 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.aif31.pocket.data.LedgerCommand
+import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.ui.PocketTheme
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.time.LocalDate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private val recovery by viewModels<RecoveryViewModel>()
+    private lateinit var dateCoordinator: ForegroundDateCoordinator
 
     private val createBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri == null) showOperationMessage("Creación de backup cancelada.")
@@ -72,7 +78,19 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        catchUpPeriods()
+        val pocketApplication = application as PocketApplication
+        dateCoordinator = ForegroundDateCoordinator(
+            initialDate = LocalDate.MIN,
+            clock = pocketApplication.clock,
+            zoneId = pocketApplication.budgetZone,
+        ) { catchUpPeriods() }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) {
+                    delay(dateCoordinator.refresh())
+                }
+            }
+        }
         val openExpense = intent?.action == ACTION_NEW_EXPENSE
         setContent {
             PocketTheme {
@@ -104,17 +122,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        catchUpPeriods()
-    }
-
-    private fun catchUpPeriods() {
-        lifecycleScope.launch {
-            val application = application as PocketApplication
-            val preferredStartDay = application.preferences.state.first().futurePeriodStartDay
-            application.ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay))
-        }
+    private suspend fun catchUpPeriods(): Boolean {
+        val application = application as PocketApplication
+        val preferredStartDay = application.preferences.state.first().futurePeriodStartDay
+        return application.ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay)) == LedgerResult.Success
     }
 
     internal fun launchDocumentOperation(operation: DocumentOperation) {
