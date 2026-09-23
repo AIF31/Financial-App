@@ -17,7 +17,6 @@ import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
@@ -56,7 +55,8 @@ class SnapshotConsistencyHostTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        databaseName = "snapshot-consistency-${UUID.randomUUID()}.db"
+        databaseName = "snapshot.db"
+        check(context.getDatabasePath(databaseName).parentFile!!.let { it.isDirectory || it.mkdirs() })
         queryGate = InFlightWriteQueryGate()
         database = Room.databaseBuilder(context, FinanceDatabase::class.java, databaseName)
             .allowMainThreadQueries()
@@ -110,7 +110,7 @@ class SnapshotConsistencyHostTest {
                 }
             }
         }
-        val initial = withTimeout(10_000) { states.receive() }
+        val initial = withContext(Dispatchers.IO) { withTimeout(10_000) { states.receive() } }
         assertCompleteVersion(initial, pocketId, 10_000 to "Before")
 
         database.withTransaction {
@@ -124,7 +124,7 @@ class SnapshotConsistencyHostTest {
             dao.putPocket(dao.pockets().single { it.id == pocketId }.copy(name = "After"))
         }) {
             continueAfterInitial.countDown()
-            withTimeout(10_000) { states.receive() }
+            withContext(Dispatchers.IO) { withTimeout(10_000) { states.receive() } }
         }
 
         collector.cancelAndJoin()

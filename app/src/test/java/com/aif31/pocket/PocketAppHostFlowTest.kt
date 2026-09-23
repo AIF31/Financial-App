@@ -196,6 +196,7 @@ class PocketAppHostFlowTest {
         compose.onNodeWithText("Comenzar").performScrollTo().performClick()
         compose.waitUntil(5_000) { runBlocking { ledger.state.first().newFundsMinor == 1_250L } }
 
+        compose.waitUntilExactlyOneExists(hasText("Ajustes"), 5_000)
         compose.onNodeWithText("Ajustes").performClick()
         compose.onNodeWithText(SettingsSection.PERIOD.title).performClick()
         compose.onNodeWithTag("period_funds").performTextClearance()
