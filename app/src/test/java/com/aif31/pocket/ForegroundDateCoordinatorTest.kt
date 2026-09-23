@@ -88,6 +88,23 @@ class ForegroundDateCoordinatorTest {
         assertEquals(1, calls)
     }
 
+    @Test
+    fun an_invalid_clock_signal_does_not_stop_future_checks() = runTest {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val clock = MutableClock(Instant.MAX, zone)
+        var calls = 0
+        val coordinator = ForegroundDateCoordinator(LocalDate.of(2026, 3, 24), clock, zone) {
+            calls++
+            true
+        }
+
+        assertEquals(60_000L, coordinator.refresh())
+        clock.value = Instant.parse("2026-03-25T09:00:00Z")
+        coordinator.refresh()
+
+        assertEquals(1, calls)
+    }
+
     private class MutableClock(
         var value: Instant,
         private val zoneId: ZoneId,
