@@ -230,6 +230,8 @@ interface FinanceDao {
     @Query("SELECT * FROM recurring_templates ORDER BY name") suspend fun templates(): List<RecurringTemplateEntity>
     @Query("SELECT * FROM pending_currency_change WHERE id = 1") suspend fun pendingCurrencyChange(): PendingCurrencyChangeEntity?
     @Query("SELECT * FROM ledger_preferences WHERE id = 1") suspend fun ledgerPreferences(): LedgerPreferencesEntity?
+    @Query("SELECT * FROM movement_suggestions WHERE status = 'PENDING' ORDER BY effective_at_utc_millis DESC")
+    suspend fun pendingMovementSuggestions(): List<MovementSuggestionEntity>
     @Query("SELECT * FROM movement_suggestions WHERE identity_hash = :identityHash") suspend fun movementSuggestion(identityHash: String): MovementSuggestionEntity?
     @Query("SELECT COUNT(*) FROM periods") suspend fun periodCount(): Int
     @Query("SELECT * FROM periods WHERE id = :id") suspend fun period(id: String): PeriodEntity?

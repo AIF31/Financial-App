@@ -11,6 +11,17 @@ import java.time.ZoneId
 import java.util.UUID
 
 internal object PeriodLedgerRules {
+    fun validateLedgerProjection(
+        periods: List<PeriodEntity>,
+        allocations: List<AllocationEntity>,
+        movements: List<MovementEntity>,
+        rolloverReleases: List<RolloverReleaseEntity>,
+        today: LocalDate,
+    ) {
+        periods.forEach { validateTotals(it, allocations, movements, rolloverReleases, today) }
+        validateHistoricalComparisons(periods, movements)
+    }
+
     fun validateTotals(
         period: PeriodEntity,
         allocations: List<AllocationEntity>,
@@ -56,6 +67,28 @@ internal object PeriodLedgerRules {
         }
         val totalDays = Math.toIntExact(Math.subtractExact(period.endExclusiveEpochDay, period.startEpochDay))
         PocketMath.project(netSpend, elapsed, totalDays)
+    }
+
+    fun validateHistoricalComparisons(
+        periods: List<PeriodEntity>,
+        movements: List<MovementEntity>,
+    ) {
+        periods.sortedBy { it.startEpochDay }.zipWithNext().forEach { (source, target) ->
+            val sourceCurrency = SupportedCurrency.fromCode(source.accountingCurrencyCode)
+            val targetCurrency = SupportedCurrency.fromCode(target.accountingCurrencyCode)
+            if (sourceCurrency != targetCurrency) {
+                val sourceMovements = movements.filter { it.periodId == source.id }
+                val netSpend = Math.subtractExact(
+                    sourceMovements.filter { it.type == MovementType.EXPENSE.name }
+                        .map { it.accountingAmountMinor }.sumMoneyExact(),
+                    sourceMovements.filter { it.type == MovementType.REFUND.name }
+                        .map { it.accountingAmountMinor }.sumMoneyExact(),
+                )
+                requireNotNull(target.frozenRateFrom(sourceCurrency)) {
+                    "Falta la conversión para comparar periodos"
+                }.convertMinor(netSpend)
+            }
+        }
     }
 
     fun catchUp(
@@ -167,6 +200,13 @@ internal object PeriodLedgerRules {
                 else -> period
             }
         }
+        validateLedgerProjection(
+            finalPeriods,
+            plannedAllocations.values.toList(),
+            movements,
+            plannedReleases,
+            today,
+        )
         return CatchUpPlan(
             periods = finalPeriods,
             allocations = plannedAllocations.values.toList(),

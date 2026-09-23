@@ -13,15 +13,24 @@ import com.aif31.pocket.settings.DataStorePreferences
 import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
 import com.aif31.pocket.settings.WorkReminderScheduler
+import java.time.Clock
+import java.time.ZoneId
 import kotlinx.coroutines.flow.first
 
 class PocketApplication : Application() {
+    internal val clock: Clock = Clock.systemUTC()
+    internal val budgetZone: ZoneId = ZoneId.of("Asia/Riyadh")
     val database: FinanceDatabase by lazy { FinanceDatabase.open(this) }
     internal val notificationBetaMetrics by lazy { createNotificationBetaMetrics(this) }
     val ledger: PocketLedger by lazy {
-        RoomPocketLedger(database) { amountCorrected, currencyCorrected ->
-            notificationBetaMetrics.recordConfirmation(amountCorrected, currencyCorrected)
-        }
+        RoomPocketLedger(
+            database = database,
+            clock = clock,
+            zoneId = budgetZone,
+            recordNotificationConfirmation = { amountCorrected, currencyCorrected ->
+                notificationBetaMetrics.recordConfirmation(amountCorrected, currencyCorrected)
+            },
+        )
     }
     val preferences: PreferencesStore by lazy { DataStorePreferences(this) }
     val exchangeRates: ExchangeRateRepository by lazy {

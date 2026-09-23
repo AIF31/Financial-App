@@ -211,6 +211,11 @@ class PocketAppHostFlowTest {
         compose.onNodeWithText("Guardar fondos").performClick()
         compose.waitUntilExactlyOneExists(hasText("Escribe fondos válidos"), 5_000)
         assertEquals(3_075L, runBlocking { ledger.state.first().newFundsMinor })
+
+        compose.onNodeWithTag("period_funds").performTextReplacement("-30.75")
+        compose.onNodeWithText("Guardar fondos").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Escribe fondos válidos"), 5_000)
+        assertEquals(3_075L, runBlocking { ledger.state.first().newFundsMinor })
     }
 
     @Test
@@ -1235,6 +1240,13 @@ class PocketAppHostFlowTest {
             ledger.state.first().pockets.first { it.pocket.name == "Viajes" }.budgetMinor
         }
         assertEquals(0L, savedBudget)
+
+        compose.onNodeWithTag("allocation_amount").performTextReplacement("12,50")
+        compose.onNodeWithText("Guardar presupuesto").performClick()
+        compose.waitUntil(5_000) {
+            runBlocking { ledger.state.first().pockets.first { it.pocket.name == "Viajes" }.budgetMinor == 1_250L }
+        }
+        assertEquals(1_250L, runBlocking { ledger.state.first().pockets.first { it.pocket.name == "Viajes" }.budgetMinor })
     }
 
     @Test

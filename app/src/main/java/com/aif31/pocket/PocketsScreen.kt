@@ -52,12 +52,9 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
     val retiredPockets = shownPockets.filter { it.retiredThisPeriod }
     val allocatedMinor = shownPockets.map { it.budgetMinor }.sumMoneyExact()
     val availableMinor = shownPockets.map { it.availabilityMinor }.sumMoneyExact()
-    val releasedRolloverMinor = shownPockets.map { it.rolloverReleasedMinor }.sumMoneyExact()
-    val periodFundsMinor = selectedPeriod?.newFundsMinor ?: state.newFundsMinor
-    val unallocatedForPeriodMinor = Math.addExact(
-        Math.subtractExact(periodFundsMinor, allocatedMinor),
-        releasedRolloverMinor,
-    )
+    val unallocatedForPeriodMinor = selectedPeriod?.id
+        ?.let(state.unallocatedMinorByPeriod::get)
+        ?: state.unallocatedMinor
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding).testTag("pockets_list"),

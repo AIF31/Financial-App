@@ -21,9 +21,11 @@ class DomainRulesTest {
     fun `money uses one explicit decimal input policy without changing signs`() {
         assertEquals(Money(1_250, "SAR"), Money.parse("12.50", "SAR"))
         assertEquals(Money(1_250, "SAR"), Money.parse("12,50", "SAR"))
+        assertEquals(Money(1_200, "SAR"), Money.parse("12.00", "SAR"))
+        assertEquals(Money(1_200, "SAR"), Money.parse("12,00", "SAR"))
         assertEquals(Money(-1_250, "SAR"), Money.parse("-12,50", "SAR"))
 
-        listOf("", "12..50", "12,5.0", "1 234.50", "1,234.50", "١٢٫٥٠").forEach { value ->
+        listOf("", "12..50", "12,5.0", "1 234.50", "1,234.50", "١٢٫٥٠", "+", "-", ".50", "12.", "12,", "12.500", "+-12.50", "1_000.00").forEach { value ->
             assertThrows(IllegalArgumentException::class.java) {
                 Money.parse(value, "SAR")
             }
