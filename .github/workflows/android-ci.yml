@@ -73,6 +73,7 @@ jobs:
           ./gradlew
           :app:pixel6Api35DebugAndroidTest
           -Pandroid.testInstrumentationRunnerArguments.notAnnotation=androidx.test.filters.LargeTest
+          -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
           --no-daemon
 
       - name: Verify managed-device tests executed

@@ -1,5 +1,8 @@
 *.iml
 .gradle/
+.gradle-user-home/
+.android/
+.m2/
 .kotlin/
 .worktrees/
 .idea/

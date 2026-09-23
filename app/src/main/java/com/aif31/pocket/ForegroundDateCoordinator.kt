@@ -1,6 +1,7 @@
 package com.aif31.pocket
 
 import java.time.Clock
+import java.time.DateTimeException
 import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneId
@@ -17,20 +18,27 @@ internal class ForegroundDateCoordinator(
     private var latestDate = initialDate
 
     suspend fun refresh(): Long {
-        val now = clock.instant().atZone(zoneId)
-        val current = mutex.withLock {
-            val date = now.toLocalDate()
-            if (!date.isAfter(latestDate)) return@withLock true
-            if (!onForwardDate()) return@withLock false
-            latestDate = date
-            true
+        val now = try {
+            clock.instant().atZone(zoneId)
+        } catch (_: DateTimeException) {
+            return FOREGROUND_CHECK_INTERVAL_MILLIS
         }
-        val nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay(zoneId).toInstant()
-        val untilMidnight = Duration.between(now.toInstant(), nextMidnight).toMillis().coerceAtLeast(1)
-        return if (current) untilMidnight else minOf(untilMidnight, RETRY_DELAY_MILLIS)
+        val untilMidnight = try {
+            val nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay(zoneId).toInstant()
+            Duration.between(now.toInstant(), nextMidnight).toMillis().coerceAtLeast(1)
+        } catch (_: DateTimeException) {
+            return FOREGROUND_CHECK_INTERVAL_MILLIS
+        }
+        mutex.withLock {
+            val date = now.toLocalDate()
+            if (!date.isAfter(latestDate)) return@withLock
+            if (!onForwardDate()) return@withLock
+            latestDate = date
+        }
+        return minOf(untilMidnight, FOREGROUND_CHECK_INTERVAL_MILLIS)
     }
 
     private companion object {
-        const val RETRY_DELAY_MILLIS = 60_000L
+        const val FOREGROUND_CHECK_INTERVAL_MILLIS = 60_000L
     }
 }

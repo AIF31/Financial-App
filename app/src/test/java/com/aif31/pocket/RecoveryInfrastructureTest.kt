@@ -1,9 +1,11 @@
 package com.aif31.pocket
 
+import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
+import androidx.lifecycle.SavedStateHandle
 import androidx.test.core.app.ApplicationProvider
 import java.io.File
 import org.junit.Assert.assertArrayEquals
@@ -59,5 +61,21 @@ class RecoveryInfrastructureTest {
             override fun startActivity(intent: Intent) = throw SecurityException("provider denied launch")
         }
         assertThrows(SecurityException::class.java) { BackupShareLauncher.share(failingContext, backupUri) }
+    }
+
+    @Test
+    fun share_retry_uses_only_the_prepared_artifact_and_survives_recreation() {
+        val directory = File(context.cacheDir, "shared_backups").apply { mkdirs() }
+        File(directory, "older.pocketbackup").writeText("older")
+        val state = SavedStateHandle()
+        val application = ApplicationProvider.getApplicationContext<Application>()
+        val recovery = RecoveryViewModel(application, state)
+
+        assertEquals(null, recovery.preparedShareFile())
+        val prepared = File(directory, "current.pocketbackup").apply { writeText("current") }
+        recovery.rememberPreparedShare(prepared)
+        assertEquals(prepared, RecoveryViewModel(application, state).preparedShareFile())
+        prepared.delete()
+        assertEquals(null, recovery.preparedShareFile())
     }
 }
