@@ -48,7 +48,7 @@ class ForegroundDateCoordinatorTest {
     }
 
     @Test
-    fun refresh_uses_the_injected_clock_and_returns_the_next_midnight_delay() = runTest {
+    fun refresh_uses_the_injected_clock_and_rechecks_during_a_long_foreground_session() = runTest {
         val zone = ZoneId.of("Asia/Riyadh")
         val clock = MutableClock(Instant.parse("2026-03-24T20:59:00Z"), zone)
         var calls = 0
@@ -69,6 +69,23 @@ class ForegroundDateCoordinatorTest {
         coordinator.refresh()
 
         assertEquals(2, calls)
+    }
+
+    @Test
+    fun a_forward_clock_change_is_detected_at_the_next_foreground_check() = runTest {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val clock = MutableClock(Instant.parse("2026-03-24T09:00:00Z"), zone)
+        var calls = 0
+        val coordinator = ForegroundDateCoordinator(LocalDate.of(2026, 3, 24), clock, zone) {
+            calls++
+            true
+        }
+
+        assertEquals(60_000L, coordinator.refresh())
+        clock.value = Instant.parse("2026-03-25T09:00:00Z")
+        coordinator.refresh()
+
+        assertEquals(1, calls)
     }
 
     private class MutableClock(

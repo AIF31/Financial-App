@@ -18,19 +18,18 @@ internal class ForegroundDateCoordinator(
 
     suspend fun refresh(): Long {
         val now = clock.instant().atZone(zoneId)
-        val current = mutex.withLock {
+        mutex.withLock {
             val date = now.toLocalDate()
-            if (!date.isAfter(latestDate)) return@withLock true
-            if (!onForwardDate()) return@withLock false
+            if (!date.isAfter(latestDate)) return@withLock
+            if (!onForwardDate()) return@withLock
             latestDate = date
-            true
         }
         val nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay(zoneId).toInstant()
         val untilMidnight = Duration.between(now.toInstant(), nextMidnight).toMillis().coerceAtLeast(1)
-        return if (current) untilMidnight else minOf(untilMidnight, RETRY_DELAY_MILLIS)
+        return minOf(untilMidnight, FOREGROUND_CHECK_INTERVAL_MILLIS)
     }
 
     private companion object {
-        const val RETRY_DELAY_MILLIS = 60_000L
+        const val FOREGROUND_CHECK_INTERVAL_MILLIS = 60_000L
     }
 }
