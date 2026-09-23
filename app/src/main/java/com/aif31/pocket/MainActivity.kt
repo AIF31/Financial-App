@@ -19,6 +19,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.time.LocalDate
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -149,12 +150,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun shareBackup() {
+        recovery.clearPreparedShare()
         lifecycleScope.launch {
             try {
                 val file = withContext(Dispatchers.IO) {
                     val bytes = (application as PocketApplication).ledger.exportBackup()
                     val directory = File(cacheDir, SHARED_BACKUP_DIRECTORY).apply { mkdirs() }
-                    val target = AtomicFile(File(directory, "pocket-${java.time.LocalDate.now()}.pocketbackup"))
+                    val target = AtomicFile(File(directory, "pocket-${LocalDate.now()}-${UUID.randomUUID()}.pocketbackup"))
                     val output = target.startWrite()
                     try {
                         output.write(bytes)
@@ -165,7 +167,9 @@ class MainActivity : ComponentActivity() {
                     }
                     target.baseFile
                 }
+                recovery.rememberPreparedShare(file)
                 BackupShareLauncher.share(this@MainActivity, file)
+                recovery.clearPreparedShare()
                 showOperationMessage("Selector para compartir abierto.")
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
@@ -178,11 +182,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun shareExistingBackup() {
+        val file = recovery.preparedShareFile()
+        if (file == null) {
+            shareBackup()
+            return
+        }
         showOperationMessage(null)
         try {
-            val file = File(cacheDir, SHARED_BACKUP_DIRECTORY).listFiles()?.maxByOrNull { it.lastModified() }
-                ?: throw IOException("No prepared backup is available")
             BackupShareLauncher.share(this, file)
+            recovery.clearPreparedShare()
             showOperationMessage("Selector para compartir abierto.")
         } catch (_: Exception) {
             showOperationMessage(

@@ -31,6 +31,18 @@ internal class RecoveryViewModel(
     )
         private set
 
+    fun rememberPreparedShare(file: File) {
+        savedState[STATE_PREPARED_SHARE_FILE] = file.name
+    }
+
+    fun preparedShareFile(): File? = savedState.get<String>(STATE_PREPARED_SHARE_FILE)?.let { name ->
+        File(File(getApplication<Application>().cacheDir, "shared_backups"), name).takeIf { it.isFile }
+    }
+
+    fun clearPreparedShare() {
+        savedState[STATE_PREPARED_SHARE_FILE] = null
+    }
+
     init {
         val revision = candidateRevision
         viewModelScope.launch {
@@ -65,6 +77,7 @@ internal class RecoveryViewModel(
     private companion object {
         const val STATE_OPERATION_MESSAGE = "operation_message"
         const val STATE_RETRY_OPERATION = "retry_operation"
+        const val STATE_PREPARED_SHARE_FILE = "prepared_share_file"
     }
 }
 
