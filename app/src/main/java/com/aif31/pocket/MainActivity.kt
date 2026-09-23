@@ -226,6 +226,5 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val ACTION_NEW_EXPENSE = "com.aif31.pocket.NEW_EXPENSE"
         private const val MAX_BACKUP_BYTES = 10 * 1024 * 1024
-        private const val SHARED_BACKUP_DIRECTORY = "shared_backups"
     }
 }

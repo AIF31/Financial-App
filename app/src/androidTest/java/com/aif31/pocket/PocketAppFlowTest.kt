@@ -27,6 +27,8 @@ import androidx.compose.ui.test.waitUntilExactlyOneExists
 import androidx.compose.ui.test.waitUntilAtLeastOneExists
 import androidx.compose.ui.test.waitUntilDoesNotExist
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.core.content.FileProvider
+import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.intent.Intents
@@ -42,6 +44,7 @@ import com.aif31.pocket.data.RoomPocketLedger
 import com.aif31.pocket.settings.AppPreferences
 import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
+import java.io.File
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalTime
@@ -50,6 +53,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -428,6 +432,59 @@ class PocketAppFlowTest {
             }
         } finally {
             Intents.release()
+            runBlocking { application.database.clearAllTables() }
+        }
+    }
+
+    @Test
+    fun main_activity_share_retry_keeps_the_prepared_file_and_reprepares_when_it_is_missing() {
+        val application = ApplicationProvider.getApplicationContext<PocketApplication>()
+        runBlocking { application.database.clearAllTables() }
+        val directory = File(application.cacheDir, SHARED_BACKUP_DIRECTORY).apply { mkdirs() }
+        val older = File(directory, "older-${java.util.UUID.randomUUID()}.pocketbackup").apply { writeText("older") }
+        val prepared = File(directory, "prepared-${java.util.UUID.randomUUID()}.pocketbackup").apply { writeText("prepared") }
+        Intents.init()
+        try {
+            intending(hasAction(Intent.ACTION_CHOOSER)).respondWith(ActivityResult(Activity.RESULT_OK, null))
+            ActivityScenario.launch<MainActivity>(Intent(application, MainActivity::class.java)).use { scenario ->
+                scenario.onActivity { activity ->
+                    ViewModelProvider(activity)[RecoveryViewModel::class.java].apply {
+                        rememberPreparedShare(prepared)
+                        showOperationMessage("No se pudo compartir el backup.", DocumentOperation.SHARE)
+                    }
+                }
+                scenario.recreate()
+                compose.waitUntilExactlyOneExists(hasText("Reintentar"), 5_000)
+                compose.onNodeWithText("Reintentar").performClick()
+                compose.waitUntilExactlyOneExists(hasText("Selector para compartir abierto."), 5_000)
+
+                fun lastSharedUri(): Uri {
+                    val chooser = Intents.getIntents().last { it.action == Intent.ACTION_CHOOSER }
+                    val send = chooser.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)!!
+                    return send.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)!!
+                }
+
+                val preparedUri = FileProvider.getUriForFile(application, "${application.packageName}.fileprovider", prepared)
+                assertEquals(preparedUri, lastSharedUri())
+
+                scenario.onActivity { activity ->
+                    ViewModelProvider(activity)[RecoveryViewModel::class.java]
+                        .showOperationMessage("No se pudo compartir el backup.", DocumentOperation.SHARE)
+                }
+                compose.waitUntilExactlyOneExists(hasText("Reintentar"), 5_000)
+                compose.onNodeWithText("Reintentar").performClick()
+                compose.waitUntilExactlyOneExists(hasText("Selector para compartir abierto."), 5_000)
+
+                assertNotEquals(preparedUri, lastSharedUri())
+                assertNotEquals(
+                    FileProvider.getUriForFile(application, "${application.packageName}.fileprovider", older),
+                    lastSharedUri(),
+                )
+            }
+        } finally {
+            Intents.release()
+            older.delete()
+            prepared.delete()
             runBlocking { application.database.clearAllTables() }
         }
     }

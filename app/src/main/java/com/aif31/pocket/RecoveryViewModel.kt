@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 internal enum class DocumentOperation { BACKUP, SHARE, CSV, RESTORE }
+internal const val SHARED_BACKUP_DIRECTORY = "shared_backups"
 
 internal class RecoveryViewModel(
     application: Application,
@@ -36,7 +37,7 @@ internal class RecoveryViewModel(
     }
 
     fun preparedShareFile(): File? = savedState.get<String>(STATE_PREPARED_SHARE_FILE)?.let { name ->
-        File(File(getApplication<Application>().cacheDir, "shared_backups"), name).takeIf { it.isFile }
+        File(File(getApplication<Application>().cacheDir, SHARED_BACKUP_DIRECTORY), name).takeIf { it.isFile }
     }
 
     fun clearPreparedShare() {
