@@ -58,3 +58,5 @@ Device tests are configured on the `pixel6Api35` Gradle Managed Device:
 ```bash
 ./gradlew :app:pixel6Api35DebugAndroidTest
 ```
+
+CI runs this API 35 `aosp-atd` profile with KVM enabled and retains its test reports and additional outputs for 14 days, including failed runs.
