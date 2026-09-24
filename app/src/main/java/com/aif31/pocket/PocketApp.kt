@@ -184,7 +184,7 @@ fun PocketApp(
         restoreError = null
         backupPreview = restoreCandidate?.let { ledger.previewBackup(it) }
     }
-    operationMessage?.takeIf { observedState?.needsOnboarding != true }?.let { message ->
+    operationMessage?.takeIf { observedState?.needsOnboarding == false }?.let { message ->
         AlertDialog(
             onDismissRequest = onOperationMessageHandled,
             title = { Text(if (operationRetryLabel == null) "Operación de documentos" else "La operación falló") },

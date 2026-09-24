@@ -837,8 +837,8 @@ class PocketAppHostFlowTest {
             )
         }
 
+        compose.waitUntilExactlyOneExists(hasText("Configura tu primer periodo"), 5_000)
         compose.waitUntilExactlyOneExists(hasText("No se pudo crear el backup."), 5_000)
-        compose.onNodeWithText("Configura tu primer periodo").assertExists()
         compose.onNodeWithText("Aceptar").performClick()
         compose.waitUntilDoesNotExist(hasText("No se pudo crear el backup."), 5_000)
         compose.runOnIdle { message.value = "Selección de backup cancelada." }
@@ -867,6 +867,7 @@ class PocketAppHostFlowTest {
             )
         }
 
+        compose.waitUntilExactlyOneExists(hasText("Configura tu primer periodo"), 5_000)
         compose.waitUntilExactlyOneExists(hasText("No se pudo compartir el backup."), 5_000)
         compose.onNodeWithText("Reintentar").performClick()
 
