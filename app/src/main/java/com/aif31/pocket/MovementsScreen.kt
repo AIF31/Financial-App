@@ -80,7 +80,7 @@ internal fun MovementsScreen(
     }
     var query by rememberSaveable { mutableStateOf("") }
     var periodIndex by rememberSaveable { mutableStateOf(0) }
-    var pocketIndex by rememberSaveable { mutableStateOf(0) }
+    var selectedPocketId by rememberSaveable { mutableStateOf<String?>(null) }
     var currencyIndex by rememberSaveable { mutableStateOf(0) }
     var methodIndex by rememberSaveable { mutableStateOf(0) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -88,23 +88,24 @@ internal fun MovementsScreen(
 
     val scope = rememberCoroutineScope()
     val periodOptions = listOf<String?>(null) + state.periods.map { it.id }
-    val pocketOptions = listOf<String?>(null) + state.pockets.map { it.pocket.id }
+    val pocketOptions = listOf<String?>(null) + state.pocketCatalog.map { it.id }
+    val pocketIndex = pocketOptions.indexOf(selectedPocketId).coerceAtLeast(0)
     val currencyOptions = listOf<String?>(null) + state.movements.map { it.originalCurrencyCode }.distinct()
     val methodOptions = listOf<String?>(null) + state.paymentMethods.map { it.id }
     val filtered = state.movements.filter { movement ->
         val text = listOfNotNull(movement.merchant, movement.note).joinToString(" ")
         (query.isBlank() || text.contains(query, ignoreCase = true)) &&
             (periodOptions.getOrNull(periodIndex) == null || movement.periodId == periodOptions[periodIndex]) &&
-            (pocketOptions.getOrNull(pocketIndex) == null || movement.pocketId == pocketOptions[pocketIndex]) &&
+            (selectedPocketId == null || movement.pocketId == selectedPocketId) &&
             (currencyOptions.getOrNull(currencyIndex) == null || movement.originalCurrencyCode == currencyOptions[currencyIndex]) &&
             (methodOptions.getOrNull(methodIndex) == null || movement.paymentMethodId == methodOptions[methodIndex])
     }
     val periodLabels = listOf("Todos los periodos") + state.periods.map { it.start.toString() }
-    val pocketLabels = listOf("Todos los Pockets") + state.pockets.map { it.pocket.name }
+    val pocketLabels = listOf("Todos los Pockets") + state.pocketCatalog.map { it.name }
     val currencyLabels = listOf("Todas las monedas") + currencyOptions.drop(1).map { it.orEmpty() }
     val methodLabels = listOf("Todos los métodos") + state.paymentMethods.map { it.name }
     val groupedMovements = filtered.groupBy { it.localDate }.entries.sortedByDescending { it.key }
-    val filtersActive = query.isNotBlank() || periodIndex != 0 || pocketIndex != 0 ||
+    val filtersActive = query.isNotBlank() || periodIndex != 0 || selectedPocketId != null ||
         currencyIndex != 0 || methodIndex != 0
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding),
@@ -150,7 +151,7 @@ internal fun MovementsScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 item { HistoryFilter("filter_period", periodLabels, periodIndex) { periodIndex = it } }
-                item { HistoryFilter("filter_pocket", pocketLabels, pocketIndex) { pocketIndex = it } }
+                item { HistoryFilter("filter_pocket", pocketLabels, pocketIndex) { selectedPocketId = pocketOptions[it] } }
                 item { HistoryFilter("filter_currency", currencyLabels, currencyIndex) { currencyIndex = it } }
                 item { HistoryFilter("filter_method", methodLabels, methodIndex) { methodIndex = it } }
             }
@@ -164,7 +165,7 @@ internal fun MovementsScreen(
                     onClick = {
                         query = ""
                         periodIndex = 0
-                        pocketIndex = 0
+                        selectedPocketId = null
                         currencyIndex = 0
                         methodIndex = 0
                     },
@@ -189,7 +190,7 @@ internal fun MovementsScreen(
                     movement = movement,
                     accountingCurrency = state.periods.firstOrNull { it.id == movement.periodId }?.accountingCurrency
                         ?: SupportedCurrency.SAR,
-                    iconKey = state.pockets.firstOrNull { it.pocket.id == movement.pocketId }?.pocket?.iconKey
+                    iconKey = state.pocketCatalog.firstOrNull { it.id == movement.pocketId }?.iconKey
                         ?: PocketIconKey.forName(movement.pocketName),
                     onClick = { selectedId = movement.id },
                 )

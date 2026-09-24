@@ -75,6 +75,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import java.util.UUID
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 
@@ -135,6 +136,9 @@ internal fun ProductionMovementScreen(
     }
     var detailsExpanded by rememberSaveable(stateKey) { mutableStateOf(initialMovement != null) }
     var error by rememberSaveable(stateKey) { mutableStateOf<String?>(null) }
+    val draftId = rememberSaveable(stateKey) { UUID.randomUUID().toString() }
+    var saving by remember { mutableStateOf(false) }
+    var saveInterrupted by rememberSaveable(stateKey) { mutableStateOf(false) }
     var templateGeneration by rememberSaveable(stateKey) { mutableIntStateOf(0) }
     val focusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
@@ -185,7 +189,10 @@ internal fun ProductionMovementScreen(
     val accountingAmountMinor = readyConversion?.accountingAmountMinor
 
     fun saveMovement() {
+        if (saving) return
+        saving = true
         scope.launch {
+            try {
             val parsedDate = runCatching { LocalDate.parse(localDate) }.getOrNull() ?: run {
                 error = "Escribe una fecha válida"
                 return@launch
@@ -213,7 +220,8 @@ internal fun ProductionMovementScreen(
             val movementZone = ZoneId.of(initialMovement?.zoneId ?: "Asia/Riyadh")
             val movement = LedgerCommand.AddMovement(
                 pocketId = pocketId,
-                id = initialMovement?.id,
+                id = initialMovement?.id ?: draftId,
+                createOnly = initialMovement == null,
                 type = if (refund) MovementType.REFUND else MovementType.EXPENSE,
                 accountingAmountMinor = parsedAmount,
                 accountingCurrency = savingAccountingCurrency,
@@ -229,12 +237,27 @@ internal fun ProductionMovementScreen(
                 conversionEffectiveDate = conversion.effectiveDate,
                 conversionSource = conversion.source,
             )
+            saveInterrupted = true
             when (val result = ledger.execute(
-                suggestion?.let { LedgerCommand.ConfirmSuggestion(it.id, movement) } ?: movement,
+                suggestion?.let { LedgerCommand.ConfirmSuggestion(it.id, movement, draftId) } ?: movement,
             )) {
-                LedgerResult.Success -> onSaved()
-                is LedgerResult.Rejected -> error = result.message
+                LedgerResult.Success -> {
+                    saveInterrupted = false
+                    onSaved()
+                }
+                is LedgerResult.Rejected -> {
+                    saveInterrupted = false
+                    error = result.message
+                }
                 is LedgerResult.Deleted -> Unit
+            }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                saveInterrupted = false
+                error = "No se pudo guardar. Revisa el borrador y reintenta."
+            } finally {
+                saving = false
             }
         }
     }
@@ -262,7 +285,7 @@ internal fun ProductionMovementScreen(
             Surface(tonalElevation = 3.dp) {
                 Button(
                     onClick = ::saveMovement,
-                    enabled = selectedPocket != null && accountingAmountMinor != null && quoteState is QuoteUiState.Ready,
+                    enabled = !saving && selectedPocket != null && accountingAmountMinor != null && quoteState is QuoteUiState.Ready,
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
@@ -272,6 +295,7 @@ internal fun ProductionMovementScreen(
                 ) {
                     Text(
                         when {
+                            saving -> "Guardando…"
                             initialMovement != null -> "Guardar cambios"
                             refund -> "Guardar devolución"
                             else -> "Guardar gasto · ${accountingCurrency.name} ${accountingAmountMinor?.let(::minorNumberForForm) ?: "0.00"}"
@@ -418,9 +442,9 @@ internal fun ProductionMovementScreen(
                     }
                 }
             }
-            error?.takeUnless {
+            (error?.takeUnless {
                 it == "Escribe un importe válido" || it == "Selecciona un Pocket"
-            }?.let { message ->
+            } ?: if (saveInterrupted && !saving) "No se confirmó el guardado. Reintenta con este borrador." else null)?.let { message ->
                 item {
                     Text(
                         message,

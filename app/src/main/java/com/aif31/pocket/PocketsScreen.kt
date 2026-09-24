@@ -45,6 +45,7 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
     val selectedCurrency = selectedPeriod?.accountingCurrency ?: SupportedCurrency.SAR
     fun money(minor: Long): String = MoneyText.format(minor, selectedCurrency)
     val shownPockets = state.pocketSummariesByPeriod[selectedPeriodId].orEmpty()
+    val archivedPockets = state.pocketCatalog.filter { it.archived }
     val isHistorical = selectedPeriod?.id != null && selectedPeriod.id != state.currentPeriod?.id
     val activePockets = shownPockets.filterNot { summary ->
         summary.retiredThisPeriod || (!isHistorical && summary.pocket.archived)
@@ -305,12 +306,12 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
                 }
             }
         }
-        if (!isHistorical && shownPockets.any { it.pocket.archived && !it.retiredThisPeriod }) {
+        if (!isHistorical && archivedPockets.isNotEmpty()) {
             item { Text("Archivados", style = MaterialTheme.typography.titleMedium) }
-            items(shownPockets.filter { it.pocket.archived && !it.retiredThisPeriod }, key = { "archived-${it.pocket.id}" }) { summary ->
+            items(archivedPockets, key = { "archived-${it.id}" }) { pocket ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(summary.pocket.name)
-                    TextButton(onClick = { scope.launch { ledger.execute(LedgerCommand.ArchivePocket(summary.pocket.id, false)) } }) {
+                    Text(pocket.name)
+                    TextButton(onClick = { scope.launch { ledger.execute(LedgerCommand.ArchivePocket(pocket.id, false)) } }) {
                         Text("Restaurar")
                     }
                 }

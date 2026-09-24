@@ -71,7 +71,7 @@ Back up both the keystore file and password independently. Losing either prevent
 
 ## App-data backup and reinstall
 
-Pocket backup uses the Storage Access Framework and a versioned `.pocketbackup` file. A device exercise can use a temporary file such as:
+Pocket backup uses the Storage Access Framework and a versioned plaintext JSON `.pocketbackup` file. Version 5 includes the preferred future period start day and reminder time. Older backups remain readable; their future start day comes from the latest saved period. Reminder delivery is disabled after restore until the user confirms it on the current device. Anyone with the file can read its financial data, so keep it in a trusted location. The first export asks the user to acknowledge this before writing or sharing the file. A device exercise can use a temporary file such as:
 
 ```text
 /sdcard/Download/pocket-test-backup.pocketbackup
@@ -87,7 +87,7 @@ Recommended transition procedure:
 6. Review the replacement warning, restore the backup, and verify dashboard and movement totals.
 7. Cold-start the app again to confirm persistence.
 
-Restore can replace a non-empty ledger after preview and explicit confirmation. Valid backups are applied transactionally, so a failed replacement leaves the prior ledger intact. Export a fresh safety backup before replacing data. CSV is analytical export only and cannot restore the app.
+Restore can replace a non-empty ledger after preview and explicit confirmation. Valid backups are applied transactionally, so a failed replacement leaves the prior ledger intact. The replacement preview offers a safety export and requires the user to complete it or explicitly continue without one. CSV is analytical export only and cannot restore the app.
 
 ## Security findings retained for future releases
 

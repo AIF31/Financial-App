@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -90,6 +92,8 @@ private enum class RootScreen(val label: String, val icon: ImageVector) {
     SETTINGS("Ajustes", Icons.Default.Settings),
 }
 
+private enum class SafetyExportStatus { UNRESOLVED, REQUESTED, CREATED, SKIPPED, FAILED }
+
 private sealed interface PocketRoute : NavKey
 
 @Serializable
@@ -111,6 +115,8 @@ fun PocketApp(
     restoreCandidate: ByteArray? = null,
     onRestoreCandidateHandled: () -> Unit = {},
     operationMessage: String? = null,
+    backupExportSucceeded: Boolean? = null,
+    onBackupExportResultHandled: () -> Unit = {},
     operationRetryLabel: String? = null,
     onOperationMessageHandled: () -> Unit = {},
     onRetryOperation: () -> Unit = {},
@@ -119,6 +125,7 @@ fun PocketApp(
     onCreateCsv: () -> Unit = {},
     onPickBackup: () -> Unit = {},
     onRequestNotificationPermission: () -> Unit = {},
+    notificationPermissionRevision: Int = 0,
     onSuccessfulRestore: () -> Unit = {},
     onRestoreCompleted: (String) -> Unit = {},
     undoWindowMillis: Long = 5_000,
@@ -126,14 +133,58 @@ fun PocketApp(
     val observedState by ledger.state.collectAsStateWithLifecycle(initialValue = null)
     val preferencesFlow = remember(preferences) { preferences?.state ?: flowOf(AppPreferences()) }
     val preferenceState by preferencesFlow.collectAsStateWithLifecycle(initialValue = AppPreferences())
+    val backupScope = rememberCoroutineScope()
+    var pendingBackupOperation by rememberSaveable { mutableStateOf<String?>(null) }
+    var safetyStatus by rememberSaveable { mutableStateOf(SafetyExportStatus.UNRESOLVED) }
+    var safetyCandidateHash by rememberSaveable { mutableStateOf<Int?>(null) }
+    fun cancelBackupDisclosure() {
+        pendingBackupOperation = null
+        if (safetyStatus == SafetyExportStatus.REQUESTED) safetyStatus = SafetyExportStatus.FAILED
+    }
+    fun requestBackup(operation: String) {
+        if (preferences == null || preferenceState.plaintextBackupAcknowledged) {
+            if (operation == "create") onCreateBackup() else onShareBackup()
+        } else {
+            pendingBackupOperation = operation
+        }
+    }
+    pendingBackupOperation?.let { operation ->
+        AlertDialog(
+            onDismissRequest = ::cancelBackupDisclosure,
+            title = { Text("Backup en texto claro") },
+            text = { Text("Cualquiera que tenga el archivo puede leer tus datos financieros. Guárdalo en un lugar seguro antes de continuar.") },
+            confirmButton = {
+                Button(onClick = {
+                    backupScope.launch {
+                        preferences?.acknowledgePlaintextBackup()
+                        pendingBackupOperation = null
+                        if (operation == "create") onCreateBackup() else onShareBackup()
+                    }
+                }) { Text("Entendido, continuar") }
+            },
+            dismissButton = { TextButton(onClick = ::cancelBackupDisclosure) { Text("Cancelar") } },
+        )
+    }
     var backupPreview by remember { mutableStateOf<com.aif31.pocket.data.BackupPreview?>(null) }
     var restoreError by rememberSaveable { mutableStateOf<String?>(null) }
     var restoreInProgress by remember { mutableStateOf(false) }
+    LaunchedEffect(backupExportSucceeded) {
+        if (safetyStatus == SafetyExportStatus.REQUESTED && backupExportSucceeded != null) {
+            safetyStatus = if (backupExportSucceeded) SafetyExportStatus.CREATED else SafetyExportStatus.FAILED
+            onBackupExportResultHandled()
+        }
+    }
     LaunchedEffect(restoreCandidate) {
+        restoreCandidate?.contentHashCode()?.let { hash ->
+            if (safetyCandidateHash != hash) {
+                safetyCandidateHash = hash
+                safetyStatus = SafetyExportStatus.UNRESOLVED
+            }
+        }
         restoreError = null
         backupPreview = restoreCandidate?.let { ledger.previewBackup(it) }
     }
-    operationMessage?.takeIf { observedState?.needsOnboarding != true }?.let { message ->
+    operationMessage?.takeIf { observedState?.needsOnboarding == false }?.let { message ->
         AlertDialog(
             onDismissRequest = onOperationMessageHandled,
             title = { Text(if (operationRetryLabel == null) "Operación de documentos" else "La operación falló") },
@@ -150,7 +201,7 @@ fun PocketApp(
             },
         )
     }
-    if (restoreCandidate != null && backupPreview != null) {
+    if (restoreCandidate != null && backupPreview != null && pendingBackupOperation == null) {
         val preview = backupPreview!!
         val scope = rememberCoroutineScope()
         AlertDialog(
@@ -161,7 +212,10 @@ fun PocketApp(
             },
             title = { Text(if (restoreError != null) "No se pudo restaurar" else if (preview.valid) "Confirmar restauración" else "Backup inválido") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     Text(
                         restoreError ?: if (preview.valid) "Versión ${preview.version}: ${preview.periods} periodos, ${preview.pockets} Pockets y ${preview.movements} movimientos."
                         else preview.message ?: "No se puede leer el archivo.",
@@ -172,12 +226,24 @@ fun PocketApp(
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodyMedium,
                         )
+                        when (safetyStatus) {
+                            SafetyExportStatus.UNRESOLVED, SafetyExportStatus.FAILED -> {
+                                if (safetyStatus == SafetyExportStatus.FAILED) Text("El backup de seguridad no se completó.")
+                                TextButton(onClick = { safetyStatus = SafetyExportStatus.REQUESTED; requestBackup("create") }) {
+                                    Text("Crear backup de seguridad")
+                                }
+                                TextButton(onClick = { safetyStatus = SafetyExportStatus.SKIPPED }) { Text("Continuar sin backup") }
+                            }
+                            SafetyExportStatus.REQUESTED -> Text("Esperando el resultado del backup de seguridad…")
+                            SafetyExportStatus.CREATED -> Text("Backup de seguridad creado.")
+                            SafetyExportStatus.SKIPPED -> Text("Continuarás sin backup de seguridad.")
+                        }
                     }
                 }
             },
             confirmButton = {
                 if (preview.valid) Button(
-                    enabled = !restoreInProgress,
+                    enabled = !restoreInProgress && (observedState?.needsOnboarding == true || safetyStatus == SafetyExportStatus.CREATED || safetyStatus == SafetyExportStatus.SKIPPED),
                     onClick = {
                     restoreInProgress = true
                     scope.launch {
@@ -185,12 +251,15 @@ fun PocketApp(
                             when (val result = ledger.restoreBackup(restoreCandidate)) {
                                 LedgerResult.Success -> withContext(NonCancellable) {
                                     val restored = ledger.state.first { it.currentPeriod != null }
-                                    val preferredStartDay = restored.periods.maxBy { it.start }.configuredStartDay
+                                    val restoredSettings = preview.portableSettings ?: com.aif31.pocket.data.PortableSettings(
+                                        restored.periods.maxBy { it.start }.configuredStartDay,
+                                    )
                                     val preferenceWarning = try {
-                                        preferences?.setFuturePeriodStartDay(preferredStartDay)
+                                        preferences?.applyRestoredPortableSettings(restoredSettings)
+                                        reminderScheduler?.apply(false, restoredSettings.reminderTime)
                                         null
                                     } catch (_: Exception) {
-                                        " No se pudo actualizar el día preferido; puedes cambiarlo en Ajustes."
+                                        " No se pudieron aplicar todos los ajustes restaurados; revísalos en Ajustes."
                                     }
                                     runCatching { onSuccessfulRestore() }
                                     onRestoreCompleted(
@@ -385,11 +454,12 @@ fun PocketApp(
                         preferencesStore = preferences,
                         exchangeRates = exchangeRates,
                         reminderScheduler = reminderScheduler,
-                        onCreateBackup = onCreateBackup,
-                        onShareBackup = onShareBackup,
+                        onCreateBackup = { requestBackup("create") },
+                        onShareBackup = { requestBackup("share") },
                         onCreateCsv = onCreateCsv,
                         onPickBackup = onPickBackup,
                         onRequestNotificationPermission = onRequestNotificationPermission,
+                        notificationPermissionRevision = notificationPermissionRevision,
                         padding = padding,
                         section = settingsSection,
                         onSectionChange = { section ->

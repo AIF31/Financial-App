@@ -27,6 +27,8 @@ internal class RecoveryViewModel(
         private set
     var operationMessage by mutableStateOf(savedState.get<String>(STATE_OPERATION_MESSAGE))
         private set
+    var backupExportSucceeded by mutableStateOf(savedState.get<Boolean>(STATE_BACKUP_EXPORT_SUCCEEDED))
+        private set
     var retryOperation by mutableStateOf(
         savedState.get<String>(STATE_RETRY_OPERATION)?.let(DocumentOperation::valueOf),
     )
@@ -75,8 +77,14 @@ internal class RecoveryViewModel(
         savedState[STATE_RETRY_OPERATION] = retry?.name
     }
 
+    fun recordBackupExportResult(succeeded: Boolean?) {
+        backupExportSucceeded = succeeded
+        savedState[STATE_BACKUP_EXPORT_SUCCEEDED] = succeeded
+    }
+
     private companion object {
         const val STATE_OPERATION_MESSAGE = "operation_message"
+        const val STATE_BACKUP_EXPORT_SUCCEEDED = "backup_export_succeeded"
         const val STATE_RETRY_OPERATION = "retry_operation"
         const val STATE_PREPARED_SHARE_FILE = "prepared_share_file"
     }

@@ -13,6 +13,7 @@ import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.MovementEntity
 import com.aif31.pocket.data.PocketIconKey
+import com.aif31.pocket.data.PortableSettings
 import com.aif31.pocket.data.PeriodPocketEntity
 import com.aif31.pocket.data.RolloverReleaseEntity
 import com.aif31.pocket.data.RecurringTemplateEntity
@@ -22,6 +23,7 @@ import com.aif31.pocket.domain.SupportedCurrency
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
@@ -55,6 +57,50 @@ class PocketLedgerHostBehaviorTest {
 
     @After
     fun tearDown() = database.close()
+
+    private fun String.withBackupVersion(version: Int): String =
+        replaceFirst("\"version\": 5", "\"version\": $version")
+            .replace(Regex("\\s*\"portableSettings\": \\{[^}]*},"), "")
+
+    @Test
+    fun portable_backup_round_trips_settings_and_defaults_older_versions() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(100_000))
+        val bytes = ledger.exportBackup(PortableSettings(10, LocalTime.of(22, 30)))
+        val preview = ledger.previewBackup(bytes)
+        assertTrue(preview.valid)
+        assertEquals(5, preview.version)
+        assertEquals(PortableSettings(10, LocalTime.of(22, 30)), preview.portableSettings)
+        val legacy = bytes.decodeToString()
+            .replace("\"version\": 5", "\"version\": 4")
+            .replace(Regex("\\s*\"portableSettings\": \\{[^}]*},"), "")
+            .encodeToByteArray()
+        val legacyPreview = ledger.previewBackup(legacy)
+        assertTrue(legacyPreview.message.orEmpty(), legacyPreview.valid)
+        assertEquals(4, legacyPreview.version)
+        assertEquals(25, legacyPreview.portableSettings?.futurePeriodStartDay)
+        assertEquals(LedgerResult.Success, ledger.restoreBackup(bytes))
+    }
+
+    @Test
+    fun retrying_the_same_expense_submission_does_not_overwrite_its_first_result() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(100_000))
+        val pocketId = ledger.state.first().pockets.first().pocket.id
+        val submitted = LedgerCommand.AddMovement(
+            id = "stable-draft", createOnly = true, pocketId = pocketId,
+            type = MovementType.EXPENSE, accountingAmountMinor = 1_250,
+            occurredAtUtcMillis = clock.millis(), localDate = LocalDate.of(2026, 2, 26),
+            paymentMethodId = ledger.state.first().defaultPaymentMethodId,
+        )
+        assertEquals(LedgerResult.Success, ledger.execute(submitted))
+        assertEquals(LedgerResult.Success, ledger.execute(submitted.copy(accountingAmountMinor = 9_999)))
+        val movement = ledger.state.first().movements.single()
+        assertEquals("stable-draft", movement.id)
+        assertEquals(1_250, movement.accountingAmountMinor)
+        assertEquals(pocketId, movement.pocketId)
+        assertEquals(submitted.paymentMethodId, movement.paymentMethodId)
+    }
 
     @Test
     fun invalid_period_dates_are_rejected_before_replacing_the_ledger() = runTest {
@@ -822,6 +868,8 @@ class PocketLedgerHostBehaviorTest {
         mutableClock.value = Instant.parse("2026-03-26T09:00:00Z")
         val nextCurrent = ledger.state.first { it.currentPeriod?.id == futurePeriods.first().id }
         assertEquals(30_000L, nextCurrent.unallocatedMinor)
+        assertTrue(nextCurrent.pocketCatalog.single { it.id == pocket.id }.archived)
+        assertTrue(ledger.state.first().pocketCatalog.single { it.id == pocket.id }.archived)
     }
 
     @Test
@@ -844,6 +892,7 @@ class PocketLedgerHostBehaviorTest {
         val restored = ledger.state.first().pockets.single { it.pocket.id == pocket.id }
         assertFalse(restored.pocket.archived)
         assertFalse(restored.retiredThisPeriod)
+        assertFalse(ledger.state.first().pocketCatalog.single { it.id == pocket.id }.archived)
     }
 
     @Test
@@ -1297,7 +1346,7 @@ class PocketLedgerHostBehaviorTest {
 
         val backup = ledger.exportBackup()
         val text = backup.decodeToString()
-        assertTrue(text.contains("\"version\": 4"))
+        assertTrue(text.contains("\"version\": 5"))
         assertFalse(text.contains("token", ignoreCase = true))
         assertFalse(text.contains("cache", ignoreCase = true))
 
@@ -1345,7 +1394,7 @@ class PocketLedgerHostBehaviorTest {
             )
         )
         ledger.execute(LedgerCommand.UpsertTemplate("legacy-template", "Legacy", 2_500, pocketId))
-        val versionFour = ledger.exportBackup().decodeToString()
+        val versionFour = ledger.exportBackup().decodeToString().withBackupVersion(4)
 
         for (version in 1..3) {
             var legacy = versionFour
@@ -1410,7 +1459,7 @@ class PocketLedgerHostBehaviorTest {
 
         assertTrue(source.previewBackup(backup).valid)
         assertFalse(source.previewBackup(backup.copyOf(backup.size / 2)).valid)
-        assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"version\": 4", "\"version\": 99").encodeToByteArray()).valid)
+        assertFalse(source.previewBackup(backup.decodeToString().withBackupVersion(99).encodeToByteArray()).valid)
         assertFalse(source.previewBackup(backup.decodeToString().replaceFirst("\"budgetMinor\": 25000", "\"budgetMinor\": 60000").encodeToByteArray()).valid)
         assertEquals(LedgerResult.Success, source.restoreBackup(backup))
         withFreshLedger { target ->
@@ -1421,7 +1470,7 @@ class PocketLedgerHostBehaviorTest {
             assertEquals(PocketIconKey.SUPERMARKET, restored.pockets.first { it.pocket.name == "Supermercado" }.pocket.iconKey)
         }
         val legacyBackup = backup.decodeToString()
-            .replaceFirst("\"version\": 4", "\"version\": 1")
+            .withBackupVersion(1)
             .replace(Regex(",\\s*\"iconKey\": \"[A-Z]+\""), "")
             .encodeToByteArray()
         withFreshLedger { target ->
@@ -1472,7 +1521,7 @@ class PocketLedgerHostBehaviorTest {
         dao.putRolloverRelease(RolloverReleaseEntity(periodId, pocketId, amountMinor = 5_000))
 
         val backup = ledger.exportBackup()
-        assertTrue(backup.decodeToString().contains("\"version\": 4"))
+        assertTrue(backup.decodeToString().contains("\"version\": 5"))
         dao.clearRolloverReleases()
         dao.clearPeriodPockets()
 
@@ -1489,7 +1538,7 @@ class PocketLedgerHostBehaviorTest {
         )
 
         val legacyVersionTwo = backup.decodeToString()
-            .replaceFirst("\"version\": 4", "\"version\": 2")
+            .withBackupVersion(2)
             .replace(
                 Regex(
                     "\\s*\"periodPockets\": \\[.*?],\\s*\"rolloverReleases\": \\[.*?],",
@@ -1784,6 +1833,26 @@ class PocketLedgerHostBehaviorTest {
 
         assertEquals(LocalDate.of(2026, 2, 27), ledger.movementDefaults().localDate)
         assertEquals(mutableClock.millis(), ledger.movementDefaults().instantMillis)
+    }
+
+    @Test
+    fun multiple_archived_pockets_remain_in_catalog_after_period_advance_and_refresh() = runTest {
+        val mutableClock = MutableClock(Instant.parse("2026-02-26T09:00:00Z"), zone)
+        val ledger = RoomPocketLedger(database, mutableClock, zone)
+        ledger.execute(LedgerCommand.Initialize(30_000))
+        val pockets = ledger.state.first { !it.needsOnboarding }.pocketCatalog.take(2)
+        pockets.forEach { assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePocket(it.id))) }
+        ledger.execute(LedgerCommand.CreateNextPeriod())
+        mutableClock.value = Instant.parse("2026-03-26T09:00:00Z")
+        repeat(2) {
+            val state = ledger.state.first { it.currentPeriod?.start == LocalDate.of(2026, 3, 25) }
+            assertEquals(pockets.map { it.id }.toSet(), state.pocketCatalog.filter { it.archived }.map { it.id }.toSet())
+        }
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePocket(pockets.first().id, archived = false)))
+        val refreshed = ledger.state.first()
+        assertFalse(refreshed.pocketCatalog.single { it.id == pockets.first().id }.archived)
+        assertTrue(refreshed.pocketCatalog.single { it.id == pockets.last().id }.archived)
+        assertEquals(0L, refreshed.pockets.single { it.pocket.id == pockets.first().id }.budgetMinor)
     }
 
     @Test
