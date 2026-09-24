@@ -52,6 +52,7 @@ import com.aif31.pocket.notifications.ParsedPayment
 import com.aif31.pocket.settings.AppPreferences
 import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
+import com.aif31.pocket.settings.ReminderStatus
 import com.aif31.pocket.ui.SettingsSection
 import java.time.Clock
 import java.time.Instant
@@ -602,6 +603,7 @@ class PocketAppHostFlowTest {
             hasText("Esta acción reemplazará los datos actuales y puede eliminar información anterior. No se puede deshacer."),
             5_000,
         )
+        compose.onNodeWithText("Continuar sin backup").performClick()
         compose.onNodeWithText("Restaurar y reemplazar").performClick()
         compose.waitUntil(5_000) { runBlocking { target.state.first().newFundsMinor == 75_000L } }
         compose.waitUntil(5_000) { completionMessage?.startsWith("Backup restaurado:") == true }
@@ -628,6 +630,7 @@ class PocketAppHostFlowTest {
 
         compose.setContent { PocketApp(ledger = slowLedger, restoreCandidate = backup) }
         compose.waitUntilExactlyOneExists(hasText("Restaurar y reemplazar"), 5_000)
+        compose.onNodeWithText("Continuar sin backup").performClick()
         compose.onNodeWithText("Restaurar y reemplazar").performClick()
         compose.waitUntil(5_000) { started.isCompleted }
         compose.onNodeWithText("Restaurando…").assertIsNotEnabled()
@@ -646,6 +649,7 @@ class PocketAppHostFlowTest {
         val restoration = StateRestorationTester(compose)
         restoration.setContent { PocketApp(ledger = ledger, restoreCandidate = backup) }
         compose.waitUntilExactlyOneExists(hasText("Restaurar y reemplazar"), 5_000)
+        compose.onNodeWithText("Continuar sin backup").performClick()
 
         restoration.emulateSavedInstanceStateRestore()
 
@@ -671,6 +675,7 @@ class PocketAppHostFlowTest {
         val restoration = StateRestorationTester(compose)
         restoration.setContent { PocketApp(ledger = canceledLedger, restoreCandidate = backup) }
         compose.waitUntilExactlyOneExists(hasText("Restaurar y reemplazar"), 5_000)
+        compose.onNodeWithText("Continuar sin backup").performClick()
         compose.onNodeWithText("Restaurar y reemplazar").performClick()
         compose.waitUntil(5_000) { started.isCompleted }
 
@@ -716,6 +721,7 @@ class PocketAppHostFlowTest {
         }
 
         compose.waitUntilExactlyOneExists(hasText("Restaurar y reemplazar"), 5_000)
+        compose.onNodeWithText("Continuar sin backup").performClick()
         compose.onNodeWithText("Restaurar y reemplazar").performClick()
 
         compose.waitUntil(10_000) { restoreHandled }
@@ -767,12 +773,13 @@ class PocketAppHostFlowTest {
         }
 
         compose.waitUntilExactlyOneExists(hasText("Restaurar y reemplazar"), 5_000)
+        compose.onNodeWithText("Continuar sin backup").performClick()
         compose.onNodeWithText("Restaurar y reemplazar").performClick()
 
         compose.waitUntil(5_000) { handled }
         assertEquals(75_000L, runBlocking { target.state.first().newFundsMinor })
         assertTrue(completion?.contains("Backup restaurado:") == true)
-        assertTrue(completion?.contains("No se pudo actualizar el día preferido") == true)
+        assertTrue(completion?.contains("No se pudieron aplicar todos los ajustes restaurados") == true)
     }
 
     @Test
@@ -1373,10 +1380,210 @@ class PocketAppHostFlowTest {
         val current: AppPreferences get() = values.value
         override suspend fun setFuturePeriodStartDay(day: Int) { values.value = values.value.copy(futurePeriodStartDay = day) }
         override suspend fun setReminder(enabled: Boolean, time: LocalTime) { values.value = values.value.copy(reminderEnabled = enabled, reminderTime = time) }
+        override suspend fun acknowledgePlaintextBackup() { values.value = values.value.copy(plaintextBackupAcknowledged = true) }
         override suspend fun setOnlineFxEnabled(enabled: Boolean) { values.value = values.value.copy(onlineFxEnabled = enabled) }
         override suspend fun setDefaultExpenseCurrency(currency: com.aif31.pocket.domain.SupportedCurrency) {
             values.value = values.value.copy(defaultExpenseCurrency = currency)
         }
+    }
+
+    @Test
+    fun archived_pocket_history_filter_keeps_its_identity_after_catalog_reorder() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val clock = Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone)
+        val ledger = RoomPocketLedger(database, clock, zone)
+        val (archivedId, movedId) = runBlocking {
+            ledger.execute(LedgerCommand.Initialize(100_000))
+            val catalog = ledger.state.first { !it.needsOnboarding }.pocketCatalog
+            val archived = catalog.first()
+            val moved = catalog[1]
+            ledger.execute(LedgerCommand.AddMovement(
+                id = "archived-history", pocketId = archived.id, type = MovementType.EXPENSE,
+                accountingAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(),
+                localDate = LocalDate.of(2026, 2, 26), merchant = "Histórico",
+            ))
+            ledger.execute(LedgerCommand.AddMovement(
+                id = "other-history", pocketId = moved.id, type = MovementType.EXPENSE,
+                accountingAmountMinor = 2_000, occurredAtUtcMillis = clock.millis() + 1,
+                localDate = LocalDate.of(2026, 2, 26), merchant = "Otro",
+            ))
+            ledger.execute(LedgerCommand.ArchivePocket(archived.id))
+            ledger.execute(LedgerCommand.CreateNextPeriod())
+            archived.id to moved.id
+        }
+        compose.setContent { PocketApp(ledger) }
+        compose.waitUntilExactlyOneExists(hasText("Movimientos"), 5_000)
+        compose.onNodeWithText("Movimientos").performClick()
+        compose.onNodeWithTag("filter_pocket").performClick()
+        compose.onNodeWithTag("filter_pocket_option_1").performClick()
+        compose.onNodeWithText("Histórico").assertExists()
+        compose.onAllNodesWithText("Otro").assertCountEquals(0)
+
+        runBlocking { assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.MovePocket(movedId, -1))) }
+        compose.waitUntil(5_000) { runBlocking { ledger.state.first().pocketCatalog.first().id == movedId } }
+        compose.onNodeWithText("Histórico").assertExists()
+        compose.onAllNodesWithText("Otro").assertCountEquals(0)
+        assertEquals(archivedId, runBlocking { ledger.state.first().movements.first { it.id == "archived-history" }.pocketId })
+    }
+
+    @Test
+    fun safety_export_failure_can_be_retried_and_success_unlocks_replacement() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(10_000)) }
+        val backup = runBlocking { ledger.exportBackup() }
+        val message = mutableStateOf<String?>(null)
+        val exportSucceeded = mutableStateOf<Boolean?>(null)
+        var attempts = 0
+        compose.setContent {
+            PocketApp(
+                ledger = ledger,
+                restoreCandidate = backup,
+                operationMessage = message.value,
+                backupExportSucceeded = exportSucceeded.value,
+                onBackupExportResultHandled = { exportSucceeded.value = null },
+                onOperationMessageHandled = { message.value = null },
+                onCreateBackup = {
+                    attempts++
+                    exportSucceeded.value = attempts != 1
+                    message.value = if (attempts == 1) "Creación de backup cancelada." else "Backup creado."
+                },
+            )
+        }
+
+        compose.waitUntilExactlyOneExists(hasText("Confirmar restauración"), 5_000)
+        compose.onNodeWithText("Restaurar y reemplazar").assertIsNotEnabled()
+        compose.onNodeWithText("Crear backup de seguridad").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Creación de backup cancelada."), 5_000)
+        compose.onNodeWithText("Aceptar").performClick()
+        compose.waitUntilExactlyOneExists(hasText("El backup de seguridad no se completó."), 5_000)
+        compose.onNodeWithText("Restaurar y reemplazar").assertIsNotEnabled()
+        compose.onNodeWithText("Crear backup de seguridad").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Backup creado."), 5_000)
+        compose.onNodeWithText("Aceptar").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Backup de seguridad creado."), 5_000)
+        compose.onNodeWithText("Restaurar y reemplazar").assertIsEnabled()
+        compose.runOnIdle { assertEquals(2, attempts) }
+    }
+
+    @Test
+    fun canceling_first_safety_export_disclosure_keeps_restore_locked() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(10_000)) }
+        val backup = runBlocking { ledger.exportBackup() }
+        var creates = 0
+        compose.setContent {
+            PocketApp(ledger, preferences = FakePreferences(), restoreCandidate = backup, onCreateBackup = { creates++ })
+        }
+        compose.waitUntilExactlyOneExists(hasText("Confirmar restauración"), 5_000)
+        compose.onNodeWithText("Crear backup de seguridad").performClick()
+        compose.onNodeWithText("Backup en texto claro").assertIsDisplayed()
+        compose.onNodeWithText("Cancelar").performClick()
+        compose.onNodeWithText("El backup de seguridad no se completó.").assertIsDisplayed()
+        compose.onNodeWithText("Restaurar y reemplazar").assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(0, creates) }
+    }
+
+    @Test
+    fun reminder_settings_reports_permission_and_scheduler_failure_then_recovers() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000)) }
+        val preferences = FakePreferences()
+        val scheduler = FakeReminderScheduler().apply { nextStatus = ReminderStatus.PermissionRequired }
+        compose.setContent { PocketApp(ledger, preferences = preferences, reminderScheduler = scheduler) }
+
+        compose.waitUntilExactlyOneExists(hasText("Ajustes"), 5_000)
+        compose.onNodeWithText("Ajustes").performClick()
+        compose.onNodeWithText("Recordatorio diario").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithTag("settings_list").performScrollToNode(hasTestTag("reminder_switch"))
+        compose.onNodeWithTag("reminder_switch").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Permiso necesario"), 5_000)
+        compose.onNodeWithTag("settings_list").performScrollToNode(hasText("Revisar permiso"))
+        compose.onNodeWithText("Revisar permiso").assertIsDisplayed()
+
+        scheduler.nextStatus = ReminderStatus.Failed
+        compose.onNodeWithText("Guardar horario").performClick()
+        compose.waitUntilExactlyOneExists(hasText("No se pudo programar"), 5_000)
+        scheduler.nextStatus = ReminderStatus.Scheduled
+        compose.onNodeWithTag("settings_list").performScrollToNode(hasText("Reintentar"))
+        compose.onNodeWithText("Reintentar").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Programado"), 5_000)
+    }
+
+    @Test
+    fun restored_reminder_is_shown_as_awaiting_device_confirmation() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000)) }
+        compose.setContent {
+            val state = ledger.state.collectAsState(initial = null).value
+            state?.let {
+                SettingsScreen(
+                    state = it, ledger = ledger,
+                    preferences = AppPreferences(reminderAwaitingConfirmation = true),
+                    preferencesStore = null, reminderScheduler = FakeReminderScheduler(),
+                    onCreateBackup = {}, onCreateCsv = {}, onPickBackup = {},
+                    onRequestNotificationPermission = {}, padding = PaddingValues(),
+                    section = SettingsSection.REMINDERS, onSectionChange = {},
+                )
+            }
+        }
+        compose.waitUntilExactlyOneExists(hasText("Desactivado · confirma en este dispositivo"), 5_000)
+        compose.onNodeWithText("La entrega es aproximada y puede retrasarse según el dispositivo.").assertExists()
+    }
+
+    @Test
+    fun permission_result_rechecks_reminder_status_without_reopening_settings() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000)) }
+        val preferences = FakePreferences()
+        val scheduler = FakeReminderScheduler().apply { nextStatus = ReminderStatus.PermissionRequired }
+        val permissionRevision = mutableStateOf(0)
+        compose.setContent {
+            PocketApp(
+                ledger, preferences = preferences, reminderScheduler = scheduler,
+                notificationPermissionRevision = permissionRevision.value,
+                onRequestNotificationPermission = { permissionRevision.value++ },
+            )
+        }
+        compose.waitUntilExactlyOneExists(hasText("Ajustes"), 5_000)
+        compose.onNodeWithText("Ajustes").performClick()
+        compose.onNodeWithText("Recordatorio diario").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithTag("settings_list").performScrollToNode(hasTestTag("reminder_switch"))
+        compose.onNodeWithTag("reminder_switch").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Permiso necesario"), 5_000)
+        compose.onNodeWithTag("settings_list").performScrollToNode(hasText("Permitir notificaciones"))
+        compose.onNodeWithText("Permitir notificaciones").performClick()
+        compose.onNodeWithText("Permiso necesario").assertExists()
+        compose.runOnIdle { scheduler.nextStatus = ReminderStatus.Scheduled; permissionRevision.value++ }
+        compose.waitUntilExactlyOneExists(hasText("Programado"), 5_000)
+    }
+
+    @Test
+    fun first_backup_requires_plaintext_disclosure_before_document_picker() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(10_000)) }
+        val preferences = FakePreferences()
+        var creates = 0
+        compose.setContent { PocketApp(ledger, preferences = preferences, onCreateBackup = { creates++ }) }
+
+        compose.waitUntilExactlyOneExists(hasText("Ajustes"), 5_000)
+        compose.onNodeWithText("Ajustes").performClick()
+        compose.onNodeWithTag("settings_hub").performScrollToNode(hasText(SettingsSection.DATA.title))
+        compose.onNodeWithText(SettingsSection.DATA.title).performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithTag("settings_list").performScrollToNode(hasText("Crear backup completo"))
+        compose.onNodeWithText("Crear backup completo").performClick()
+        compose.onNodeWithText("Backup en texto claro").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(0, creates) }
+        compose.onNodeWithText("Cancelar").performClick()
+        compose.runOnIdle { assertEquals(0, creates) }
+        compose.onNodeWithText("Crear backup completo").performClick()
+        compose.onNodeWithText("Entendido, continuar").performClick()
+        compose.waitUntil(5_000) { creates == 1 && preferences.current.plaintextBackupAcknowledged }
     }
 
     @Test
@@ -1515,6 +1722,12 @@ class PocketAppHostFlowTest {
     private class FakeReminderScheduler : ReminderScheduler {
         var enabled: Boolean? = null
         var time: LocalTime? = null
+        var nextStatus: ReminderStatus = ReminderStatus.Scheduled
         override fun apply(enabled: Boolean, time: LocalTime) { this.enabled = enabled; this.time = time }
+        override suspend fun status(enabled: Boolean) = if (enabled) nextStatus else ReminderStatus.Off
+        override suspend fun applyAndCheck(enabled: Boolean, time: LocalTime): ReminderStatus {
+            apply(enabled, time)
+            return status(enabled)
+        }
     }
 }

@@ -8,8 +8,10 @@ import androidx.datastore.preferences.core.PreferencesSerializer
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.aif31.pocket.domain.SupportedCurrency
+import com.aif31.pocket.data.PortableSettings
 import java.io.File
 import java.nio.file.FileSystems
+import java.time.LocalTime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
@@ -27,6 +29,22 @@ import org.junit.Rule
 class AppPreferencesTest {
     @get:Rule
     val temporaryFolder = TemporaryFolder()
+
+    @Test
+    fun `restored settings disable the reminder and retain the first export disclosure`() = runTest {
+        val store = DataStorePreferences(newDataStore("recovery.preferences_pb", backgroundScope))
+        store.setReminder(true, LocalTime.of(19, 0))
+        store.acknowledgePlaintextBackup()
+        store.applyRestoredPortableSettings(PortableSettings(10, LocalTime.of(22, 30)))
+        val restored = store.state.first()
+        assertEquals(10, restored.futurePeriodStartDay)
+        assertEquals(LocalTime.of(22, 30), restored.reminderTime)
+        assertFalse(restored.reminderEnabled)
+        assertTrue(restored.reminderAwaitingConfirmation)
+        assertTrue(restored.plaintextBackupAcknowledged)
+        store.setReminder(true, restored.reminderTime)
+        assertFalse(store.state.first().reminderAwaitingConfirmation)
+    }
 
     @Test
     fun `missing upgrade keys default to disabled online FX and SAR input`() = runTest {

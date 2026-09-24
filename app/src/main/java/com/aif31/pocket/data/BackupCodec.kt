@@ -13,14 +13,15 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNames
 
 internal object BackupCodec {
-    private const val VERSION = 4
+    private const val VERSION = 5
     private val json = Json { ignoreUnknownKeys = false; encodeDefaults = true; prettyPrint = true }
 
-    suspend fun encode(database: FinanceDatabase): ByteArray {
+    suspend fun encode(database: FinanceDatabase, settings: PortableSettings): ByteArray {
         val payload = database.withTransaction {
             val dao = database.financeDao()
             BackupPayload(
                 version = VERSION,
+                portableSettings = PortableSettingsPayload(settings.futurePeriodStartDay, settings.reminderTime.hour, settings.reminderTime.minute),
                 periods = dao.periods().map {
                     PeriodDto(
                         it.id,
@@ -97,7 +98,10 @@ internal object BackupCodec {
 
     fun preview(bytes: ByteArray, today: LocalDate, zoneId: ZoneId): BackupPreview = try {
         val payload = decodeValidateAndPlan(bytes, today, zoneId).payload
-        BackupPreview(payload.version, payload.periods.size, payload.pockets.size, payload.movements.size, valid = true)
+        BackupPreview(
+            payload.version, payload.periods.size, payload.pockets.size, payload.movements.size, valid = true,
+            portableSettings = payload.portableSettings?.toModel() ?: PortableSettings(payload.periods.maxBy { it.start }.startDay),
+        )
     } catch (error: Exception) {
         BackupPreview(0, 0, 0, 0, valid = false, message = error.message ?: "Backup inválido")
     }
@@ -167,7 +171,7 @@ internal object BackupCodec {
             rolloverReleases = releases,
             movements = movements,
             pendingCurrencyChange = payload.pendingCurrencyChange?.toEntity(),
-            preferredStartDay = latest.configuredStartDay,
+            preferredStartDay = payload.portableSettings?.futurePeriodStartDay ?: latest.configuredStartDay,
             today = today,
             zoneId = zoneId,
         )
@@ -211,6 +215,12 @@ internal object BackupCodec {
         require(bytes.isNotEmpty() && bytes.size <= 10 * 1024 * 1024) { "Tamaño de backup inválido" }
         val decoded = json.decodeFromString(BackupPayload.serializer(), bytes.toString(StandardCharsets.UTF_8))
         require(decoded.version in 1..VERSION) { "Versión de backup incompatible" }
+        require(decoded.version < 5 || decoded.portableSettings != null) { "Faltan ajustes del backup" }
+        decoded.portableSettings?.let {
+            require(it.futurePeriodStartDay in 1..31 && it.reminderHour in 0..23 && it.reminderMinute in 0..59) {
+                "Ajustes del backup inválidos"
+            }
+        }
         val payload = if (decoded.version < 3 && decoded.periodPockets.isEmpty()) {
             decoded.copy(
                 periodPockets = decoded.periods.flatMap { period ->
@@ -401,6 +411,7 @@ internal suspend fun FinanceDao.putPeriodEntities(values: List<PeriodEntity>) {
 @Serializable
 private data class BackupPayload(
     val version: Int,
+    val portableSettings: PortableSettingsPayload? = null,
     val periods: List<PeriodDto>,
     val pockets: List<PocketDto>,
     val allocations: List<AllocationDto>,
@@ -412,6 +423,15 @@ private data class BackupPayload(
     val pendingCurrencyChange: PendingCurrencyChangeDto? = null,
     val ledgerPreferences: LedgerPreferencesDto? = null,
 )
+
+@Serializable
+private data class PortableSettingsPayload(
+    val futurePeriodStartDay: Int,
+    val reminderHour: Int,
+    val reminderMinute: Int,
+) {
+    fun toModel() = PortableSettings(futurePeriodStartDay, java.time.LocalTime.of(reminderHour, reminderMinute))
+}
 
 @Serializable
 private data class PeriodDto(

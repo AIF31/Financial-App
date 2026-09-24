@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.aif31.pocket.domain.SupportedCurrency
+import com.aif31.pocket.data.PortableSettings
 import java.time.LocalTime
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -18,6 +19,8 @@ data class AppPreferences(
     val futurePeriodStartDay: Int = 25,
     val reminderEnabled: Boolean = false,
     val reminderTime: LocalTime = LocalTime.of(21, 0),
+    val reminderAwaitingConfirmation: Boolean = false,
+    val plaintextBackupAcknowledged: Boolean = false,
     val onlineFxEnabled: Boolean = false,
     val defaultExpenseCurrency: SupportedCurrency = SupportedCurrency.SAR,
     val notificationSourcePackages: Set<String> = emptySet(),
@@ -27,6 +30,11 @@ interface PreferencesStore {
     val state: Flow<AppPreferences>
     suspend fun setFuturePeriodStartDay(day: Int)
     suspend fun setReminder(enabled: Boolean, time: LocalTime)
+    suspend fun applyRestoredPortableSettings(settings: PortableSettings) {
+        setFuturePeriodStartDay(settings.futurePeriodStartDay)
+        setReminder(false, settings.reminderTime)
+    }
+    suspend fun acknowledgePlaintextBackup() {}
     suspend fun setOnlineFxEnabled(enabled: Boolean)
     suspend fun setDefaultExpenseCurrency(currency: SupportedCurrency)
     suspend fun setNotificationSourcePackages(packages: Set<String>) {}
@@ -48,6 +56,8 @@ class DataStorePreferences internal constructor(
             futurePeriodStartDay = values[START_DAY] ?: 25,
             reminderEnabled = values[REMINDER_ENABLED] ?: false,
             reminderTime = LocalTime.of(values[REMINDER_HOUR] ?: 21, values[REMINDER_MINUTE] ?: 0),
+            reminderAwaitingConfirmation = values[REMINDER_AWAITING_CONFIRMATION] ?: false,
+            plaintextBackupAcknowledged = values[PLAINTEXT_BACKUP_ACKNOWLEDGED] ?: false,
             onlineFxEnabled = values[ONLINE_FX_ENABLED] ?: false,
             defaultExpenseCurrency = values[DEFAULT_EXPENSE_CURRENCY]
                 ?.let { runCatching { SupportedCurrency.fromCode(it) }.getOrNull() }
@@ -66,7 +76,23 @@ class DataStorePreferences internal constructor(
             it[REMINDER_ENABLED] = enabled
             it[REMINDER_HOUR] = time.hour
             it[REMINDER_MINUTE] = time.minute
+            it[REMINDER_AWAITING_CONFIRMATION] = false
         }
+    }
+
+    override suspend fun applyRestoredPortableSettings(settings: PortableSettings) {
+        require(settings.futurePeriodStartDay in 1..31)
+        dataStore.edit {
+            it[START_DAY] = settings.futurePeriodStartDay
+            it[REMINDER_ENABLED] = false
+            it[REMINDER_HOUR] = settings.reminderTime.hour
+            it[REMINDER_MINUTE] = settings.reminderTime.minute
+            it[REMINDER_AWAITING_CONFIRMATION] = true
+        }
+    }
+
+    override suspend fun acknowledgePlaintextBackup() {
+        dataStore.edit { it[PLAINTEXT_BACKUP_ACKNOWLEDGED] = true }
     }
 
     override suspend fun setOnlineFxEnabled(enabled: Boolean) {
@@ -94,6 +120,8 @@ class DataStorePreferences internal constructor(
         val REMINDER_ENABLED = booleanPreferencesKey("reminder_enabled")
         val REMINDER_HOUR = intPreferencesKey("reminder_hour")
         val REMINDER_MINUTE = intPreferencesKey("reminder_minute")
+        val REMINDER_AWAITING_CONFIRMATION = booleanPreferencesKey("reminder_awaiting_confirmation")
+        val PLAINTEXT_BACKUP_ACKNOWLEDGED = booleanPreferencesKey("plaintext_backup_acknowledged")
         val ONLINE_FX_ENABLED = booleanPreferencesKey("online_fx_enabled")
         val DEFAULT_EXPENSE_CURRENCY = stringPreferencesKey("default_expense_currency")
         val NOTIFICATION_SOURCE_PACKAGES = androidx.datastore.preferences.core.stringSetPreferencesKey("notification_source_packages")

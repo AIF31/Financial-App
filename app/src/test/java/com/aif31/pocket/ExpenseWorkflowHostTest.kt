@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.aif31.pocket.data.*
@@ -36,6 +37,82 @@ class ExpenseWorkflowHostTest {
         state = ledger.state.first()
     }
     @After fun close() { database.close() }
+
+    @Test fun delayed_save_disables_double_tap_and_retry_keeps_the_draft_identity() {
+        val requests = mutableListOf<LedgerCommand.AddMovement>()
+        var response = CompletableDeferred<LedgerResult>()
+        val delayedLedger = object : PocketLedger by ledger {
+            override suspend fun execute(command: LedgerCommand): LedgerResult {
+                requests += command as LedgerCommand.AddMovement
+                val result = response.await()
+                return if (result == LedgerResult.Success) ledger.execute(command) else result
+            }
+        }
+        var saved = 0
+        compose.setContent {
+            ProductionMovementScreen(state, delayedLedger, {}, { saved++ }, ledger.movementDefaults())
+        }
+        compose.onNodeWithTag("movement_amount").performTextInput("12.50")
+        compose.onNodeWithTag("movement_pocket_Supermercado").performClick()
+        compose.onNodeWithTag("movement_save").performClick()
+        compose.onNodeWithTag("movement_save").assertIsNotEnabled().assertTextEquals("Guardando…")
+        assertEquals(1, requests.size)
+        compose.runOnIdle { response.complete(LedgerResult.Rejected("Inténtalo otra vez")) }
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("Inténtalo otra vez"))
+        compose.onNodeWithText("Inténtalo otra vez").assertIsDisplayed()
+        compose.onNodeWithTag("movement_amount").assertTextContains("12.50")
+        assertEquals(0, saved)
+        assertTrue(runBlocking { ledger.state.first().movements.isEmpty() })
+        response = CompletableDeferred()
+        compose.onNodeWithTag("movement_save").performClick()
+        compose.onNodeWithTag("movement_save").assertIsNotEnabled()
+        assertEquals(2, requests.size)
+        assertEquals(requests[0].id, requests[1].id)
+        assertTrue(requests.all { it.createOnly })
+        compose.runOnIdle { response.complete(LedgerResult.Success) }
+        compose.waitUntil(5_000) { saved == 1 }
+        val movement = runBlocking { ledger.state.first().movements.single() }
+        assertEquals(requests[1].pocketId, movement.pocketId)
+        assertEquals(requests[1].localDate, movement.localDate)
+        assertEquals(1_250L, movement.accountingAmountMinor)
+        assertEquals(ConversionStatus.CONFIRMED, movement.conversionStatus)
+        assertEquals(requests[1].paymentMethodId, movement.paymentMethodId)
+    }
+
+    @Test fun interrupted_save_retains_draft_and_id_for_safe_retry() {
+        val requests = mutableListOf<LedgerCommand.AddMovement>()
+        var response = CompletableDeferred<LedgerResult>()
+        val delayedLedger = object : PocketLedger by ledger {
+            override suspend fun execute(command: LedgerCommand): LedgerResult {
+                requests += command as LedgerCommand.AddMovement
+                val result = response.await()
+                return if (result == LedgerResult.Success) ledger.execute(command) else result
+            }
+        }
+        var saved = 0
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            ProductionMovementScreen(state, delayedLedger, {}, { saved++ }, ledger.movementDefaults())
+        }
+        compose.onNodeWithTag("movement_amount").performTextInput("12.50")
+        compose.onNodeWithTag("movement_pocket_Supermercado").performClick()
+        compose.onNodeWithTag("movement_save").performClick()
+        assertEquals(1, requests.size)
+        val firstResponse = response
+
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithTag("movement_amount").assertTextContains("12.50")
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("No se confirmó el guardado. Reintenta con este borrador."))
+        response = CompletableDeferred(LedgerResult.Success)
+        compose.onNodeWithTag("movement_save").performClick()
+        compose.waitUntil(5_000) { saved == 1 }
+        assertEquals(2, requests.size)
+        assertEquals(requests[0].id, requests[1].id)
+        firstResponse.complete(LedgerResult.Success)
+        compose.waitForIdle()
+        assertEquals(1, saved)
+        assertEquals(1, runBlocking { ledger.state.first().movements.size })
+    }
 
     @Test fun loading_foreign_quote_blocks_save_and_switching_to_same_currency_cancels_it() {
         val pending = CompletableDeferred<FxQuote>()

@@ -2,6 +2,7 @@ package com.aif31.pocket.data
 
 import com.aif31.pocket.domain.SupportedCurrency
 import java.time.LocalDate
+import java.time.LocalTime
 
 data class CurrencyBoundary(
     val from: SupportedCurrency,
@@ -136,6 +137,7 @@ data class LedgerState(
     val periods: List<Period> = emptyList(),
     val currentPeriod: Period? = null,
     val pockets: List<PocketPeriodSummary> = emptyList(),
+    val pocketCatalog: List<Pocket> = emptyList(),
     val pocketSummariesByPeriod: Map<String, List<PocketPeriodSummary>> = emptyMap(),
     val movements: List<Movement> = emptyList(),
     val paymentMethods: List<PaymentMethod> = emptyList(),
@@ -194,8 +196,9 @@ sealed interface LedgerCommand {
         val conversionEffectiveDate: LocalDate? = null,
         val conversionSource: String? = null,
         val accountingCurrency: SupportedCurrency? = null,
+        val createOnly: Boolean = false,
     ) : LedgerCommand
-    data class ConfirmSuggestion(val suggestionId: String, val movement: AddMovement) : LedgerCommand
+    data class ConfirmSuggestion(val suggestionId: String, val movement: AddMovement, val submissionId: String? = null) : LedgerCommand
     data class RejectSuggestion(val suggestionId: String) : LedgerCommand
     data class DeleteMovement(val movementId: String) : LedgerCommand
     data class RestoreMovement(val movement: Movement) : LedgerCommand
@@ -236,7 +239,7 @@ interface PocketLedger {
     val state: kotlinx.coroutines.flow.Flow<LedgerState>
     fun movementDefaults(): MovementDefaults
     suspend fun execute(command: LedgerCommand): LedgerResult
-    suspend fun exportBackup(): ByteArray
+    suspend fun exportBackup(settings: PortableSettings = PortableSettings()): ByteArray
     suspend fun previewBackup(bytes: ByteArray): BackupPreview
     suspend fun restoreBackup(bytes: ByteArray): LedgerResult
     suspend fun exportCsv(): ByteArray
@@ -247,11 +250,17 @@ data class MovementDefaults(
     val instantMillis: Long,
 )
 
+data class PortableSettings(
+    val futurePeriodStartDay: Int = 25,
+    val reminderTime: LocalTime = LocalTime.of(21, 0),
+)
+
 data class BackupPreview(
     val version: Int,
     val periods: Int,
     val pockets: Int,
     val movements: Int,
     val valid: Boolean,
+    val portableSettings: PortableSettings? = null,
     val message: String? = null,
 )

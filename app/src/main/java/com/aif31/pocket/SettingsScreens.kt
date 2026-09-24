@@ -20,6 +20,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.aif31.pocket.data.*
 import com.aif31.pocket.domain.Money
 import com.aif31.pocket.domain.SupportedCurrency
@@ -47,6 +50,7 @@ internal fun SettingsScreen(
     onCreateCsv: () -> Unit,
     onPickBackup: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
+    notificationPermissionRevision: Int = 0,
     padding: PaddingValues,
     section: SettingsSection?,
     onSectionChange: (SettingsSection?) -> Unit,
@@ -91,6 +95,7 @@ internal fun SettingsScreen(
         onCreateCsv = onCreateCsv,
         onPickBackup = onPickBackup,
         onRequestNotificationPermission = onRequestNotificationPermission,
+        notificationPermissionRevision = notificationPermissionRevision,
         padding = padding,
         section = selectedSection,
         onBack = { onSectionChange(null) },
@@ -217,6 +222,7 @@ private fun SettingsDetailScreen(
     onCreateCsv: () -> Unit,
     onPickBackup: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
+    notificationPermissionRevision: Int,
     padding: PaddingValues,
     section: SettingsSection,
     onBack: () -> Unit,
@@ -236,6 +242,28 @@ private fun SettingsDetailScreen(
     var editingTemplate by rememberSaveable { mutableStateOf<String?>(null) }
     var message by rememberSaveable { mutableStateOf<String?>(null) }
     var reminderPermissionRationaleVisible by rememberSaveable { mutableStateOf(false) }
+    var reminderStatus by remember { mutableStateOf<ReminderStatus>(ReminderStatus.Off) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    fun refreshReminderStatus() {
+        scope.launch {
+            reminderStatus = try {
+                reminderScheduler?.status(preferences.reminderEnabled)
+                    ?: if (preferences.reminderEnabled) ReminderStatus.Failed else ReminderStatus.Off
+            } catch (_: Exception) {
+                ReminderStatus.Failed
+            }
+        }
+    }
+    LaunchedEffect(section, preferences.reminderEnabled, preferences.reminderTime, notificationPermissionRevision) {
+        if (section == SettingsSection.REMINDERS) refreshReminderStatus()
+    }
+    DisposableEffect(lifecycleOwner, section, preferences.reminderEnabled) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && section == SettingsSection.REMINDERS) refreshReminderStatus()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val selectedFundsPeriod = state.periods.firstOrNull { it.id == selectedFundsPeriodId }
     val selectedFundsCurrency = selectedFundsPeriod?.accountingCurrency ?: SupportedCurrency.SAR
 
@@ -315,7 +343,12 @@ private fun SettingsDetailScreen(
             item {
                 Text("Recordatorio diario", style = MaterialTheme.typography.titleLarge)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(if (preferences.reminderEnabled) "Activado" else "Desactivado")
+                Text(when (reminderStatus) {
+                    ReminderStatus.Off -> if (preferences.reminderAwaitingConfirmation) "Desactivado · confirma en este dispositivo" else "Desactivado"
+                    ReminderStatus.PermissionRequired -> "Permiso necesario"
+                    ReminderStatus.Scheduled -> "Programado"
+                    ReminderStatus.Failed -> "No se pudo programar"
+                })
                 Switch(
                     checked = preferences.reminderEnabled,
                     onCheckedChange = { enabled ->
@@ -324,10 +357,16 @@ private fun SettingsDetailScreen(
                             message = "Escribe una hora válida en formato HH:mm"
                         } else {
                             scope.launch {
-                                preferencesStore?.setReminder(enabled, time)
-                                reminderScheduler?.apply(enabled, time)
-                                message = if (enabled) "Recordatorio activado" else "Recordatorio desactivado"
-                                reminderPermissionRationaleVisible = enabled
+                                try {
+                                    preferencesStore?.setReminder(enabled, time)
+                                    reminderStatus = reminderScheduler?.applyAndCheck(enabled, time)
+                                        ?: if (enabled) ReminderStatus.Failed else ReminderStatus.Off
+                                    reminderPermissionRationaleVisible = reminderStatus == ReminderStatus.PermissionRequired
+                                    message = if (enabled) null else "Recordatorio desactivado"
+                                } catch (_: Exception) {
+                                    reminderStatus = ReminderStatus.Failed
+                                    message = "No se pudo programar el recordatorio"
+                                }
                             }
                         }
                     },
@@ -341,13 +380,34 @@ private fun SettingsDetailScreen(
                     message = "Escribe una hora válida en formato HH:mm"
                 } else {
                     scope.launch {
-                        preferencesStore?.setReminder(preferences.reminderEnabled, time)
-                        reminderScheduler?.apply(preferences.reminderEnabled, time)
-                        message = "Horario guardado"
+                        try {
+                            preferencesStore?.setReminder(preferences.reminderEnabled, time)
+                            reminderStatus = reminderScheduler?.applyAndCheck(preferences.reminderEnabled, time)
+                                ?: if (preferences.reminderEnabled) ReminderStatus.Failed else ReminderStatus.Off
+                            message = "Horario guardado"
+                        } catch (_: Exception) {
+                            reminderStatus = ReminderStatus.Failed
+                            message = "No se pudo programar el recordatorio"
+                        }
                     }
                 }
             }) { Text("Guardar horario") }
             message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+            if (reminderStatus == ReminderStatus.Failed && preferences.reminderEnabled) {
+                Text("Comprueba los ajustes de notificaciones y vuelve a intentarlo.")
+                TextButton(onClick = {
+                    scope.launch {
+                        reminderStatus = try {
+                            reminderScheduler?.applyAndCheck(true, preferences.reminderTime) ?: ReminderStatus.Failed
+                        } catch (_: Exception) { ReminderStatus.Failed }
+                    }
+                }) { Text("Reintentar") }
+            }
+            if (reminderStatus == ReminderStatus.PermissionRequired) {
+                Text("Permite las notificaciones para recibir el recordatorio.")
+                TextButton(onClick = { reminderPermissionRationaleVisible = true }) { Text("Revisar permiso") }
+            }
+            Text("La entrega es aproximada y puede retrasarse según el dispositivo.")
             Text("El recordatorio no muestra importes en la pantalla bloqueada.")
             if (reminderPermissionRationaleVisible) {
                 Card(Modifier.fillMaxWidth()) {

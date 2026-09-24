@@ -373,6 +373,9 @@ class RoomPocketLedger(
     }
 
     private suspend fun addMovement(command: LedgerCommand.AddMovement): LedgerResult = database.withTransaction {
+        if (command.createOnly && command.id != null && dao.movement(command.id) != null) {
+            return@withTransaction LedgerResult.Success
+        }
         require(command.accountingAmountMinor > 0) { "El importe debe ser mayor que cero" }
         require(command.rate == null || (command.rate.toBigDecimalOrNull()?.signum() ?: 0) > 0) { "Tipo de cambio inválido" }
         val periods = dao.periods()
@@ -422,10 +425,16 @@ class RoomPocketLedger(
     private suspend fun confirmSuggestion(command: LedgerCommand.ConfirmSuggestion): LedgerResult {
         var corrections: Pair<Boolean, Boolean>? = null
         val result = database.withTransaction {
+            if (command.submissionId != null && dao.movement(command.submissionId) != null) {
+                return@withTransaction LedgerResult.Success
+            }
             val suggestion = dao.movementSuggestion(command.suggestionId)
             require(suggestion?.status == "PENDING" && suggestion.expiresAtUtcMillis > clock.millis()) { "La sugerencia ya no está disponible" }
             // A confirmed suggestion always creates a new Movement. A caller-provided ID could overwrite one.
-            val movementResult = addMovement(command.movement.copy(id = null))
+            val movementResult = addMovement(command.movement.copy(
+                id = command.submissionId,
+                createOnly = command.submissionId != null,
+            ))
             if (movementResult == LedgerResult.Success) {
                 dao.putMovementSuggestion(suggestion.asTombstone("CONFIRMED"))
                 val confirmedAmount = command.movement.originalAmountMinor ?: command.movement.accountingAmountMinor
@@ -850,10 +859,11 @@ class RoomPocketLedger(
         val today = today()
         val current = periods.firstOrNull { today >= it.start && today < it.endExclusive }
         val pocketsById = pocketEntities.associateBy { it.id }
+        val pocketCatalog = pocketEntities.sortedWith(compareBy<PocketEntity> { it.sortOrder }.thenBy { it.name }).map { it.toModel() }
         val methodsById = methodEntities.associateBy { it.id }
         val movements = movementEntities.map { it.toModel(pocketsById, methodsById) }
         val suggestions = suggestionEntities.filter { it.expiresAtUtcMillis > clock.millis() }.mapNotNull { it.toModel() }
-        if (current == null) return LedgerState(periods = periods, movements = movements, movementSuggestions = suggestions)
+        if (current == null) return LedgerState(periods = periods, pocketCatalog = pocketCatalog, movements = movements, movementSuggestions = suggestions)
         fun summariesFor(periodId: String): List<PocketPeriodSummary> {
             val periodMovements = movements.filter { it.periodId == periodId }
             val periodAllocations = allocations.filter { it.periodId == periodId }.associateBy { it.pocketId }
@@ -929,6 +939,7 @@ class RoomPocketLedger(
             periods = periods,
             currentPeriod = current,
             pockets = summaries,
+            pocketCatalog = pocketCatalog,
             pocketSummariesByPeriod = allSummaries,
             movements = movements,
             paymentMethods = methodEntities.map { PaymentMethod(it.id, it.name, it.archived) },
@@ -965,7 +976,7 @@ class RoomPocketLedger(
 
     private fun today(): LocalDate = clock.instant().atZone(zoneId).toLocalDate()
 
-    override suspend fun exportBackup(): ByteArray = withContext(codecDispatcher) { BackupCodec.encode(database) }
+    override suspend fun exportBackup(settings: PortableSettings): ByteArray = withContext(codecDispatcher) { BackupCodec.encode(database, settings) }
     override suspend fun previewBackup(bytes: ByteArray): BackupPreview = withContext(codecDispatcher) {
         BackupCodec.preview(bytes, today(), zoneId)
     }

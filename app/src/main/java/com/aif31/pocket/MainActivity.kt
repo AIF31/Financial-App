@@ -9,11 +9,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
+import com.aif31.pocket.data.PortableSettings
 import com.aif31.pocket.ui.PocketTheme
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -30,9 +34,13 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     private val recovery by viewModels<RecoveryViewModel>()
     private lateinit var dateCoordinator: ForegroundDateCoordinator
+    private var notificationPermissionRevision by mutableIntStateOf(0)
 
     private val createBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        if (uri == null) showOperationMessage("Creación de backup cancelada.")
+        if (uri == null) {
+            recovery.recordBackupExportResult(false)
+            showOperationMessage("Creación de backup cancelada.")
+        }
         else writeExport(uri, DocumentOperation.BACKUP)
     }
     private val createCsv = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
@@ -74,7 +82,9 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    private val requestNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private val requestNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        notificationPermissionRevision++
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -104,6 +114,8 @@ class MainActivity : ComponentActivity() {
                     restoreCandidate = recovery.restoreCandidate,
                     onRestoreCandidateHandled = recovery::clearRestoreCandidate,
                     operationMessage = recovery.operationMessage,
+                    backupExportSucceeded = recovery.backupExportSucceeded,
+                    onBackupExportResultHandled = { recovery.recordBackupExportResult(null) },
                     operationRetryLabel = recovery.retryOperation?.let { "Reintentar" },
                     onOperationMessageHandled = { showOperationMessage(null) },
                     onRetryOperation = ::retryDocumentOperation,
@@ -118,6 +130,7 @@ class MainActivity : ComponentActivity() {
                     onRequestNotificationPermission = {
                         if (android.os.Build.VERSION.SDK_INT >= 33) requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                     },
+                    notificationPermissionRevision = notificationPermissionRevision,
                 )
             }
         }
@@ -131,6 +144,7 @@ class MainActivity : ComponentActivity() {
 
     internal fun launchDocumentOperation(operation: DocumentOperation) {
         showOperationMessage(null)
+        if (operation == DocumentOperation.BACKUP) recovery.recordBackupExportResult(null)
         when (operation) {
             DocumentOperation.BACKUP -> createBackup.launch("pocket-${java.time.LocalDate.now()}.pocketbackup")
             DocumentOperation.SHARE -> shareBackup()
@@ -149,12 +163,18 @@ class MainActivity : ComponentActivity() {
         recovery.showOperationMessage(message, retry)
     }
 
+    private suspend fun exportPortableBackup(): ByteArray {
+        val app = application as PocketApplication
+        val settings = app.preferences.state.first()
+        return app.ledger.exportBackup(PortableSettings(settings.futurePeriodStartDay, settings.reminderTime))
+    }
+
     private fun shareBackup() {
         recovery.clearPreparedShare()
         lifecycleScope.launch {
             try {
                 val file = withContext(Dispatchers.IO) {
-                    val bytes = (application as PocketApplication).ledger.exportBackup()
+                    val bytes = exportPortableBackup()
                     val directory = File(cacheDir, SHARED_BACKUP_DIRECTORY).apply { mkdirs() }
                     val target = AtomicFile(File(directory, "pocket-${LocalDate.now()}-${UUID.randomUUID()}.pocketbackup"))
                     val output = target.startWrite()
@@ -205,14 +225,16 @@ class MainActivity : ComponentActivity() {
             try {
                 withContext(Dispatchers.IO) {
                     val ledger = (application as PocketApplication).ledger
-                    val bytes = if (operation == DocumentOperation.BACKUP) ledger.exportBackup() else ledger.exportCsv()
+                    val bytes = if (operation == DocumentOperation.BACKUP) exportPortableBackup() else ledger.exportCsv()
                     val output = contentResolver.openOutputStream(uri, "wt")
                         ?: throw IOException("The selected document could not be opened")
                     output.use { it.write(bytes) }
                 }
                 showOperationMessage(if (operation == DocumentOperation.BACKUP) "Backup creado." else "CSV exportado.")
+                if (operation == DocumentOperation.BACKUP) recovery.recordBackupExportResult(true)
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
+                if (operation == DocumentOperation.BACKUP) recovery.recordBackupExportResult(false)
                 val message = if (operation == DocumentOperation.BACKUP) {
                     "No se pudo crear el backup. Comprueba el destino y vuelve a intentarlo."
                 } else {
