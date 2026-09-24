@@ -14,4 +14,4 @@ The issue review found gaps in permission-result refresh, keyboard-visible savin
 
 ## Verification and limits
 
-The final local gate passed 205 host tests and 29 Pixel 6 API 35 managed-device tests, with no failures or skips, plus lint and debug/release builds. No personal Android device was used. Remote CI and GitHub issue closure remain pending publication of the local commit.
+The final local gate passed 205 host tests and 29 Pixel 6 API 35 managed-device tests, with no failures or skips, plus lint and debug/release builds. No personal Android device was used. The first PR CI retry exposed a stale host-test assertion: negative funds receive the ledger's domain rejection, not the parse error left on screen from the prior input. The assertion now waits for the domain rejection. PR #26 carries the fix through required CI; issue closure awaits merge.

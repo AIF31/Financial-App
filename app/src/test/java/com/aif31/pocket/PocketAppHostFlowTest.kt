@@ -216,7 +216,7 @@ class PocketAppHostFlowTest {
 
         compose.onNodeWithTag("period_funds").performTextReplacement("-30.75")
         compose.onNodeWithText("Guardar fondos").performClick()
-        compose.waitUntilExactlyOneExists(hasText("Escribe fondos válidos"), 5_000)
+        compose.waitUntilExactlyOneExists(hasText("Los fondos no pueden ser negativos"), 5_000)
         assertEquals(3_075L, runBlocking { ledger.state.first().newFundsMinor })
     }
 
