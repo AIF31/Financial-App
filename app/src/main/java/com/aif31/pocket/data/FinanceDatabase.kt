@@ -315,11 +315,9 @@ abstract class FinanceDatabase : RoomDatabase() {
     abstract fun financeDao(): FinanceDao
 
     companion object {
-        fun open(context: Context): FinanceDatabase = open(context, "pocket.db")
-
-        internal fun open(context: Context, name: String): FinanceDatabase =
-            Room.databaseBuilder(context.applicationContext, FinanceDatabase::class.java, name)
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+        fun open(context: Context): FinanceDatabase =
+            Room.databaseBuilder(context.applicationContext, FinanceDatabase::class.java, "pocket.db")
+                .addMigrations(*MIGRATIONS)
                 .build()
 
         fun inMemory(context: Context): FinanceDatabase =
@@ -465,5 +463,7 @@ abstract class FinanceDatabase : RoomDatabase() {
                 )
             }
         }
+
+        internal val MIGRATIONS = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
     }
 }

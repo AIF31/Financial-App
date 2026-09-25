@@ -1,5 +1,7 @@
 package com.aif31.pocket.data
 
+import android.content.Context
+import androidx.room.Room
 import androidx.room.testing.MigrationTestHelper
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -23,6 +25,11 @@ class FinanceDatabaseMigrationTest {
         InstrumentationRegistry.getInstrumentation(),
         FinanceDatabase::class.java,
     )
+
+    private fun openMigratedDatabase(context: Context, name: String): FinanceDatabase =
+        Room.databaseBuilder(context.applicationContext, FinanceDatabase::class.java, name)
+            .addMigrations(*FinanceDatabase.MIGRATIONS)
+            .build()
 
     @Test
     fun populated_version_1_upgrades_to_current_and_remains_usable() = runBlocking {
@@ -49,7 +56,7 @@ class FinanceDatabaseMigrationTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val zone = ZoneId.of("Asia/Riyadh")
         val clock = Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone)
-        val database = FinanceDatabase.open(context, name)
+        val database = openMigratedDatabase(context, name)
         try {
             val ledger = RoomPocketLedger(database, clock, zone)
             val state = ledger.state.first { it.periods.isNotEmpty() }
@@ -93,7 +100,7 @@ class FinanceDatabaseMigrationTest {
         }
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val zone = ZoneId.of("Asia/Riyadh")
-        val database = FinanceDatabase.open(context, name)
+        val database = openMigratedDatabase(context, name)
         try {
             val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-01-26T09:00:00Z"), zone), zone)
             try {

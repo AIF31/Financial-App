@@ -16,7 +16,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.waitUntilExactlyOneExists
+import androidx.compose.ui.test.waitUntilDoesNotExist
 import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.Lifecycle
@@ -87,6 +89,81 @@ class PocketCriticalConfigurationTest {
             compose.onNodeWithText("Comenzar").performScrollTo().performClick()
             compose.onNodeWithText("Revisa los fondos y el día de inicio").performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("Restaurar backup").performScrollTo().assertIsDisplayed()
+        }
+    }
+
+    @Test fun large_font_compact_window_keeps_populated_period_pocket_movement_and_recovery_actions_reachable() {
+        seedLedger()
+        shell("settings put system font_scale 1.5")
+        shell("wm size 720x1280")
+        launch().use {
+            compose.waitUntilExactlyOneExists(hasText("Ajustes"), 10_000)
+            compose.onNodeWithText("Ajustes").performClick()
+            compose.onNodeWithText("Periodo y fondos").performScrollTo().performClick()
+            compose.onNodeWithTag("period_funds").performTextReplacement("1.2.3")
+            closeSoftKeyboard()
+            compose.onNodeWithText("Guardar fondos").performScrollTo().performClick()
+            compose.onNodeWithText("Escribe fondos válidos").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("period_funds").performTextReplacement("1200.00")
+            closeSoftKeyboard()
+            compose.onNodeWithText("Guardar fondos").performScrollTo().performClick()
+            compose.waitUntil(10_000) { runBlocking { app.ledger.state.first().newFundsMinor == 120_000L } }
+            compose.onNodeWithText("Crear periodo siguiente").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("settings_list").performScrollToNode(hasText("Atrás"))
+            compose.onNodeWithText("Atrás").performClick()
+
+            compose.onNodeWithText("Pockets").performClick()
+            compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Crear Pocket"))
+            compose.onNodeWithText("Crear Pocket").performClick()
+            compose.onNodeWithText("Guardar Pocket").assertIsDisplayed().performClick()
+            compose.onNodeWithText("Escribe un nombre para el Pocket").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("pocket_name").performTextInput("Vacaciones")
+            closeSoftKeyboard()
+            compose.onNodeWithText("Aplicar rollover").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Guardar Pocket").assertIsDisplayed().performClick()
+            compose.waitUntil(10_000) { runBlocking { app.ledger.state.first().pockets.any { it.pocket.name == "Vacaciones" } } }
+
+            compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("pocket_Supermercado"))
+            compose.onNodeWithTag("pocket_Supermercado").performClick()
+            compose.onNodeWithTag("allocation_amount").performTextReplacement("50.00")
+            closeSoftKeyboard()
+            compose.onNodeWithText("Guardar presupuesto").assertIsDisplayed().performClick()
+            compose.waitUntil(10_000) { runBlocking { app.ledger.state.first().pockets.first { it.pocket.name == "Supermercado" }.budgetMinor == 5_000L } }
+
+            compose.onNodeWithText("Inicio").performClick()
+            compose.onNodeWithTag("contextual_add").performClick()
+            compose.onNodeWithTag("movement_amount").performTextInput("8.25")
+            closeSoftKeyboard()
+            compose.onNodeWithTag("movement_pocket_Supermercado").performScrollTo().performClick()
+            compose.onNodeWithTag("movement_save").assertIsDisplayed().performClick()
+            compose.waitUntil(10_000) { runBlocking { app.ledger.state.first().movements.size == 1 } }
+            compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Gastado"))
+            compose.onNodeWithText("Gastado").assertIsDisplayed()
+            compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("SAR 8.25"))
+            compose.onNodeWithText("SAR 8.25").assertIsDisplayed()
+            compose.onNodeWithText("Pockets").performClick()
+            compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("pocket_Supermercado"))
+            compose.onNodeWithText("SAR 41.75 disponibles").assertIsDisplayed()
+        }
+
+        val backup = runBlocking { app.ledger.exportBackup() }
+        launch().use { scenario ->
+            scenario.onActivity { activity ->
+                runBlocking { ViewModelProvider(activity)[RecoveryViewModel::class.java].setRestoreCandidate(backup) }
+            }
+            compose.waitUntilExactlyOneExists(hasText("Confirmar restauración"), 10_000)
+            compose.onNodeWithText("Esta acción reemplazará los datos actuales y puede eliminar información anterior. No se puede deshacer.")
+                .performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Continuar sin backup").performScrollTo().performClick()
+            compose.onNodeWithText("Restaurar y reemplazar").assertIsDisplayed().assertIsEnabled().performClick()
+            compose.waitUntilDoesNotExist(hasText("Confirmar restauración"), 10_000)
+        }
+        launch().use { scenario ->
+            scenario.onActivity { activity ->
+                runBlocking { ViewModelProvider(activity)[RecoveryViewModel::class.java].setRestoreCandidate(byteArrayOf(1, 2, 3)) }
+            }
+            compose.waitUntilExactlyOneExists(hasText("Backup inválido"), 10_000)
+            compose.onNodeWithText("Cancelar").assertIsDisplayed().performClick()
         }
     }
 

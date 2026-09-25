@@ -260,6 +260,9 @@ class RoomPocketLedger(
                 val snapshot = periodPockets.firstOrNull { it.periodId == period.id && it.pocketId == pocket.id }
                 val restoredSnapshot = snapshot?.copy(retired = false)
                     ?: PeriodPocketEntity(period.id, pocket.id, pocket.rolloverEnabled, retired = false)
+                val futureSnapshots = periods.filter { it.startEpochDay > period.startEpochDay }
+                    .filterNot { future -> periodPockets.any { it.periodId == future.id && it.pocketId == pocket.id } }
+                    .map { future -> PeriodPocketEntity(future.id, pocket.id, pocket.rolloverEnabled, retired = false) }
                 val releases = dao.rolloverReleases()
                 val release = releases.firstOrNull { it.periodId == period.id && it.pocketId == pocket.id }
                 val allocations = dao.allocations()
@@ -272,7 +275,7 @@ class RoomPocketLedger(
                 rolloverProjection(
                     period.id,
                     periods,
-                    periodPockets.filterNot { it.periodId == period.id && it.pocketId == pocket.id } + restoredSnapshot,
+                    periodPockets.filterNot { it.periodId == period.id && it.pocketId == pocket.id } + restoredSnapshot + futureSnapshots,
                     dao.movements(),
                     restoredAllocation?.let { restored ->
                         allocations.filterNot { it.periodId == period.id && it.pocketId == pocket.id } + restored
@@ -283,6 +286,7 @@ class RoomPocketLedger(
                 restoredAllocation?.let { dao.putAllocation(it) }
                 release?.let { dao.deleteRolloverRelease(period.id, pocket.id) }
                 dao.putPeriodPocket(restoredSnapshot)
+                dao.putPeriodPockets(futureSnapshots)
                 recalculateRolloverFrom(period.id)
             }
             if (currentPeriod == null) dao.putPocket(pocket.copy(archived = false))
