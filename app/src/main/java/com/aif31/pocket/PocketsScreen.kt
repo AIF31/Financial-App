@@ -1,6 +1,8 @@
 package com.aif31.pocket
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
@@ -376,7 +378,7 @@ private fun PocketEditorDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (existing == null) "Crear Pocket" else "Editar Pocket") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -450,7 +452,7 @@ private fun PocketManagementDialog(
             onDismissRequest = onDismiss,
             title = { Text("Detalle histórico") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium)
                     Text("Presupuesto: ${money(summary.budgetMinor)}")
                     Text("Rollover recibido: ${money(summary.rolloverMinor)}")
@@ -469,7 +471,7 @@ private fun PocketManagementDialog(
             onDismissRequest = onDismiss,
             title = { Text("Pocket retirado") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium)
                     Text("Gastos: ${money(summary.expenseMinor)}")
                     Text("Reembolsos: ${money(summary.refundMinor)}")
@@ -501,7 +503,7 @@ private fun PocketManagementDialog(
         onDismissRequest = onDismiss,
         title = { Text(summary.pocket.name) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Gestiona el presupuesto y las opciones de este Pocket sin saturar la vista general.")
                 OutlinedTextField(
                     value = amount,
