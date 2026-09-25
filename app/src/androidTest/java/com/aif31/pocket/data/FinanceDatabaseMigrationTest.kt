@@ -28,13 +28,7 @@ class FinanceDatabaseMigrationTest {
 
     private fun openMigratedDatabase(context: Context, name: String): FinanceDatabase =
         Room.databaseBuilder(context.applicationContext, FinanceDatabase::class.java, name)
-            .addMigrations(
-                FinanceDatabase.MIGRATION_2_3,
-                FinanceDatabase.MIGRATION_3_4,
-                FinanceDatabase.MIGRATION_4_5,
-                FinanceDatabase.MIGRATION_5_6,
-                FinanceDatabase.MIGRATION_6_7,
-            )
+            .addMigrations(*FinanceDatabase.MIGRATIONS)
             .build()
 
     @Test
