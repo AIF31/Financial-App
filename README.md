@@ -29,7 +29,7 @@ Read [`Info/CHANGELOG.md`](Info/CHANGELOG.md) before starting work. For every re
 
 After each code review, create or update a dated report in [`docs/audits/`](docs/audits/) with the review scope, findings, and verification limits. Update the relevant audit when findings are resolved, linking the fix and its verification. Keep these records current alongside the changelog.
 
-Every pull request must increase `versionName` by one patch number (`n.n.n` to `n.n.n+1`) and `versionCode` by one. The required Android checks job verifies both before merge. A version bump does not publish an APK; the download link above changes only when a release is published.
+Pull requests that change app, test, build, or project script files must increase `versionName` by one patch number (`n.n.n` to `n.n.n+1`) and `versionCode` by one. Documentation-only pull requests do not require a bump. The required Android checks job verifies this before merge. A version bump does not publish an APK; the download link above changes only when a release is published.
 
 ## Build and run
 

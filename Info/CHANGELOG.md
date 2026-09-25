@@ -6,7 +6,7 @@ Notable repository changes are recorded here for future maintainers.
 
 ### App version policy
 
-- Advanced the development build to `1.0.1` (`versionCode` 2) after merged PR #26. Each future pull request must increase both values by exactly one patch/code step; the required Android checks job validates the change before merge. The published APK remains `1.0.0` until a new release is signed and published.
+- Advanced the development build to `1.0.1` (`versionCode` 2) after merged PR #26. Future pull requests changing app, test, build, or project script files must increase both values by exactly one patch/code step; documentation-only pull requests are exempt. The required Android checks job validates the change before merge. The published APK remains `1.0.0` until a new release is signed and published.
 - The version rule passed its self-check and comparison against the previous `main` commit. The physical test record includes the focused visual-tour navigation fix and its isolated passing rerun; the full physical suite was not rerun after that fix. The local Graphify update command could not start because its configured Python interpreter is unavailable.
 
 ### Local Codex and Graphify files
