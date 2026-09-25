@@ -2,6 +2,31 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-09-25
+
+### App version policy
+
+- Advanced the development build to `1.0.1` (`versionCode` 2) after merged PR #26. Each future pull request must increase both values by exactly one patch/code step; the required Android checks job validates the change before merge. The published APK remains `1.0.0` until a new release is signed and published.
+- The version rule passed its self-check and comparison against the previous `main` commit. The physical test record includes the focused visual-tour navigation fix and its isolated passing rerun; the full physical suite was not rerun after that fix. The local Graphify update command could not start because its configured Python interpreter is unavailable.
+
+### Local Codex and Graphify files
+
+- Ignored generated `graphify-out/` data and local `.codex/` additions while keeping `.codex/config.toml`, `Info/`, and Android CI versioned. Verified the ignore rules and that Codex CLI can read the local Graphify skill.
+- Kept 36 Android and agent workflow skills versioned, removed 16 optional skill directories and the local Skills Guide from Git's index without deleting local copies, and reduced `skills-lock.json` to the retained set.
+- Scanned the public `main` tree for credential files and key signatures; none were found. The `v1.0.0` APK predates the current `main` by 40 commits.
+
+### Closed-issues implementation review
+
+- Reviewed the current `e58b14f` checkout against closed GitHub issues #1 and #9–#22 along independent standards and spec axes; recorded findings in `docs/audits/2026-09-25-closed-issues-final-implementation-review.md`.
+- Found two remaining #1 product gaps: new foreign expenses cannot use an offline manual SAR equivalent, and historical Pocket budgets cannot be edited. Found two documented UI-standard breaches and one lower-confidence code smell.
+- Verified the exact committed head's Android CI run `36047162329` passed both jobs. This was a static review; no local Gradle or physical-device tests were run. The existing maximum-font and TalkBack physical-release gaps remain open.
+
+### Latest merged PR review
+
+- Reviewed merged PR #26 specifically against issues #14, #15, #16, #17, #21, and #22; recorded separate Standards and Spec findings in `docs/audits/2026-09-25-pr26-merged-review.md`.
+- Found a test-only production database opener, a lower-confidence string-operation smell, an incomplete #17 restore path for pre-created later periods, and partial #22 large-font coverage. Earlier #1 findings were outside this PR diff.
+- Confirmed GitHub `main` at merge commit `f35f8c3`, the PR diff, the passing CI run for `e58b14f`, and a clean `git diff --check` on the PR range. No local Gradle or physical-device tests were run for this review.
+
 ## 2026-09-24
 
 ### Remaining issues in [PR #26](https://github.com/AIF31/Financial-App/pull/26)

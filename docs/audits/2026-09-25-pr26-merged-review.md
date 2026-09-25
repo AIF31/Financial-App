@@ -1,0 +1,23 @@
+# Merged PR #26 code review — 2026-09-25
+
+## Scope and verification
+
+[PR #26](https://github.com/AIF31/Financial-App/pull/26) is the latest PR merged into `main`. GitHub reports merge commit [`f35f8c3`](https://github.com/AIF31/Financial-App/commit/f35f8c3817b3afc97201b06d09f5086e1a81db64) as the current `main` head. Its first-parent base is `ebc0ccf`, and its PR head is `e58b14f`. The review used `git diff ebc0ccf...e58b14f` and `git log ebc0ccf..e58b14f --oneline`; GitHub's base-to-merge comparison reports the same 25 changed files and 1,244 additions/80 deletions. Local uncommitted files are outside this PR review.
+
+The two independent review axes used the PR's linked GitHub issues [#14](https://github.com/AIF31/Financial-App/issues/14), [#15](https://github.com/AIF31/Financial-App/issues/15), [#16](https://github.com/AIF31/Financial-App/issues/16), [#17](https://github.com/AIF31/Financial-App/issues/17), [#21](https://github.com/AIF31/Financial-App/issues/21), and [#22](https://github.com/AIF31/Financial-App/issues/22). `Info/README.md`, `CONTEXT.md`, and the [committed UI philosophy](https://github.com/AIF31/Financial-App/blob/ebc0ccfd0d78664e028f94b33174589b97e35b7d/UI-UX-Design-Philosophy.md) supplied repository standards. Earlier #1 findings predate this diff and are outside this PR review.
+
+The exact PR head passed [Android CI run 36047162329](https://github.com/AIF31/Financial-App/actions/runs/36047162329): both Android checks and Pixel 6 API 35 device tests succeeded. `git diff --check ebc0ccf...e58b14f` passed. This review did not rerun Gradle or a physical-device test. Graphify's configured Python executable is unavailable, so source was inspected directly.
+
+## Standards
+
+1. **Documented breach — test-only production entry point.** [`FinanceDatabase.kt:318`](../../app/src/main/java/com/aif31/pocket/data/FinanceDatabase.kt#L318) adds `open(context, name)`, whose only new callers are migration tests. The [UI philosophy §15](https://github.com/AIF31/Financial-App/blob/ebc0ccfd0d78664e028f94b33174589b97e35b7d/UI-UX-Design-Philosophy.md#L355) says not to add production-only escape hatches for tests. The test can construct a named Room database with the same migrations without expanding the production opener.
+2. **Judgement call — possible Primitive Obsession.** [`PocketApp.kt:137`](../../app/src/main/java/com/aif31/pocket/PocketApp.kt#L137) stores the pending backup action as `String?`, with `"create"`/`"share"` branches. The existing [`DocumentOperation` enum](../../app/src/main/java/com/aif31/pocket/RecoveryViewModel.kt#L16) already represents these actions. This is a Fowler heuristic, not a hard violation; no separate refactor is justified solely by this review.
+
+## Spec
+
+1. **#17 — restore misses a pre-created later period.** The issue requires a restored Pocket to be eligible in future periods. Archiving removes the Pocket's snapshots from **all** pre-created future periods ([`RoomPocketLedger.kt:324`](../../app/src/main/java/com/aif31/pocket/data/RoomPocketLedger.kt#L324)), while restoring recreates only the **current** period's snapshot ([`RoomPocketLedger.kt:255`](../../app/src/main/java/com/aif31/pocket/data/RoomPocketLedger.kt#L255)). `CreateNextPeriod` can create several periods in advance. If P2 and P3 already exist, archive in P1, then restore in P2, P3 still lacks that Pocket when it becomes current. The new [restore test](../../app/src/test/java/com/aif31/pocket/PocketLedgerHostBehaviorTest.kt#L876) checks only P2. The underlying archive behavior predates PR #26; this is an incomplete #17 acceptance fix, not a regression introduced by the PR.
+2. **#22 — large-font critical-flow coverage is partial.** The issue requires large-font checks for primary actions, validation, summaries, dialogs, and recovery controls. The PR's sole `font_scale 1.5` test ([`PocketCriticalConfigurationTest.kt:81`](../../app/src/androidTest/java/com/aif31/pocket/PocketCriticalConfigurationTest.kt#L81)) checks onboarding validation and the restore entry point. Pocket editing, Movement saving, populated summaries, and restore confirmation run at default scale. This is a verification gap; it does not establish that those layouts fail.
+
+No additional substantiated finding was found for #14, #15, #16, or #21 in the PR diff. Passing CI supports the implemented paths but does not cover the two acceptance gaps above.
+
+**Summary:** Standards: one documented breach and one judgement-call smell; worst is the test-only production opener. Spec: two findings; worst is the #17 restored Pocket disappearing in a later pre-created period.

@@ -4,9 +4,10 @@ This directory is the human-oriented operational knowledge base for Pocket. It s
 
 ## Start here
 
+- [Changelog](CHANGELOG.md): repository changes, verification performed, and unresolved blockers.
 - [Install Pocket on an Android device](installing-pocket.md): official downloads, sideloading, source builds, updates, and data-safety notes.
 - [Implementation reference](implementation-reference.md): product boundaries, architecture, durable decisions, and repository history.
-- [Windows, Android Studio, and physical-device testing](windows-android-studio-device-testing.md): working environment, build commands, ADB workflow, and device-test precautions.
+- [Windows, Android Studio, and Pixel 10 Pro testing](windows-android-studio-device-testing.md): working environment, build commands, ADB workflow, and physical-device precautions.
 - [Release signing and recovery](release-signing-and-recovery.md): permanent key handling, signed builds, verification, backup, uninstall, and restore.
 - [Release verification](verification/release-verification.md): retained test evidence and known coverage gaps.
 - [License](../LICENSE.md): PolyForm Noncommercial License 1.0.0 terms for Pocket.
@@ -19,4 +20,4 @@ Update these documents when the package name, SDK, signing certificate, backup f
 
 ## Current handoff status
 
-The MVP is implemented on `main`. Automated host, lint, and managed-device checks are retained in the verification record; physical-device checks should be repeated on a representative device before a release. Maximum-font and TalkBack checks remain release evidence gaps until they are explicitly exercised.
+The MVP is implemented on `main`. Automated host, lint, and managed-device checks are retained in the verification record; physical-device checks should be repeated on a Pixel 10 Pro before a release. Follow the personal-data preservation procedure before installing or testing on that phone. Maximum-font and TalkBack checks remain release evidence gaps until they are explicitly exercised.

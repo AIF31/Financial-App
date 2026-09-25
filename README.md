@@ -8,6 +8,8 @@ Pocket supports Android 8.0 (API 26) and newer.
 
 **[Download Pocket 1.0.0 for Android](https://github.com/AIF31/Financial-App/releases/download/v1.0.0/Pocket-v1.0.0.apk)**
 
+This is the latest published APK. The source on `main` can include changes that have not been released yet.
+
 1. Open the download link on the Android device and save `Pocket-v1.0.0.apk`.
 2. Open the downloaded APK from the browser notification or the device's **Downloads** folder.
 3. If prompted, allow that browser or file manager to **Install unknown apps**, then return to the installer.
@@ -20,6 +22,14 @@ See the [complete installation guide](Info/installing-pocket.md) for device-spec
 ## Project information
 
 Operational documentation is maintained outside the Android module under [`Info/`](Info/README.md). Start there for implementation decisions, Windows/Android Studio setup, physical-device testing, release signing, recovery, and retained verification evidence.
+
+## Contributor and agent workflow
+
+Read [`Info/CHANGELOG.md`](Info/CHANGELOG.md) before starting work. For every repository change, update it under the current date with what changed, the verification actually performed, and any unresolved blockers.
+
+After each code review, create or update a dated report in [`docs/audits/`](docs/audits/) with the review scope, findings, and verification limits. Update the relevant audit when findings are resolved, linking the fix and its verification. Keep these records current alongside the changelog.
+
+Every pull request must increase `versionName` by one patch number (`n.n.n` to `n.n.n+1`) and `versionCode` by one. The required Android checks job verifies both before merge. A version bump does not publish an APK; the download link above changes only when a release is published.
 
 ## Build and run
 
