@@ -205,7 +205,7 @@ class NotificationSuggestionLedgerTest {
             text = hostile,
         )
 
-        assertEquals(false, captured)
+        assertNull(captured)
         assertTrue(database.financeDao().observeMovementSuggestions().first().isEmpty())
     }
 

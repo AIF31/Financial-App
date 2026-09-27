@@ -81,6 +81,8 @@ internal fun SettingsScreen(
             preferencesStore = preferencesStore,
             padding = padding,
             onBack = { onSectionChange(null) },
+            onRequestNotificationPermission = onRequestNotificationPermission,
+            notificationPermissionRevision = notificationPermissionRevision,
         )
         return
     }

@@ -2,6 +2,19 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-09-27
+
+### Notification capture: auto-recording, alerts, and settings
+
+- Detected bank payments for a known merchant are now recorded as Movements in that merchant's last Pocket; new merchants and foreign currencies stay in a **Por revisar** inbox. Accepted in [ADR 0002](../docs/adr/0002-auto-record-notification-payments-for-known-merchants.md); `CONTEXT.md` and the [beta spec](../docs/product/NOTIFICATION_ASSISTANCE_BETA.md) are updated.
+- Fixed missed captures from SMS apps: each message in a conversation notification is now parsed and identified separately, so new bank SMS no longer overwrite earlier ones and OTPs no longer hide purchases. The parser now reads SAB-style multi-line and point-of-sale texts, extracts their merchants, rejects credits, and reads a bare `$` as the USD or MXN default currency.
+- Added a heads-up alert for each newly detected payment, which opens Movements when tapped; the lock screen shows only a redacted version.
+- Redesigned **Captura desde notificaciones**: setup checklist, auto-record and alert switches, app search, suggested finance and messaging apps, and selected apps pinned on top, each shown with icon and name. Movements shows a **Detectado** label on auto-recorded Movements.
+- Advanced the development build to `1.0.2` (`versionCode` 3).
+- Follow-up fixes, each covered by a test that failed first: re-posted conversations no longer inflate beta parser counts; `Compra en línea … en OXXO` reads `OXXO` as the merchant; a bank app updating its notification with the same text no longer duplicates the payment; a purchase in a new, not-yet-opened budget period catches up periods and still auto-records; and foreign-currency alerts always ask for the conversion. Review-card times now use the budget zone, matching Movements.
+- Verification: a fresh full host unit run passed 224 tests, and the release and androidTest sources compiled. The flow and each fix except the bank-app update were exercised on the Pixel_10_Pro emulator with synthetic SMS. It was not tested on the physical phone or with real bank messages.
+- Known issue: `PocketAppHostFlowTest.restore_confirmation_disables_duplicate_submissions_until_the_result_arrives` failed once (dialog created on a background thread) and then passed three isolated reruns and a full rerun. It is unrelated to this change and is flagged for a separate fix.
+
 ## 2026-09-25
 
 ### App version policy

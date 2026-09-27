@@ -24,6 +24,8 @@ data class AppPreferences(
     val onlineFxEnabled: Boolean = false,
     val defaultExpenseCurrency: SupportedCurrency = SupportedCurrency.SAR,
     val notificationSourcePackages: Set<String> = emptySet(),
+    val notificationAutoRecord: Boolean = true,
+    val notificationDetectionAlerts: Boolean = true,
 )
 
 interface PreferencesStore {
@@ -43,6 +45,8 @@ interface PreferencesStore {
         if (selected) packages += packageName else packages -= packageName
         setNotificationSourcePackages(packages)
     }
+    suspend fun setNotificationAutoRecord(enabled: Boolean) {}
+    suspend fun setNotificationDetectionAlerts(enabled: Boolean) {}
 }
 private val Context.pocketPreferences by preferencesDataStore("pocket_preferences")
 
@@ -63,6 +67,8 @@ class DataStorePreferences internal constructor(
                 ?.let { runCatching { SupportedCurrency.fromCode(it) }.getOrNull() }
                 ?: SupportedCurrency.SAR,
             notificationSourcePackages = values[NOTIFICATION_SOURCE_PACKAGES] ?: emptySet(),
+            notificationAutoRecord = values[NOTIFICATION_AUTO_RECORD] ?: true,
+            notificationDetectionAlerts = values[NOTIFICATION_DETECTION_ALERTS] ?: true,
         )
     }
 
@@ -115,6 +121,14 @@ class DataStorePreferences internal constructor(
         }
     }
 
+    override suspend fun setNotificationAutoRecord(enabled: Boolean) {
+        dataStore.edit { it[NOTIFICATION_AUTO_RECORD] = enabled }
+    }
+
+    override suspend fun setNotificationDetectionAlerts(enabled: Boolean) {
+        dataStore.edit { it[NOTIFICATION_DETECTION_ALERTS] = enabled }
+    }
+
     private companion object {
         val START_DAY = intPreferencesKey("future_period_start_day")
         val REMINDER_ENABLED = booleanPreferencesKey("reminder_enabled")
@@ -124,6 +138,8 @@ class DataStorePreferences internal constructor(
         val PLAINTEXT_BACKUP_ACKNOWLEDGED = booleanPreferencesKey("plaintext_backup_acknowledged")
         val ONLINE_FX_ENABLED = booleanPreferencesKey("online_fx_enabled")
         val DEFAULT_EXPENSE_CURRENCY = stringPreferencesKey("default_expense_currency")
+        val NOTIFICATION_AUTO_RECORD = booleanPreferencesKey("notification_auto_record")
+        val NOTIFICATION_DETECTION_ALERTS = booleanPreferencesKey("notification_detection_alerts")
         val NOTIFICATION_SOURCE_PACKAGES = androidx.datastore.preferences.core.stringSetPreferencesKey("notification_source_packages")
     }
 }

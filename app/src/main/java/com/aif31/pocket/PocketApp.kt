@@ -126,6 +126,7 @@ fun PocketApp(
     onPickBackup: () -> Unit = {},
     onRequestNotificationPermission: () -> Unit = {},
     notificationPermissionRevision: Int = 0,
+    openMovementsRevision: Int = 0,
     onSuccessfulRestore: () -> Unit = {},
     onRestoreCompleted: (String) -> Unit = {},
     undoWindowMillis: Long = 5_000,
@@ -324,6 +325,10 @@ fun PocketApp(
     fun navigateRoot(destination: RootScreen) {
         backStack[0] = RootRoute(destination)
         while (backStack.size > 1) backStack.removeLastOrNull()
+    }
+
+    LaunchedEffect(openMovementsRevision) {
+        if (openMovementsRevision > 0) navigateRoot(RootScreen.MOVEMENTS)
     }
 
     LaunchedEffect(openNewExpense, state.currentPeriod.id) {
