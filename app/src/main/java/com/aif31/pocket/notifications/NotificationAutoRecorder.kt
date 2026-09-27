@@ -80,6 +80,6 @@ internal class NotificationAutoRecorder(
 private const val AUTO_RECORDED_PREFIX = "ntf-"
 
 /** Auto-recorded Movements get a derived ID so the UI can label them and retries stay idempotent. */
-internal fun autoRecordedMovementId(suggestionId: String) = AUTO_RECORDED_PREFIX + suggestionId.take(32)
+internal fun autoRecordedMovementId(suggestionId: String) = AUTO_RECORDED_PREFIX + suggestionId
 
 internal fun isAutoRecordedMovement(movementId: String) = movementId.startsWith(AUTO_RECORDED_PREFIX)

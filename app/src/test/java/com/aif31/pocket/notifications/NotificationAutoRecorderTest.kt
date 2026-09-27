@@ -81,6 +81,16 @@ class NotificationAutoRecorderTest {
         assertTrue(confirmations.isEmpty())
     }
 
+    @Test fun an_auto_recorded_movement_is_identified_by_its_full_suggestion_identity() = runTest {
+        val pocket = ledger.state.first().pockets.first().pocket
+        recordManually(pocket.id, "Corner Shop")
+        val suggestionId = detect("full-id", ParsedPayment(1_000, SupportedCurrency.SAR, "Corner Shop"))
+
+        NotificationAutoRecorder(ledger, zone).record(suggestionId)
+
+        assertTrue(ledger.state.first().movements.any { it.id == "ntf-$suggestionId" })
+    }
+
     @Test fun retrying_a_recorded_suggestion_never_creates_a_second_movement() = runTest {
         val pocket = ledger.state.first().pockets.first().pocket
         recordManually(pocket.id, "Corner Shop")
