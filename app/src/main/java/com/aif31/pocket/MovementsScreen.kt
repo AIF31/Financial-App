@@ -151,7 +151,11 @@ internal fun MovementsScreen(
             items(state.movementSuggestions, key = { "suggestion-${it.id}" }) { suggestion ->
                 SuggestionCard(
                     suggestion = suggestion,
-                    accountingCurrency = state.currentPeriod?.accountingCurrency,
+                    // The payment's own period decides whether it needs a conversion, not the current one.
+                    accountingCurrency = Instant.ofEpochMilli(suggestion.effectiveAtUtcMillis)
+                        .atZone(BUDGET_ZONE).toLocalDate()
+                        .let { date -> state.periods.firstOrNull { !date.isBefore(it.start) && date.isBefore(it.endExclusive) } }
+                        ?.accountingCurrency ?: state.currentPeriod?.accountingCurrency,
                     today = state.currentLocalDate,
                     onReview = { onReviewSuggestion(suggestion.id) },
                     onDiscard = {
@@ -269,8 +273,7 @@ private fun SuggestionCard(
 ) {
     val context = LocalContext.current
     val source = remember(suggestion.sourcePackage) { appLabel(context, suggestion.sourcePackage) }
-    // Same budget zone the expense form stores, so the time matches the Movement it becomes.
-    val detectedAt = Instant.ofEpochMilli(suggestion.effectiveAtUtcMillis).atZone(ZoneId.of("Asia/Riyadh"))
+    val detectedAt = Instant.ofEpochMilli(suggestion.effectiveAtUtcMillis).atZone(BUDGET_ZONE)
     val hint = if (accountingCurrency != null && suggestion.currency != accountingCurrency) {
         reviewHint(ReviewReason.FOREIGN_CURRENCY)
     } else {
@@ -454,3 +457,6 @@ private fun formatMovementDate(date: LocalDate, today: LocalDate): String {
 
 
 private fun minorNumber(minor: Long): String = MoneyText.grouped(minor)
+
+/** Same budget zone the expense form stores, so suggestion times and periods match the Movement they become. */
+private val BUDGET_ZONE: ZoneId = ZoneId.of("Asia/Riyadh")

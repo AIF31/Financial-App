@@ -106,9 +106,8 @@ internal object NotificationPaymentParser {
     }
 }
 
-/** Normalizes a merchant so "TAMIMI GLOBAL C×KIN" and "Tamimi Global C Kin" share Pocket memory. */
+/** Normalizes a merchant so "K.F.C", "KFC", and "Tamimi-Market" / "TAMIMI MARKET" share Pocket memory. */
 internal fun merchantKey(merchant: String?): String? =
     merchant?.lowercase(Locale.ROOT)
-        ?.replace(Regex("[^\\p{L}\\p{N}]+"), " ")
-        ?.trim()
+        ?.replace(Regex("[^\\p{L}\\p{N}]+"), "")
         ?.takeIf { it.isNotEmpty() }

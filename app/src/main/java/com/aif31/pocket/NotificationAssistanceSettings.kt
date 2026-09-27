@@ -5,7 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -293,7 +294,8 @@ internal fun NotificationAssistanceSettings(
             item(key = "header-$key") {
                 Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             }
-            items(list, key = { "$key-${it.packageName}" }) { app ->
+            // Keyed by package alone, so a row keeps its identity and focus when it moves between sections.
+            items(list, key = { it.packageName }) { app ->
                 SourceAppRow(
                     app = app,
                     selected = app.packageName in selectedPackages,
@@ -382,8 +384,14 @@ private fun SourceAppRow(
 ) {
     val context = LocalContext.current
     val icon = remember(app.packageName) { appIcon(context, app.packageName) }
+    // One toggleable row per app: TalkBack reads the name and checked state as a single checkbox.
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled) { onCheckedChange(!selected) },
+        modifier = Modifier.fillMaxWidth().toggleable(
+            value = selected,
+            enabled = enabled,
+            role = Role.Checkbox,
+            onValueChange = onCheckedChange,
+        ),
         colors = if (selected) {
             CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
         } else {
@@ -411,14 +419,7 @@ private fun SourceAppRow(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            Checkbox(
-                checked = selected,
-                enabled = enabled,
-                modifier = Modifier.semantics {
-                    contentDescription = "Permitir notificaciones de ${app.label}"
-                },
-                onCheckedChange = onCheckedChange,
-            )
+            Checkbox(checked = selected, enabled = enabled, onCheckedChange = null)
         }
     }
 }

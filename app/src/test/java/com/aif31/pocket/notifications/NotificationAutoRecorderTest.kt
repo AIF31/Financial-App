@@ -136,6 +136,30 @@ class NotificationAutoRecorderTest {
         )
     }
 
+    @Test fun a_newest_expense_in_an_archived_pocket_sends_the_payment_to_review() = runTest {
+        val pockets = ledger.state.first().pockets.map { it.pocket }
+        recordManually(pockets[0].id, "Corner Cafe", minutesAgo = 30)
+        recordManually(pockets[1].id, "Corner Cafe")
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePocket(pockets[1].id)))
+        val suggestionId = detect("archived-newest", ParsedPayment(1_000, SupportedCurrency.SAR, "Corner Cafe"))
+
+        assertEquals(
+            AutoRecordOutcome.NeedsReview(ReviewReason.POCKET_ARCHIVED),
+            NotificationAutoRecorder(ledger, zone).record(suggestionId),
+        )
+    }
+
+    @Test fun merchant_memory_ignores_punctuation_inside_names() = runTest {
+        val pocket = ledger.state.first().pockets.first().pocket
+        recordManually(pocket.id, "K.F.C")
+        val suggestionId = detect("kfc", ParsedPayment(2_500, SupportedCurrency.SAR, "KFC"))
+
+        assertEquals(
+            AutoRecordOutcome.Recorded(autoRecordedMovementId(suggestionId), pocket.name),
+            NotificationAutoRecorder(ledger, zone).record(suggestionId),
+        )
+    }
+
     @Test fun archived_pockets_are_not_reused() = runTest {
         val pocket = ledger.state.first().pockets.first().pocket
         recordManually(pocket.id, "Old Shop")
@@ -143,7 +167,7 @@ class NotificationAutoRecorderTest {
         val suggestionId = detect("archived", ParsedPayment(1_000, SupportedCurrency.SAR, "Old Shop"))
 
         assertEquals(
-            AutoRecordOutcome.NeedsReview(ReviewReason.NEW_MERCHANT),
+            AutoRecordOutcome.NeedsReview(ReviewReason.POCKET_ARCHIVED),
             NotificationAutoRecorder(ledger, zone).record(suggestionId),
         )
     }

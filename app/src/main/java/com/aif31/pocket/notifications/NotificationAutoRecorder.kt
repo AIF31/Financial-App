@@ -10,7 +10,7 @@ import java.time.ZoneId
 import kotlinx.coroutines.flow.first
 
 /** Why a detected payment stayed in the review inbox instead of becoming a Movement. */
-internal enum class ReviewReason { NO_MERCHANT, NEW_MERCHANT, FOREIGN_CURRENCY, NO_PERIOD, REJECTED, UNAVAILABLE }
+internal enum class ReviewReason { NO_MERCHANT, NEW_MERCHANT, POCKET_ARCHIVED, FOREIGN_CURRENCY, NO_PERIOD, REJECTED, UNAVAILABLE }
 
 internal sealed interface AutoRecordOutcome {
     data class Recorded(val movementId: String, val pocketName: String) : AutoRecordOutcome
@@ -42,12 +42,13 @@ internal class NotificationAutoRecorder(
             return AutoRecordOutcome.NeedsReview(ReviewReason.FOREIGN_CURRENCY)
         }
         val key = merchantKey(suggestion.merchant) ?: return AutoRecordOutcome.NeedsReview(ReviewReason.NO_MERCHANT)
-        val activePockets = state.pocketCatalog.filterNot { it.archived }.associateBy { it.id }
-        val pocket = state.movements
+        val latest = state.movements
             .filter { it.type == MovementType.EXPENSE && merchantKey(it.merchant) == key }
-            .sortedByDescending { it.occurredAtUtcMillis }
-            .firstNotNullOfOrNull { activePockets[it.pocketId] }
+            .maxByOrNull { it.occurredAtUtcMillis }
             ?: return AutoRecordOutcome.NeedsReview(ReviewReason.NEW_MERCHANT)
+        // Only the newest expense decides; falling back to an older Pocket would be a guess.
+        val pocket = state.pocketCatalog.firstOrNull { it.id == latest.pocketId && !it.archived }
+            ?: return AutoRecordOutcome.NeedsReview(ReviewReason.POCKET_ARCHIVED)
         val movementId = autoRecordedMovementId(suggestion.id)
         val result = ledger.execute(
             LedgerCommand.ConfirmSuggestion(

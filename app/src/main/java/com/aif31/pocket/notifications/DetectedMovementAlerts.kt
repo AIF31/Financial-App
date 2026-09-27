@@ -37,7 +37,7 @@ internal fun detectedMovementAlert(
 }
 
 internal fun reviewHint(reason: ReviewReason): String = when (reason) {
-    ReviewReason.NO_MERCHANT, ReviewReason.NEW_MERCHANT -> "Elige un Pocket para registrarlo"
+    ReviewReason.NO_MERCHANT, ReviewReason.NEW_MERCHANT, ReviewReason.POCKET_ARCHIVED -> "Elige un Pocket para registrarlo"
     ReviewReason.FOREIGN_CURRENCY -> "Moneda extranjera: confirma la conversión"
     ReviewReason.NO_PERIOD -> "Fuera de los periodos: revísalo"
     ReviewReason.REJECTED, ReviewReason.UNAVAILABLE -> "Revísalo en Movimientos"

@@ -23,6 +23,8 @@ With auto-recording on, the payment becomes a Movement when:
 - it has a merchant, and the most recent expense for that merchant (ignoring case and punctuation) is in a Pocket that is not archived; and
 - its currency equals the accounting currency of the period containing its date. If that period does not exist yet because Pocket has not been opened since it began, Pocket catches up periods first, as it does on launch. A foreign currency always needs review, and its hint asks for the conversion even when the merchant is new.
 
+Only the newest matching expense decides the Pocket. If its Pocket is archived, the payment goes to review; Pocket never falls back to an older expense's Pocket. Merchant matching drops case, spaces, and punctuation, so `K.F.C` matches `KFC`.
+
 A sales channel after "en" or "at" (`en línea`, `online`, `internet`) is skipped, so `Compra en línea por … en OXXO` reads the merchant as `OXXO`.
 
 The Movement uses the default payment method and is labelled **Detectado** in Movements. Every other payment stays in the **Por revisar** inbox at the top of Movements, with the source app name, date and time, and a hint: choose a Pocket, or confirm the conversion for a foreign currency. **Revisar** opens the normal expense form prefilled; **Descartar** removes it.
