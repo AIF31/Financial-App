@@ -3,6 +3,7 @@ package com.aif31.pocket
 import android.content.Context
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasContentDescription
@@ -115,7 +116,7 @@ class PocketUiUxReviewTourTest {
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasContentDescription("Mostrar métricas del periodo"))
         compose.onNodeWithContentDescription("Mostrar métricas del periodo").assertIsDisplayed()
         compose.onNodeWithContentDescription("Mostrar métricas del periodo").performSemanticsAction(SemanticsActions.OnClick)
-        compose.waitUntilExactlyOneExists(hasText("Ocultar más información"), TIMEOUT)
+        compose.waitUntilExactlyOneExists(hasText("Ocultar detalles"), TIMEOUT)
         reviewScrollTarget("dashboard_list", "Gasto diario promedio")
         reviewScrollTarget("dashboard_list", "Proyección estimada")
 
@@ -130,7 +131,7 @@ class PocketUiUxReviewTourTest {
         compose.onNodeWithText("Más detalles").performClick()
         compose.onNodeWithTag("movement_form").performScrollToNode(hasTestTag("movement_currency_USD"))
         compose.onNodeWithTag("movement_currency_USD").performSemanticsAction(SemanticsActions.OnClick)
-        compose.onNodeWithTag("movement_currency_USD").assertTextContains("✓ USD")
+        compose.onNodeWithTag("movement_currency_USD").assertIsSelected()
         scrollMovementTo("Activa la conversión en línea")
         pauseForReview()
         compose.onNodeWithText("Activa la conversión en línea").assertIsDisplayed()
@@ -140,8 +141,8 @@ class PocketUiUxReviewTourTest {
         scrollMovementTo("Devolución")
         compose.onNodeWithText("Devolución").performClick()
         pauseForReview()
-        scrollMovementTo("✓ Tarjeta")
-        compose.onNodeWithText("✓ Tarjeta").performClick()
+        scrollMovementTo("Tarjeta")
+        compose.onNodeWithText("Tarjeta").performClick()
         scrollMovementTo("Fecha (AAAA-MM-DD)")
         compose.onNodeWithText("Fecha (AAAA-MM-DD)").assertIsDisplayed()
         pauseForReview()
@@ -206,18 +207,18 @@ class PocketUiUxReviewTourTest {
         compose.waitUntilExactlyOneExists(hasTestTag("settings_list"), TIMEOUT)
         compose.onNodeWithText("Guardar fondos").performClick()
         pauseForReview(SHORT_PAUSE)
-        compose.onNodeWithText("Atrás").performClick()
+        compose.onNodeWithContentDescription("Atrás").performClick()
         compose.onNodeWithText("Recordatorio diario").performClick()
         compose.onNodeWithTag("reminder_time").performTextReplacement("20:30")
         closeSoftKeyboard()
         compose.onNodeWithTag("reminder_switch").performClick()
         pauseForReview()
-        compose.onNodeWithText("Atrás").performClick()
+        compose.onNodeWithContentDescription("Atrás").performClick()
         compose.onNodeWithText("Métodos de pago").performClick()
         compose.onNodeWithTag("settings_list").performScrollToNode(hasTestTag("payment_method_Tarjeta"))
         compose.onNodeWithTag("payment_method_Tarjeta").performClick()
         pauseForReview()
-        compose.onNodeWithText("Atrás").performClick()
+        compose.onNodeWithContentDescription("Atrás").performClick()
         compose.onNodeWithTag("settings_hub")
             .performScrollToNode(hasContentDescription("Abrir Plantillas recurrentes"))
         compose.onNodeWithContentDescription("Abrir Plantillas recurrentes")
@@ -225,7 +226,7 @@ class PocketUiUxReviewTourTest {
         compose.onNodeWithTag("template_pocket_Supermercado").performScrollTo().performClick()
         compose.onNodeWithTag("template_method_Tarjeta").performScrollTo().performClick()
         pauseForReview()
-        compose.onNodeWithText("Atrás").performClick()
+        compose.onNodeWithContentDescription("Atrás").performClick()
         compose.onNodeWithTag("settings_hub")
             .performScrollToNode(hasContentDescription("Abrir Datos y portabilidad"))
         compose.onNodeWithContentDescription("Abrir Datos y portabilidad")
@@ -235,7 +236,7 @@ class PocketUiUxReviewTourTest {
         compose.onNodeWithText("Restaurar backup").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Exportar CSV").performScrollTo().assertIsDisplayed()
         pauseForReview(LONG_PAUSE)
-        compose.onNodeWithText("Atrás").performClick()
+        compose.onNodeWithContentDescription("Atrás").performClick()
 
         // End on the primary dashboard for a clear closing frame.
         compose.onNodeWithText("Inicio").performClick()

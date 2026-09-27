@@ -156,6 +156,8 @@ The dashboard should lead naturally to recording an expense and managing a relev
 
 Dashboard values must come from the same domain calculations used elsewhere. The UI must not reimplement financial rules.
 
+Supporting metrics live behind the "Ver detalles" disclosure on the availability card and come from `PeriodInsights`/`PeriodComparison`. Period comparisons use average daily spending so an in-progress period is compared fairly with a closed one. The detailed comparison is a subordinate "Comparar periodos" route, not a root destination; the same period metrics appear in the Pockets period view, including historical periods.
+
 ### 7.3 Pockets
 
 The Pockets surface supports quick comparison of:

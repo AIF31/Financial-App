@@ -23,7 +23,10 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -39,7 +42,6 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -47,10 +49,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,7 +62,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
+import com.aif31.pocket.ui.ChoiceOption
+import com.aif31.pocket.ui.SegmentedChoice
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavKey
@@ -67,6 +77,7 @@ import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.Movement
+import com.aif31.pocket.data.PeriodComparison
 import com.aif31.pocket.data.PocketLedger
 import com.aif31.pocket.domain.Money
 import com.aif31.pocket.domain.SupportedCurrency
@@ -100,7 +111,14 @@ private sealed interface PocketRoute : NavKey
 private data class RootRoute(val screen: RootScreen) : PocketRoute
 
 @Serializable
-private data class MovementRoute(val movementId: String? = null, val suggestionId: String? = null) : PocketRoute
+private data class MovementRoute(
+    val movementId: String? = null,
+    val suggestionId: String? = null,
+    val pocketId: String? = null,
+) : PocketRoute
+
+@Serializable
+private data class ComparisonRoute(val periodId: String, val baselinePeriodId: String?) : PocketRoute
 
 @Serializable
 private data class SettingsDetailRoute(val section: SettingsSection) : PocketRoute
@@ -112,6 +130,8 @@ fun PocketApp(
     exchangeRates: ExchangeRateRepository? = null,
     reminderScheduler: ReminderScheduler? = null,
     openNewExpense: Boolean = false,
+    /** Increments once per "new expense" launch (shortcut or onNewIntent); each value opens quick entry once. */
+    newExpenseRequest: Int = if (openNewExpense) 1 else 0,
     restoreCandidate: ByteArray? = null,
     onRestoreCandidateHandled: () -> Unit = {},
     operationMessage: String? = null,
@@ -293,7 +313,7 @@ fun PocketApp(
     }
     val state = observedState
     if (state == null) {
-        Text("Cargando…", modifier = Modifier.padding(24.dp))
+        CenteredProgress("Cargando…")
         return
     }
     if (state.needsOnboarding) {
@@ -309,7 +329,7 @@ fun PocketApp(
         return
     }
     if (state.currentPeriod == null) {
-        Text("Actualizando periodo…", modifier = Modifier.padding(24.dp))
+        CenteredProgress("Actualizando periodo…")
         return
     }
 
@@ -317,18 +337,27 @@ fun PocketApp(
     val currentRoute = backStack.last()
     val screen = backStack.filterIsInstance<RootRoute>().lastOrNull()?.screen ?: RootScreen.DASHBOARD
     val movementRoute = currentRoute as? MovementRoute
+    val comparisonRoute = currentRoute as? ComparisonRoute
     val settingsSection = (currentRoute as? SettingsDetailRoute)?.section
     val snackbar = remember { SnackbarHostState() }
     val appScope = rememberCoroutineScope()
+    // Keeps each root destination's saveable state (scroll, search, filters) while other routes are shown.
+    val rootStateHolder = rememberSaveableStateHolder()
 
     fun navigateRoot(destination: RootScreen) {
         backStack[0] = RootRoute(destination)
         while (backStack.size > 1) backStack.removeLastOrNull()
     }
 
-    LaunchedEffect(openNewExpense, state.currentPeriod.id) {
-        if (openNewExpense && backStack.lastOrNull() !is MovementRoute) {
-            backStack.add(MovementRoute())
+    fun openComparison(periodId: String) {
+        backStack.add(ComparisonRoute(periodId, PeriodComparison.previousPeriodId(state, periodId)))
+    }
+
+    var handledNewExpenseRequest by rememberSaveable { mutableIntStateOf(0) }
+    LaunchedEffect(newExpenseRequest, state.currentPeriod.id) {
+        if (newExpenseRequest > handledNewExpenseRequest) {
+            if (backStack.lastOrNull() !is MovementRoute) backStack.add(MovementRoute())
+            handledNewExpenseRequest = newExpenseRequest
         }
     }
 
@@ -366,11 +395,26 @@ fun PocketApp(
             },
             initialMovement = movementBeingEdited,
             suggestion = suggestion,
+            initialPocketId = movementRoute.pocketId,
+        )
+        return
+    }
+
+    if (comparisonRoute != null) {
+        BackHandler { backStack.removeLastOrNull() }
+        ComparisonScreen(
+            state = state,
+            periodId = comparisonRoute.periodId,
+            baselinePeriodId = comparisonRoute.baselinePeriodId,
+            onPeriodsChange = { periodId, baselineId -> backStack[backStack.lastIndex] = ComparisonRoute(periodId, baselineId) },
+            onBack = { backStack.removeLastOrNull() },
         )
         return
     }
 
     BackHandler(enabled = backStack.size > 1) { backStack.removeLastOrNull() }
+    // Platform convention: back from another root tab returns to Inicio before leaving the app.
+    BackHandler(enabled = backStack.size == 1 && screen != RootScreen.DASHBOARD) { navigateRoot(RootScreen.DASHBOARD) }
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val useNavigationRail = maxWidth >= 600.dp
         val rootNavigationVisible = currentRoute is RootRoute
@@ -383,7 +427,7 @@ fun PocketApp(
                             selected = screen == destination,
                             onClick = { navigateRoot(destination) },
                             icon = { Icon(destination.icon, contentDescription = destination.label) },
-                            label = { Text(destination.label) },
+                            label = { Text(destination.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         )
                     }
                 }
@@ -423,18 +467,22 @@ fun PocketApp(
                                     selected = screen == destination,
                                     onClick = { navigateRoot(destination) },
                                     icon = { Icon(destination.icon, contentDescription = destination.label) },
-                                    label = { Text(destination.label) },
+                                    label = { Text(destination.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 )
                             }
                         }
                     }
                 },
             ) { padding ->
-                when (screen) {
+                Crossfade(targetState = screen, animationSpec = tween(durationMillis = 150), label = "root") { shown ->
+                rootStateHolder.SaveableStateProvider(shown.name) {
+                when (shown) {
                     RootScreen.DASHBOARD -> DashboardScreen(
                         state = state,
                         padding = padding,
                         onManagePockets = { navigateRoot(RootScreen.POCKETS) },
+                        onRecordExpenseIn = { backStack.add(MovementRoute(pocketId = it)) },
+                        onComparePeriods = { openComparison(state.currentPeriod.id) },
                     )
                     RootScreen.MOVEMENTS -> MovementsScreen(
                         state = state,
@@ -446,7 +494,7 @@ fun PocketApp(
                         onEditMovement = { backStack.add(MovementRoute(it.id)) },
                         onReviewSuggestion = { backStack.add(MovementRoute(suggestionId = it)) },
                     )
-                    RootScreen.POCKETS -> PocketsScreen(state, ledger, padding)
+                    RootScreen.POCKETS -> PocketsScreen(state, ledger, padding, onComparePeriod = ::openComparison)
                     RootScreen.SETTINGS -> SettingsScreen(
                         state = state,
                         ledger = ledger,
@@ -471,8 +519,22 @@ fun PocketApp(
                         },
                     )
                 }
+                }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun CenteredProgress(label: String) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        CircularProgressIndicator()
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -543,29 +605,38 @@ private fun OnboardingScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Text("Moneda contable", style = MaterialTheme.typography.titleMedium)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SupportedCurrency.entries.forEach { currency ->
-                                OutlinedButton(onClick = { accountingCurrency = currency }) {
-                                    Text(if (accountingCurrency == currency) "✓ ${currency.name}" else currency.name)
-                                }
-                            }
-                        }
+                        SegmentedChoice(
+                            options = SupportedCurrency.entries.map { ChoiceOption(it, it.name) },
+                            selected = accountingCurrency,
+                            onSelect = { accountingCurrency = it },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                         OutlinedTextField(
                             value = funds,
-                            onValueChange = { funds = it },
+                            onValueChange = { funds = it; error = null },
                             label = { Text("Fondos nuevos (${accountingCurrency.name})") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            prefix = { Text(accountingCurrency.name) },
+                            singleLine = true,
+                            isError = error != null,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
                             modifier = Modifier.fillMaxWidth().testTag("new_funds"),
                         )
                         OutlinedTextField(
                             value = startDay,
-                            onValueChange = { startDay = it.filter(Char::isDigit).take(2) },
+                            onValueChange = { startDay = it.filter(Char::isDigit).take(2); error = null },
                             label = { Text("Día de inicio") },
                             supportingText = { Text("El periodo se renovará cada mes en este día.") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                             modifier = Modifier.fillMaxWidth().testTag("start_day"),
                         )
-                        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        error?.let {
+                            Text(
+                                it,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                        }
                     }
                 }
                 Button(
@@ -613,11 +684,15 @@ private fun DashboardScreen(
     state: LedgerState,
     padding: PaddingValues,
     onManagePockets: () -> Unit,
+    onRecordExpenseIn: (String) -> Unit,
+    onComparePeriods: () -> Unit,
 ) {
     ActionableDashboardContent(
         state = state,
         contentPadding = padding,
         onManagePockets = onManagePockets,
+        onRecordExpenseIn = onRecordExpenseIn,
+        onComparePeriods = onComparePeriods,
     )
 }
 @Composable
@@ -631,6 +706,7 @@ private fun MovementDialog(
     onSaved: () -> Unit,
     initialMovement: Movement? = null,
     suggestion: com.aif31.pocket.data.MovementSuggestion? = null,
+    initialPocketId: String? = null,
 ) {
     ProductionMovementScreen(
         state = state,
@@ -643,5 +719,6 @@ private fun MovementDialog(
         defaultExpenseCurrency = defaultExpenseCurrency,
         onlineFxEnabled = onlineFxEnabled,
         exchangeRates = exchangeRates,
+        initialPocketId = initialPocketId,
     )
 }

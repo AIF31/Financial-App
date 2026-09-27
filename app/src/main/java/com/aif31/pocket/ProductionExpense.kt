@@ -1,6 +1,43 @@
 package com.aif31.pocket
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.SelectableDates
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import com.aif31.pocket.ui.ChoiceOption
+import com.aif31.pocket.ui.SegmentedChoice
+import com.aif31.pocket.ui.SingleChoiceChips
+import com.aif31.pocket.ui.TimeOfDayPickerDialog
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,8 +55,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -28,13 +63,11 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -69,7 +102,10 @@ import com.aif31.pocket.fx.QuoteFailure
 import com.aif31.pocket.expense.ExpenseEntryStateHolder
 import com.aif31.pocket.expense.ExpenseRequest
 import com.aif31.pocket.expense.QuoteUiState
-import com.aif31.pocket.ui.PocketArtwork
+import com.aif31.pocket.ui.PocketArtworkPlate
+import com.aif31.pocket.ui.PocketTopAppBar
+import com.aif31.pocket.ui.availableText
+import androidx.compose.ui.text.AnnotatedString
 import com.aif31.pocket.ui.MoneyText
 import java.time.Instant
 import java.time.LocalDate
@@ -79,7 +115,6 @@ import java.util.UUID
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ProductionMovementScreen(
     state: LedgerState,
@@ -92,6 +127,7 @@ internal fun ProductionMovementScreen(
     defaultExpenseCurrency: SupportedCurrency = SupportedCurrency.SAR,
     onlineFxEnabled: Boolean = false,
     exchangeRates: ExchangeRateRepository? = null,
+    initialPocketId: String? = null,
 ) {
     val stateKey = initialMovement?.id ?: suggestion?.id
     val initialAccountingCurrency = state.periods.firstOrNull { it.id == initialMovement?.periodId }?.accountingCurrency
@@ -112,7 +148,7 @@ internal fun ProductionMovementScreen(
         )
     }
     var amountEdited by rememberSaveable(stateKey) { mutableStateOf(false) }
-    var selectedPocket by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.pocketId) }
+    var selectedPocket by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.pocketId ?: initialPocketId) }
     var refund by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.type == MovementType.REFUND) }
     var merchant by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.merchant ?: suggestion?.merchant.orEmpty()) }
     var note by rememberSaveable(stateKey) { mutableStateOf(initialMovement?.note.orEmpty()) }
@@ -141,6 +177,10 @@ internal fun ProductionMovementScreen(
     var saveInterrupted by rememberSaveable(stateKey) { mutableStateOf(false) }
     var templateGeneration by rememberSaveable(stateKey) { mutableIntStateOf(0) }
     val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val haptics = LocalHapticFeedback.current
+    var datePickerVisible by rememberSaveable(stateKey) { mutableStateOf(false) }
+    var timePickerVisible by rememberSaveable(stateKey) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(stateKey) {
@@ -243,6 +283,7 @@ internal fun ProductionMovementScreen(
             )) {
                 LedgerResult.Success -> {
                     saveInterrupted = false
+                    haptics.performHapticFeedback(HapticFeedbackType.Confirm)
                     onSaved()
                 }
                 is LedgerResult.Rejected -> {
@@ -264,21 +305,14 @@ internal fun ProductionMovementScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        when {
-                            initialMovement != null -> "Editar movimiento"
-                            refund -> "Nueva devolución"
-                            else -> "Nuevo gasto"
-                        },
-                    )
+            PocketTopAppBar(
+                title = when {
+                    initialMovement != null -> "Editar movimiento"
+                    refund -> "Nueva devolución"
+                    else -> "Nuevo gasto"
                 },
-                navigationIcon = {
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Cerrar")
-                    }
-                },
+                onNavigateBack = onDismiss,
+                navigationLabel = "Cerrar",
             )
         },
         bottomBar = {
@@ -319,7 +353,7 @@ internal fun ProductionMovementScreen(
                     Text("Plantillas", style = MaterialTheme.typography.titleMedium)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(state.templates.filterNot { it.archived }, key = { it.id }) { template ->
-                            OutlinedButton(
+                            AssistChip(
                                 onClick = {
                                     selectedPocket = template.pocketId
                                     paymentMethod = template.paymentMethodId
@@ -327,25 +361,21 @@ internal fun ProductionMovementScreen(
                                     amount = minorNumberForForm(template.amountMinor)
                                     templateGeneration++
                                 },
-                            ) {
-                                Text(template.name)
-                            }
+                                label = { Text(template.name) },
+                                leadingIcon = { Icon(Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) },
+                            )
                         }
                     }
                 }
             }
             item {
                 Text("Importe", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(SupportedCurrency.entries) { option ->
-                        OutlinedButton(
-                            onClick = { currency = option.name },
-                            modifier = Modifier.testTag("movement_currency_${option.name}"),
-                        ) {
-                            Text(if (inputCurrency == option) "✓ ${option.name}" else option.name)
-                        }
-                    }
-                }
+                SegmentedChoice(
+                    options = SupportedCurrency.entries.map { ChoiceOption(it, it.name, "movement_currency_${it.name}") },
+                    selected = inputCurrency,
+                    onSelect = { currency = it.name },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                )
                 OutlinedTextField(
                     value = amount,
                     onValueChange = {
@@ -362,7 +392,8 @@ internal fun ProductionMovementScreen(
                     isError = amountIsInvalid || error == "Escribe un importe válido",
                     singleLine = true,
                     textStyle = MaterialTheme.typography.displaySmall.copy(fontFamily = FontFamily.Monospace),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                     shape = MaterialTheme.shapes.extraLarge,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -382,41 +413,46 @@ internal fun ProductionMovementScreen(
             }
             item {
                 Text("¿De qué Pocket?", style = MaterialTheme.typography.titleLarge)
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    state.pockets.filterNot { it.pocket.archived || it.retiredThisPeriod }.chunked(2).forEach { rowPockets ->
+                val availableByPocket = state.pockets.associate { it.pocket.id to it.availabilityMinor }
+                val fontScale = LocalDensity.current.fontScale
+                BoxWithConstraints {
+                // Column count follows the width available per unit of text size, so names never split mid-word.
+                val columns = ((maxWidth.value / fontScale) / 170f).toInt().coerceIn(1, 3)
+                Column(
+                    modifier = Modifier.selectableGroup().padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    state.pockets.filterNot { it.pocket.archived || it.retiredThisPeriod }.chunked(columns).forEach { rowPockets ->
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             rowPockets.forEach { pocket ->
-                                val isSelected = selectedPocket == pocket.pocket.id
-                                OutlinedButton(
-                                    onClick = {
+                                PocketChoice(
+                                    name = pocket.pocket.name,
+                                    iconKey = pocket.pocket.iconKey,
+                                    available = availableByPocket[pocket.pocket.id]?.let {
+                                        availableText(it, state.currentPeriod?.accountingCurrency ?: accountingCurrency)
+                                    },
+                                    selected = selectedPocket == pocket.pocket.id,
+                                    onSelect = {
                                         selectedPocket = pocket.pocket.id
                                         if (error == "Selecciona un Pocket") error = null
                                     },
-                                    modifier = Modifier.weight(1f).heightIn(min = 64.dp)
-                                        .testTag("movement_pocket_${pocket.pocket.name}"),
-                                    colors = if (isSelected) {
-                                        androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
-                                            containerColor = MaterialTheme.colorScheme.primary,
-                                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                                        )
-                                    } else {
-                                        androidx.compose.material3.ButtonDefaults.outlinedButtonColors()
-                                    },
-                                ) {
-                                    PocketArtwork(pocket.pocket.iconKey, contentDescription = null, modifier = Modifier.size(36.dp))
-                                    Spacer(Modifier.size(8.dp))
-                                    Text(if (isSelected) "✓ ${pocket.pocket.name}" else pocket.pocket.name)
-                                }
+                                    modifier = Modifier.weight(1f).fillMaxHeight().testTag("movement_pocket_${pocket.pocket.name}"),
+                                )
                             }
-                            if (rowPockets.size == 1) Box(Modifier.weight(1f))
+                            repeat(columns - rowPockets.size) { Box(Modifier.weight(1f)) }
                         }
                     }
                 }
+                }
                 if (error == "Selecciona un Pocket") {
-                    Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                    Text(
+                        error.orEmpty(),
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
                 }
             }
             item {
@@ -424,23 +460,20 @@ internal fun ProductionMovementScreen(
                     value = merchant,
                     onValueChange = { merchant = it },
                     label = { Text("Comercio (opcional)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
             item {
                 Text("Método de pago (opcional)", style = MaterialTheme.typography.titleMedium)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    item {
-                        OutlinedButton(onClick = { paymentMethod = null }) {
-                            Text(if (paymentMethod == null) "✓ Ninguno" else "Ninguno")
-                        }
-                    }
-                    items(state.paymentMethods.filterNot { it.archived }, key = { it.id }) { method ->
-                        OutlinedButton(onClick = { paymentMethod = method.id }) {
-                            Text(if (paymentMethod == method.id) "✓ ${method.name}" else method.name)
-                        }
-                    }
-                }
+                SingleChoiceChips(
+                    options = listOf(ChoiceOption<String?>(null, "Ninguno")) +
+                        state.paymentMethods.filterNot { it.archived }.map { ChoiceOption<String?>(it.id, it.name) },
+                    selected = paymentMethod,
+                    onSelect = { paymentMethod = it },
+                )
             }
             (error?.takeUnless {
                 it == "Escribe un importe válido" || it == "Selecciona un Pocket"
@@ -455,7 +488,11 @@ internal fun ProductionMovementScreen(
             }
             item {
                 Card(
-                    modifier = Modifier.fillMaxWidth().clickable { detailsExpanded = !detailsExpanded },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(CardDefaults.shape)
+                        .toggleable(value = detailsExpanded, role = Role.Button, onValueChange = { detailsExpanded = it })
+                        .semantics { stateDescription = if (detailsExpanded) "Expandido" else "Contraído" },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                 ) {
                     Row(
@@ -469,41 +506,62 @@ internal fun ProductionMovementScreen(
                             modifier = Modifier.size(48.dp),
                         ) {
                             Box(contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                Icon(Icons.Default.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Default.Description, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
                             }
                         }
                         Column(modifier = Modifier.weight(1f)) {
                             Text(if (detailsExpanded) "Ocultar detalles" else "Más detalles", style = MaterialTheme.typography.titleMedium)
                             Text("Fecha, nota y devolución", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
+                        Icon(if (detailsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null)
                     }
                 }
             }
             if (detailsExpanded) {
                 item {
                     Text("Tipo", style = MaterialTheme.typography.titleMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { refund = false }) {
-                            Text(if (!refund) "✓ Gasto" else "Gasto")
-                        }
-                        OutlinedButton(onClick = { refund = true }) {
-                            Text(if (refund) "✓ Devolución" else "Devolución")
-                        }
-                    }
+                    SegmentedChoice(
+                        options = listOf(ChoiceOption(false, "Gasto"), ChoiceOption(true, "Devolución")),
+                        selected = refund,
+                        onSelect = { refund = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
                 }
                 item {
                     Text("Fecha y hora", style = MaterialTheme.typography.titleMedium)
+                    val today = state.currentLocalDate
+                    val parsedDate = runCatching { LocalDate.parse(localDate) }.getOrNull()
+                    SingleChoiceChips(
+                        options = listOf(ChoiceOption(today, "Hoy"), ChoiceOption(today.minusDays(1), "Ayer")),
+                        selected = parsedDate,
+                        onSelect = { localDate = it.toString() },
+                        modifier = Modifier.padding(vertical = 4.dp),
+                    )
+                    Spacer(Modifier.size(4.dp))
                     OutlinedTextField(
                         value = localDate,
                         onValueChange = { localDate = it },
                         label = { Text("Fecha (AAAA-MM-DD)") },
+                        supportingText = parsedDate?.let { { Text(it.format(longDate)) } },
+                        singleLine = true,
+                        trailingIcon = {
+                            IconButton(onClick = { datePickerVisible = true }) {
+                                Icon(Icons.Default.CalendarMonth, contentDescription = "Elegir fecha")
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    Spacer(Modifier.size(8.dp))
                     OutlinedTextField(
                         value = localTime,
                         onValueChange = { localTime = it },
                         label = { Text("Hora (HH:mm)") },
+                        singleLine = true,
+                        trailingIcon = {
+                            IconButton(onClick = { timePickerVisible = true }) {
+                                Icon(Icons.Default.Schedule, contentDescription = "Elegir hora")
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -512,12 +570,122 @@ internal fun ProductionMovementScreen(
                         value = note,
                         onValueChange = { note = it },
                         label = { Text("Nota (opcional)") },
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                         modifier = Modifier.fillMaxWidth(),
                     )
 
                 }
             }
         }
+    }
+    if (datePickerVisible) {
+        MovementDatePicker(
+            initial = runCatching { LocalDate.parse(localDate) }.getOrNull() ?: state.currentLocalDate,
+            periods = state.periods,
+            onPicked = { localDate = it.toString(); datePickerVisible = false },
+            onDismiss = { datePickerVisible = false },
+        )
+    }
+    if (timePickerVisible) {
+        TimeOfDayPickerDialog(
+            initial = runCatching { LocalTime.parse(localTime) }.getOrNull() ?: LocalTime.NOON,
+            onPicked = { localTime = it.toString(); timePickerVisible = false },
+            onDismiss = { timePickerVisible = false },
+        )
+    }
+}
+
+private val longDate = DateTimeFormatter.ofPattern("EEEE d 'de' MMMM yyyy", Locale.forLanguageTag("es"))
+
+/** Radio-style Pocket card: artwork, name, and current availability, with selected semantics. */
+@Composable
+private fun PocketChoice(
+    name: String,
+    iconKey: com.aif31.pocket.data.PocketIconKey,
+    available: AnnotatedString?,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+        contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(
+            if (selected) 2.dp else 1.dp,
+            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+        ),
+        modifier = modifier
+            .heightIn(min = 64.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        ) {
+            Box {
+                PocketArtworkPlate(iconKey, plateSize = 40.dp, selected = selected)
+                if (selected) {
+                    // Non-color selection cue that does not take width from the Pocket name.
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd).size(16.dp),
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.padding(2.dp))
+                    }
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 2)
+                available?.let {
+                    Text(it, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+    }
+}
+
+// DatePicker/DatePickerDialog are still @ExperimentalMaterial3Api in Material3 1.4.0. They replace typed
+// "AAAA-MM-DD" entry, restrict choices to existing periods, and the typed field remains as a fallback.
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MovementDatePicker(
+    initial: LocalDate,
+    periods: List<com.aif31.pocket.data.Period>,
+    onPicked: (LocalDate) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val selectable = remember(periods) {
+        object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                val date = Instant.ofEpochMilli(utcTimeMillis).atZone(ZoneOffset.UTC).toLocalDate()
+                return periods.any { date >= it.start && date < it.endExclusive }
+            }
+        }
+    }
+    val pickerState = rememberDatePickerState(
+        initialSelectedDateMillis = initial.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+        selectableDates = selectable,
+    )
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                enabled = pickerState.selectedDateMillis != null,
+                onClick = {
+                    pickerState.selectedDateMillis?.let {
+                        onPicked(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate())
+                    }
+                },
+            ) { Text("Aceptar") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    ) {
+        DatePicker(state = pickerState)
     }
 }
 

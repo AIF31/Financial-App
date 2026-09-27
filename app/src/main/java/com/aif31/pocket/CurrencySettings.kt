@@ -22,6 +22,9 @@ import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.CurrencyBoundary
 import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.fx.FxQuote
+import com.aif31.pocket.ui.ChoiceOption
+import com.aif31.pocket.ui.SegmentedChoice
+import com.aif31.pocket.ui.SingleChoiceChips
 
 internal sealed interface CurrencyQuoteState {
     data object Idle : CurrencyQuoteState
@@ -57,8 +60,7 @@ internal fun CurrencySettingsContent(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
-            Text("Moneda y conversión", style = MaterialTheme.typography.headlineMedium)
-            Text("Moneda contable actual: ${state.currentCurrency.name}")
+            Text("Moneda contable actual: ${state.currentCurrency.name}", style = MaterialTheme.typography.titleMedium)
         }
         item {
             Row(
@@ -82,13 +84,12 @@ internal fun CurrencySettingsContent(
         }
         item {
             Text("Moneda predeterminada para gastos", style = MaterialTheme.typography.titleMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SupportedCurrency.entries.forEach { currency ->
-                    OutlinedButton(onClick = { onDefaultExpenseCurrencyChange(currency) }) {
-                        Text(if (state.defaultExpenseCurrency == currency) "✓ ${currency.name}" else currency.name)
-                    }
-                }
-            }
+            SegmentedChoice(
+                options = SupportedCurrency.entries.map { ChoiceOption(it, it.name) },
+                selected = state.defaultExpenseCurrency,
+                onSelect = onDefaultExpenseCurrencyChange,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            )
         }
         state.pendingChange?.let { pending ->
             item {
@@ -107,13 +108,11 @@ internal fun CurrencySettingsContent(
         if (state.onlineFxEnabled && state.pendingChange == null) {
             item {
                 Text("Moneda del próximo periodo", style = MaterialTheme.typography.titleMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SupportedCurrency.entries.filterNot { it == state.currentCurrency }.forEach { currency ->
-                        OutlinedButton(onClick = { onTargetCurrencyChange(currency) }) {
-                            Text(if (state.targetCurrency == currency) "✓ ${currency.name}" else currency.name)
-                        }
-                    }
-                }
+                SingleChoiceChips(
+                    options = SupportedCurrency.entries.filterNot { it == state.currentCurrency }.map { ChoiceOption<SupportedCurrency?>(it, it.name) },
+                    selected = state.targetCurrency,
+                    onSelect = { it?.let(onTargetCurrencyChange) },
+                )
             }
             item {
                 when (val quoteState = state.quoteState) {

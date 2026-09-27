@@ -16,7 +16,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -38,6 +37,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.aif31.pocket.notifications.NotificationBetaMetricsSnapshot
 import com.aif31.pocket.settings.AppPreferences
 import com.aif31.pocket.settings.PreferencesStore
+import com.aif31.pocket.ui.PocketTopAppBar
+import androidx.compose.foundation.layout.WindowInsets
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -83,70 +84,71 @@ internal fun NotificationAssistanceSettings(
             .distinctBy { it.first }
             .sortedBy { it.second.lowercase() }
     }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(padding),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item {
-            TextButton(onClick = onBack) { Text("Atrás") }
-            Text("Captura desde notificaciones", style = MaterialTheme.typography.headlineMedium)
-            Text("Experimental · inglés y español. Pocket solo crea sugerencias para que las revises.")
-            diagnostics?.let { metrics ->
-                Text(
-                    "Diagnóstico beta local: ${metrics.parserSuccesses}/${metrics.parserAttempts} detectadas, " +
-                        "${metrics.parserFailures} fallidas. ${metrics.correctedConfirmations}/${metrics.confirmations} " +
-                        "confirmaciones corregidas (${(metrics.correctionRate * 100).toInt()}%); " +
-                        "importe ${metrics.amountCorrections}, moneda ${metrics.currencyCorrections}. " +
-                        "El tamaño mínimo de la muestra sigue pendiente.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            Text(if (accessGranted) "Acceso a notificaciones concedido" else "Acceso a notificaciones no concedido")
-            Button(onClick = {
-                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-            }) { Text(if (accessGranted) "Administrar acceso" else "Conceder acceso") }
-            saveError?.let { message ->
-                Text(message, color = MaterialTheme.colorScheme.error)
-            }
-        }
-        items(apps, key = { it.first }) { (packageName, label) ->
-            val selected = packageName in selectedPackages
-            Card(Modifier.fillMaxWidth()) {
-                Row(
-                    Modifier.fillMaxWidth().padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(label)
-                        Text(packageName, style = MaterialTheme.typography.bodySmall)
-                    }
-                    Checkbox(
-                        checked = selected,
-                        enabled = preferencesStore != null && savingPackage == null,
-                        modifier = Modifier.semantics {
-                            contentDescription = "Permitir notificaciones de $label ($packageName)"
-                        },
-                        onCheckedChange = { checked ->
-                            val next = selectedPackages.toMutableSet()
-                            if (checked) next += packageName else next -= packageName
-                            selectedPackages = next
-                            savingPackage = packageName
-                            saveError = null
-                            scope.launch {
-                                try {
-                                    preferencesStore?.setNotificationSourcePackage(packageName, checked)
-                                } catch (error: Exception) {
-                                    if (error is CancellationException) throw error
-                                    selectedPackages = preferences.notificationSourcePackages
-                                    saveError = "No se pudo guardar la selección. Inténtalo de nuevo."
-                                } finally {
-                                    savingPackage = null
-                                }
-                            }
-                        },
+    Column(Modifier.fillMaxSize().padding(padding)) {
+        PocketTopAppBar("Captura desde notificaciones", onBack, windowInsets = WindowInsets(0))
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                Text("Experimental · inglés y español. Pocket solo crea sugerencias para que las revises.")
+                diagnostics?.let { metrics ->
+                    Text(
+                        "Diagnóstico beta local: ${metrics.parserSuccesses}/${metrics.parserAttempts} detectadas, " +
+                            "${metrics.parserFailures} fallidas. ${metrics.correctedConfirmations}/${metrics.confirmations} " +
+                            "confirmaciones corregidas (${(metrics.correctionRate * 100).toInt()}%); " +
+                            "importe ${metrics.amountCorrections}, moneda ${metrics.currencyCorrections}. " +
+                            "El tamaño mínimo de la muestra sigue pendiente.",
+                        style = MaterialTheme.typography.bodySmall,
                     )
+                }
+                Text(if (accessGranted) "Acceso a notificaciones concedido" else "Acceso a notificaciones no concedido")
+                Button(onClick = {
+                    context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                }) { Text(if (accessGranted) "Administrar acceso" else "Conceder acceso") }
+                saveError?.let { message ->
+                    Text(message, color = MaterialTheme.colorScheme.error)
+                }
+            }
+            items(apps, key = { it.first }) { (packageName, label) ->
+                val selected = packageName in selectedPackages
+                Card(Modifier.fillMaxWidth()) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(label)
+                            Text(packageName, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Checkbox(
+                            checked = selected,
+                            enabled = preferencesStore != null && savingPackage == null,
+                            modifier = Modifier.semantics {
+                                contentDescription = "Permitir notificaciones de $label ($packageName)"
+                            },
+                            onCheckedChange = { checked ->
+                                val next = selectedPackages.toMutableSet()
+                                if (checked) next += packageName else next -= packageName
+                                selectedPackages = next
+                                savingPackage = packageName
+                                saveError = null
+                                scope.launch {
+                                    try {
+                                        preferencesStore?.setNotificationSourcePackage(packageName, checked)
+                                    } catch (error: Exception) {
+                                        if (error is CancellationException) throw error
+                                        selectedPackages = preferences.notificationSourcePackages
+                                        saveError = "No se pudo guardar la selección. Inténtalo de nuevo."
+                                    } finally {
+                                        savingPackage = null
+                                    }
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }

@@ -116,7 +116,7 @@ class PocketAppFlowTest {
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasContentDescription("Mostrar métricas del periodo"))
         compose.onNodeWithContentDescription("Mostrar métricas del periodo").assertIsDisplayed()
         compose.onNodeWithContentDescription("Mostrar métricas del periodo").performSemanticsAction(SemanticsActions.OnClick)
-        compose.waitUntilExactlyOneExists(hasText("Ocultar más información"), 5_000)
+        compose.waitUntilExactlyOneExists(hasText("Ocultar detalles"), 5_000)
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Gasto diario promedio"))
         compose.onNodeWithText("Gasto diario promedio").assertIsDisplayed()
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("SAR 200.00 disponibles"))

@@ -2,6 +2,29 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-09-27
+
+### Period insights, comparison, and UX quality pass (`1.0.2`, `versionCode` 3)
+
+- Added `PeriodInsights` and `PeriodComparison` (`data/PeriodInsights.kt`): read-only metrics derived from the ledger's Pocket summaries and Movements — average daily spend, spend available per remaining day, projection, funds used versus period elapsed, cumulative daily spend, largest expense, and per-Pocket averages. Comparisons use average daily spending; a different accounting currency is converted only through the adjacent frozen boundary rate, otherwise the periods are shown side by side without deltas.
+- Inicio: the Disponible card gains a "Ver detalles" disclosure with spend pace and the previous-period daily average, plus a "Comparar periodos" entry. Status wording and icon now reflect overspending and pace; day counts are pluralized. Each Pocket row has a quick "Registrar gasto en …" action that opens the shared quick-entry route with that Pocket preselected.
+- New subordinate route "Comparar periodos": any two periods, cumulative spend curve (solid, dashed, and dotted lines so meaning never depends on color), summary table, and per-Pocket paired bars. The four bottom-bar destinations are unchanged.
+- Pockets: the period summary expands into the same metrics and chart for the selected period (open by default for historical periods) with a comparison shortcut; period chips expose tab semantics, show currency and "Actual", and start scrolled to the selection. Pocket status uses one shared badge with container colors instead of low-contrast tertiary text.
+- Selection controls across onboarding, quick entry, Currency, Payment methods, and Templates now use Material segmented buttons and filter chips with real selected semantics instead of "✓" text prefixes. Quick entry adds date and time pickers, "Hoy"/"Ayer", Pocket cards that show availability, keyboard actions and capitalization, and haptic confirmation on save.
+- Movements: explicit filter chips that highlight when active, readable period labels, search clear button, daily totals, full detail dialog, swipe-to-delete with undo plus TalkBack custom actions, and an empty state with a record action.
+- Navigation and shell: root tabs keep their scroll, search, and filters; back from another tab returns to Inicio; short fade between tabs; settings detail screens use a top app bar; centered loading state.
+- Artwork and theme: Pocket artwork and logo re-encoded as right-sized WebP (≈1.8 MB of PNG to ≈140 KB); adaptive launcher icon with a monochrome themed-icon layer; night theme window background to avoid a light flash on dark cold starts; a light artwork plate keeps illustrations legible in dark theme.
+- Two-axis review follow-up:
+  - The reminder notification now uses a monochrome `ic_stat_pocket` vector. An adaptive launcher icon as a notification small icon can crash System UI on API 26.
+  - Budget use is measured against Pocket budgets plus rollover, the same base as availability.
+  - The spend curve and Movement stats count only Pockets in the period snapshot, matching net spend.
+  - Pace status, Pocket budget status, per-Pocket deltas, and Movement net spend moved into the data layer (`SpendPaceStatus`, `PocketBudgetStatus`, `netSpendMinor`). "Sin presupuesto" again depends on the Pocket budget only.
+  - The ledger's previous-period total is shown again beside the daily-average comparison.
+  - Artwork colors are theme roles.
+  - Experimental Material APIs are isolated in `PocketTopAppBar`, the time picker, and the date picker, each with its reason documented.
+- Intent handling (android-intent-security audit): `MainActivity` now counts "new expense" launches across `onCreate` (skipped when restoring state) and `onNewIntent`, reading only the explicit action. Quick entry no longer reopens after rotation. The existing PendingIntent (`FLAG_IMMUTABLE`, explicit), the non-exported `FileProvider` limited to `shared_backups/`, and the permission-guarded notification listener already followed the guidance.
+- Verification: 226 host tests passed, including new `PeriodInsightsTest` and `PocketQualityOfLifeHostTest`; `lintDebug`, `assembleDebug`, and `compileDebugAndroidTestKotlin` passed. Screens were reviewed from Robolectric renders at phone width in light, dark, and 1.5× font; no emulator or physical-device run was performed for this change, and TalkBack remains an open manual check.
+
 ## 2026-09-25
 
 ### App version policy
