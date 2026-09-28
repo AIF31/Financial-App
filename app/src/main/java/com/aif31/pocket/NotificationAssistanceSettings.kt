@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -47,6 +48,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -179,9 +182,15 @@ internal fun NotificationAssistanceSettings(
         }
     }
 
+    val listState = rememberLazyListState()
+    val searchFocus = remember { FocusRequester() }
+    // Items before the search field: introduction, setup, behaviour and, when shown, diagnostics.
+    val searchIndex = if (diagnostics == null) 3 else 4
+
     Column(Modifier.fillMaxSize().padding(padding)) {
         PocketTopAppBar("Captura desde notificaciones", onBack, windowInsets = WindowInsets(0))
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -213,6 +222,13 @@ internal fun NotificationAssistanceSettings(
                                 else -> "${selectedPackages.size} apps seleccionadas"
                             },
                             detail = "Elige tu banco o, si recibes SMS del banco, tu app de mensajes.",
+                            action = if (selectedPackages.isEmpty()) "Elegir apps" else null,
+                            onAction = {
+                                scope.launch {
+                                    listState.animateScrollToItem(searchIndex)
+                                    searchFocus.requestFocus()
+                                }
+                            },
                         )
                         HorizontalDivider()
                         SetupStep(
@@ -287,7 +303,11 @@ internal fun NotificationAssistanceSettings(
                     },
                     singleLine = true,
                     shape = MaterialTheme.shapes.extraLarge,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp).testTag("notification_app_search"),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                        .focusRequester(searchFocus)
+                        .testTag("notification_app_search"),
                 )
             }
             fun section(key: String, title: String, list: List<SourceApp>) {

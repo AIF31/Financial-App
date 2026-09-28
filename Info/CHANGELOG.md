@@ -12,6 +12,11 @@ Notable repository changes are recorded here for future maintainers.
 - The dashboard and Pockets-list Pocket cards each carry a single accessibility label (name, availability, budget, status). The visible texts it repeats are hidden from accessibility services but stay available to tests. A card clipped at the list edge still announces its Pocket, and screen readers do not read each card twice. The Pockets list "Gestionar" button remains reachable.
 - The "Comparar periodos" summary table measures its widest amount. When an amount cannot fit beside the label, as at large font scales, each label moves above its values, so numbers such as "7,500.00" are no longer split across lines. Each row is still announced once: its cells are hidden from accessibility services, because the row's spoken description already covers them.
 
+### Time format and notification setup
+
+- The time picker in the Movement form and the daily reminder follows the phone's 12- or 24-hour clock setting instead of always using a 24-hour dial. The stored time is unchanged. On a 12-hour phone, the Movement form's "Hora (HH:mm)" field also shows the time in that format, for example "10:16 p. m.".
+- In "Captura desde notificaciones", the "Ninguna app seleccionada" setup step has an "Elegir apps" button. It scrolls to the "Buscar app" field and focuses it, so the keyboard opens ready to search.
+
 ### PR #34 review follow-up
 
 - Merged `main` after PR #33 and advanced the development build to `1.0.3` (`versionCode` 4), because PR #33 had already taken `1.0.2`. The notification settings screen keeps PR #33's redesign under the shared top app bar, and PR #33's "open Movements" alert action sits beside the new-expense request counter in `MainActivity`.
