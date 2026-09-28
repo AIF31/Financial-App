@@ -175,7 +175,8 @@ class PocketQualityOfLifeHostTest {
         compose.onNodeWithText("Deslizable").performTouchInput { swipeLeft(startX = centerX, endX = left) }
 
         compose.waitUntilExactlyOneExists(hasText("Deshacer"), 5_000)
-        compose.onAllNodesWithText("Deslizable").fetchSemanticsNodes().let { assertEquals(0, it.size) }
+        // The snackbar appears once the delete commits; the list drops the row when the ledger flow emits after that.
+        compose.waitUntilDoesNotExist(hasText("Deslizable"), 5_000)
         compose.onNodeWithText("Deshacer").performClick()
         compose.waitUntilExactlyOneExists(hasText("Deslizable"), 5_000)
     }
