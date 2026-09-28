@@ -1,6 +1,7 @@
 package com.aif31.pocket.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
@@ -120,12 +121,11 @@ internal val LocalArtworkColors = staticCompositionLocalOf { LightArtworkColors 
 @Composable
 fun PocketTheme(content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
+    val colors = if (dark) DarkColors else LightColors
     CompositionLocalProvider(LocalArtworkColors provides if (dark) DarkArtworkColors else LightArtworkColors) {
-        MaterialTheme(
-            colorScheme = if (dark) DarkColors else LightColors,
-            shapes = PocketShapes,
-            typography = PocketTypography,
-            content = content,
-        )
+        MaterialTheme(colorScheme = colors, shapes = PocketShapes, typography = PocketTypography) {
+            // Screens drawn straight on the window, such as onboarding, have no Surface to set a content color.
+            CompositionLocalProvider(LocalContentColor provides colors.onBackground, content = content)
+        }
     }
 }

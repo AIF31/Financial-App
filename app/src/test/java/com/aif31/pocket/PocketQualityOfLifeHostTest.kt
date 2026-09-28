@@ -3,11 +3,16 @@ package com.aif31.pocket
 import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.DeviceConfigurationOverride
+import androidx.compose.ui.test.FontScale
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -30,6 +35,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.waitUntilDoesNotExist
 import androidx.compose.ui.test.waitUntilExactlyOneExists
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.aif31.pocket.data.FinanceDatabase
@@ -43,11 +49,13 @@ import java.time.ZoneId
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])
@@ -62,10 +70,10 @@ class PocketQualityOfLifeHostTest {
     }
 
     /** Previous period (25 Jan – 24 Feb) with SAR 31.00 spent; current period starts 25 Feb. */
-    private fun ledgerWithPreviousPeriod(): RoomPocketLedger {
+    private fun ledgerWithPreviousPeriod(newFundsMinor: Long = 20_000): RoomPocketLedger {
         val previous = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-10T09:00:00Z"), zone), zone)
         runBlocking {
-            previous.execute(LedgerCommand.Initialize(20_000))
+            previous.execute(LedgerCommand.Initialize(newFundsMinor))
             val state = previous.state.first { !it.needsOnboarding }
             previous.execute(
                 LedgerCommand.AddMovement(
@@ -190,6 +198,116 @@ class PocketQualityOfLifeHostTest {
         assertEquals(2, compose.onAllNodesWithText("SAR 31.00").fetchSemanticsNodes().size)
         compose.onNodeWithText("SAR 1.00").assertIsDisplayed()
         compose.waitUntilDoesNotExist(hasText("Puedes gastar al día"), 1_000)
+    }
+
+    @Test
+    fun dashboard_pocket_card_names_its_pocket_even_when_its_text_is_scrolled_out_of_view() {
+        compose.setContent { PocketApp(ledgerWithPreviousPeriod()) }
+        compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasTestTag("pocket_row_Supermercado"))
+
+        // A partly visible card exposes only its visible children, so the card itself must carry the label.
+        compose.onNode(
+            hasTestTag("pocket_row_Supermercado") and hasClickAction() and
+                hasContentDescription("Supermercado", substring = true) and
+                hasContentDescription("disponibles", substring = true),
+            useUnmergedTree = true,
+        ).assertExists()
+    }
+
+    @Test
+    fun screen_readers_hear_the_dashboard_pocket_card_once_not_its_label_and_then_each_text_again() {
+        compose.setContent { PocketApp(ledgerWithPreviousPeriod()) }
+        compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasTestTag("pocket_row_Supermercado"))
+
+        compose.onNode(
+            hasAnyAncestor(hasTestTag("pocket_row_Supermercado")) and hasText("Supermercado") and exposedToAccessibility,
+            useUnmergedTree = true,
+        ).assertDoesNotExist()
+    }
+
+    private val exposedToAccessibility = !SemanticsMatcher.keyIsDefined(SemanticsProperties.HideFromAccessibility)
+
+    @Test
+    fun screen_readers_hear_the_pockets_list_card_once_and_can_still_reach_its_manage_button() {
+        compose.setContent { PocketApp(ledgerWithPreviousPeriod()) }
+        compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        compose.onNodeWithText("Pockets").performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag("pockets_list"), 5_000)
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("pocket_Supermercado"))
+
+        compose.onNode(
+            hasAnyAncestor(hasTestTag("pocket_Supermercado")) and hasText("Supermercado") and exposedToAccessibility,
+            useUnmergedTree = true,
+        ).assertDoesNotExist()
+        compose.onNode(hasContentDescription("Gestionar Supermercado") and exposedToAccessibility, useUnmergedTree = true)
+            .assertExists()
+    }
+
+    @Test
+    fun pockets_list_card_names_its_pocket_even_when_its_text_is_scrolled_out_of_view() {
+        compose.setContent { PocketApp(ledgerWithPreviousPeriod()) }
+        compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        compose.onNodeWithText("Pockets").performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag("pockets_list"), 5_000)
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("pocket_Supermercado"))
+
+        compose.onNode(
+            hasTestTag("pocket_Supermercado") and hasClickAction() and
+                hasContentDescription("Supermercado", substring = true) and
+                hasContentDescription("disponibles", substring = true),
+            useUnmergedTree = true,
+        ).assertExists()
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE) // Real text measurement; legacy mode fakes glyph widths.
+    @Config(qualifiers = "w384dp-h823dp") // The Galaxy S23 width where the split was seen.
+    fun comparison_summary_amounts_are_never_split_across_lines_at_the_largest_font_size() {
+        val ledger = ledgerWithPreviousPeriod(newFundsMinor = 750_000)
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) { PocketApp(ledger) }
+        }
+        compose.waitUntilExactlyOneExists(hasContentDescription("Mostrar métricas del periodo"), 10_000)
+        compose.onNodeWithContentDescription("Mostrar métricas del periodo").performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Comparar periodos"))
+        compose.onNodeWithText("Comparar periodos").performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitUntilExactlyOneExists(hasTestTag("comparison_list"), 5_000)
+        compose.onNodeWithTag("comparison_list").performScrollToNode(hasContentDescription("Fondos nuevos. ", substring = true))
+
+        for (column in listOf("current", "baseline")) {
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithTag("comparison_value_${column}_Fondos nuevos", useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val layout = layouts.single()
+            val text = layout.layoutInput.text.text
+            // A line may break between "SAR" and the number, but never inside "7,500.00".
+            for (line in 0 until layout.lineCount - 1) {
+                val end = layout.getLineEnd(line)
+                val splitsNumber = text[end - 1].isAmountChar() && text[end].isAmountChar()
+                assertFalse("\"$text\" breaks inside a number after \"${text.substring(0, end)}\"", splitsNumber)
+            }
+        }
+    }
+
+    private fun Char.isAmountChar() = isDigit() || this == '.' || this == ','
+
+    @Test
+    fun screen_readers_hear_each_comparison_summary_row_once() {
+        val ledger = ledgerWithPreviousPeriod()
+        compose.setContent { PocketApp(ledger) }
+        compose.waitUntilExactlyOneExists(hasContentDescription("Mostrar métricas del periodo"), 10_000)
+        compose.onNodeWithContentDescription("Mostrar métricas del periodo").performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Comparar periodos"))
+        compose.onNodeWithText("Comparar periodos").performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitUntilExactlyOneExists(hasTestTag("comparison_list"), 5_000)
+        compose.onNodeWithTag("comparison_list").performScrollToNode(hasContentDescription("Fondos nuevos. ", substring = true))
+
+        // The row's spoken description already names the label and both values.
+        compose.onNode(hasText("Fondos nuevos") and exposedToAccessibility, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNode(hasTestTag("comparison_value_current_Fondos nuevos") and exposedToAccessibility, useUnmergedTree = true)
+            .assertDoesNotExist()
     }
 
     @Test

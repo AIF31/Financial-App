@@ -2,9 +2,11 @@ package com.aif31.pocket
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -30,10 +32,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.LedgerState
@@ -188,34 +192,53 @@ private fun ComparisonTable(current: PeriodInsights, baseline: PeriodInsights?) 
     )
     val currentName = formatPeriodRange(current.period.start, current.period.endExclusive)
     val baselineName = baseline?.let { formatPeriodRange(it.period.start, it.period.endExclusive) }
-    Column {
-        TableHeader(currentName, baselineName)
-        HorizontalDivider()
-        rows.forEach { row ->
-            val currentValue = row.value(current)
-            val baselineValue = baseline?.let(row.value)
-            // Screen readers do not see the column headers, so each value is announced with its period.
-            val spoken = buildString {
-                append("${row.label}. $currentName: $currentValue")
-                if (baselineName != null && baselineValue != null) append(". $baselineName: $baselineValue")
+    val style = MaterialTheme.typography.bodyMedium
+    val measurer = rememberTextMeasurer()
+    BoxWithConstraints {
+        // Beside the label, each value column gets 1 part of 2.1 (or 3.1) of the width. When a number such as
+        // "7,500.00" cannot fit there, as with large fonts, labels move above their values so the numbers get
+        // the full width instead of wrapping mid-number.
+        val valueColumns = if (baseline == null) 1 else 2
+        val besideLabelWidth = constraints.maxWidth / (LABEL_WEIGHT + valueColumns)
+        val widestNumber = rows.filter { it.amount }
+            .flatMap { row -> listOfNotNull(row.value(current), baseline?.let(row.value)) }
+            .flatMap { it.split(' ') }
+            .maxOf { measurer.measure(it, style.copy(fontFamily = FontFamily.Monospace)).size.width }
+        val stacked = widestNumber > besideLabelWidth
+        Column {
+            TableHeader(currentName, baselineName, stacked)
+            HorizontalDivider()
+            rows.forEach { row ->
+                val currentValue = row.value(current)
+                val baselineValue = baseline?.let(row.value)
+                // Screen readers do not see the column headers, so each value is announced with its period.
+                val spoken = buildString {
+                    append("${row.label}. $currentName: $currentValue")
+                    if (baselineName != null && baselineValue != null) append(". $baselineName: $baselineValue")
+                }
+                TableRow(row.label, currentValue, baselineValue, if (row.amount) FontFamily.Monospace else null, spoken, stacked)
             }
-            TableRow(row.label, currentValue, baselineValue, if (row.amount) FontFamily.Monospace else null, spoken)
-        }
-        current.largestExpense?.let { movement ->
-            Text(
-                "Mayor gasto del periodo elegido: ${movement.merchantOrPocket}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp),
-            )
+            current.largestExpense?.let { movement ->
+                Text(
+                    "Mayor gasto del periodo elegido: ${movement.merchantOrPocket}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
         }
     }
 }
 
+private const val LABEL_WEIGHT = 1.1f
+
+/** Cells repeat the row's spoken description, so screen readers would otherwise hear each row twice. */
+private val CoveredByRowDescription = Modifier.semantics { hideFromAccessibility() }
+
 @Composable
-private fun TableHeader(current: String, baseline: String?) {
+private fun TableHeader(current: String, baseline: String?, stacked: Boolean) {
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Spacer(Modifier.weight(1.1f))
+        if (!stacked) Spacer(Modifier.weight(LABEL_WEIGHT))
         Text(current, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
         if (baseline != null) {
             Text(baseline, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
@@ -224,17 +247,50 @@ private fun TableHeader(current: String, baseline: String?) {
 }
 
 @Composable
-private fun TableRow(label: String, current: String, baseline: String?, valueFont: FontFamily?, spokenDescription: String) {
+private fun TableRow(
+    label: String,
+    current: String,
+    baseline: String?,
+    valueFont: FontFamily?,
+    spokenDescription: String,
+    stacked: Boolean,
+) {
     val style = MaterialTheme.typography.bodyMedium
+    // The row is announced once, with its spoken description in place of the individual cells.
+    val rowSemantics = Modifier.semantics(mergeDescendants = true) { contentDescription = spokenDescription }
+    if (stacked) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp).then(rowSemantics)) {
+            Text(label, style = style, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = CoveredByRowDescription)
+            Row(Modifier.fillMaxWidth()) { TableValues(label, current, baseline, valueFont, style) }
+        }
+        return
+    }
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 8.dp).clearAndSetSemantics { contentDescription = spokenDescription },
+        Modifier.fillMaxWidth().padding(vertical = 8.dp).then(rowSemantics),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = style, modifier = Modifier.weight(1.1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(current, style = style, modifier = Modifier.weight(1f), textAlign = TextAlign.End, fontFamily = valueFont)
-        if (baseline != null) {
-            Text(baseline, style = style, modifier = Modifier.weight(1f), textAlign = TextAlign.End, fontFamily = valueFont)
-        }
+        Text(label, style = style, modifier = CoveredByRowDescription.weight(LABEL_WEIGHT), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        TableValues(label, current, baseline, valueFont, style)
+    }
+}
+
+@Composable
+private fun RowScope.TableValues(label: String, current: String, baseline: String?, valueFont: FontFamily?, style: TextStyle) {
+    Text(
+        current,
+        style = style,
+        modifier = CoveredByRowDescription.weight(1f).testTag("comparison_value_current_$label"),
+        textAlign = TextAlign.End,
+        fontFamily = valueFont,
+    )
+    if (baseline != null) {
+        Text(
+            baseline,
+            style = style,
+            modifier = CoveredByRowDescription.weight(1f).testTag("comparison_value_baseline_$label"),
+            textAlign = TextAlign.End,
+            fontFamily = valueFont,
+        )
     }
 }
 

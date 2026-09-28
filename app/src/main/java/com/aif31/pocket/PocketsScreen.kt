@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
@@ -223,12 +224,27 @@ internal fun PocketsScreen(
         }
         items(activePockets, key = { it.pocket.id }) { summary ->
             val status = summary.budgetStatus
-            val statusColor = status.presentation().indicator
+            val presentation = status.presentation()
+            val statusColor = presentation.indicator
+            val available = availableText(summary.availabilityMinor, selectedCurrency)
+            val budget = "Presupuesto ${money(summary.budgetMinor)}"
+            // The card's label already says all of this; exposing the pieces too would make screen readers repeat it.
+            val coveredByLabel = Modifier.semantics { hideFromAccessibility() }
             Card(
                 Modifier
                     .fillMaxWidth()
                     .testTag("pocket_${summary.pocket.name}")
-                    .clickable { selected = summary },
+                    .clickable { selected = summary }
+                    // A card scrolled partly out of view exposes only its visible children, so it carries its own label.
+                    .semantics {
+                        contentDescription = listOf(
+                            summary.pocket.name,
+                            available.text,
+                            "${summary.consumedPercent}% consumido",
+                            budget,
+                            presentation.label,
+                        ).joinToString(". ")
+                    },
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -242,7 +258,7 @@ internal fun PocketsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                            Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium, modifier = coveredByLabel.weight(1f))
                             if (!isHistorical) {
                                 IconButton(
                                     onClick = { selected = summary },
@@ -253,9 +269,10 @@ internal fun PocketsScreen(
                             }
                         }
                         Text(
-                            availableText(summary.availabilityMinor, selectedCurrency),
+                            available,
                             color = if (summary.availabilityMinor < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.titleMedium,
+                            modifier = coveredByLabel,
                         )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -264,12 +281,12 @@ internal fun PocketsScreen(
                         ) {
                             LinearProgressIndicator(
                                 progress = { (summary.consumedPercent / 100f).coerceIn(0f, 1f) },
-                                modifier = Modifier.weight(1f).height(6.dp),
+                                modifier = coveredByLabel.weight(1f).height(6.dp),
                                 color = statusColor,
                                 trackColor = MaterialTheme.colorScheme.surfaceVariant,
                                 drawStopIndicator = {},
                             )
-                            Text("${summary.consumedPercent}%", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${summary.consumedPercent}%", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = coveredByLabel)
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -277,11 +294,12 @@ internal fun PocketsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                "Presupuesto ${money(summary.budgetMinor)}",
+                                budget,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.bodySmall,
+                                modifier = coveredByLabel,
                             )
-                            PocketStatusBadge(status)
+                            PocketStatusBadge(status, coveredByLabel)
                         }
                     }
                 }

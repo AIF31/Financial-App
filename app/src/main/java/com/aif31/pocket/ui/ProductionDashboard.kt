@@ -54,6 +54,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -379,12 +380,19 @@ private fun PocketProgressRow(
 ) {
     val status = summary.budgetStatus
     val colors = status.presentation()
+    val available = availableText(summary.availabilityMinor, accountingCurrency)
+    val rollover = "Rollover: ${MoneyText.format(summary.rolloverMinor, accountingCurrency)}"
+    val consumption = "${summary.consumedPercent}% consumido · Presupuesto ${MoneyText.format(summary.budgetMinor, accountingCurrency)}"
+    // The card's label already says all of this; exposing the pieces too would make screen readers repeat it.
+    val coveredByLabel = Modifier.semantics { hideFromAccessibility() }
     // The whole card records a spend in this Pocket. A separate small button at the row's end would sit in the
     // floating action button's column, where a partly covered target is too small to use reliably.
     Card(
         modifier = modifier
             .clip(CardDefaults.shape)
             .clickable(onClickLabel = "Registrar gasto en ${summary.pocket.name}", onClick = onRecordExpense)
+            // A card scrolled partly out of view exposes only its visible children, so it carries its own label.
+            .semantics { contentDescription = listOf(summary.pocket.name, available.text, rollover, consumption, colors.label).joinToString(". ") }
             .testTag("pocket_row_${summary.pocket.name}"),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
@@ -396,14 +404,15 @@ private fun PocketProgressRow(
             ) {
                 PocketArtworkPlate(summary.pocket.iconKey, plateSize = 52.dp)
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium)
+                    Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium, modifier = coveredByLabel)
                     Text(
-                        availableText(summary.availabilityMinor, accountingCurrency),
+                        available,
                         color = if (summary.availabilityMinor < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                        modifier = coveredByLabel,
                     )
                     Text(
-                        "Rollover: ${MoneyText.format(summary.rolloverMinor, accountingCurrency)}",
-                        modifier = Modifier.testTag("rollover_${summary.pocket.name}"),
+                        rollover,
+                        modifier = coveredByLabel.testTag("rollover_${summary.pocket.name}"),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -418,7 +427,7 @@ private fun PocketProgressRow(
             }
             LinearProgressIndicator(
                 progress = { (summary.consumedPercent / 100f).coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth().height(6.dp),
+                modifier = coveredByLabel.fillMaxWidth().height(6.dp),
                 color = colors.indicator,
                 trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 drawStopIndicator = {},
@@ -429,12 +438,12 @@ private fun PocketProgressRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "${summary.consumedPercent}% consumido · Presupuesto ${MoneyText.format(summary.budgetMinor, accountingCurrency)}",
+                    consumption,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.weight(1f),
+                    modifier = coveredByLabel.weight(1f),
                 )
-                PocketStatusBadge(status)
+                PocketStatusBadge(status, coveredByLabel)
             }
         }
     }

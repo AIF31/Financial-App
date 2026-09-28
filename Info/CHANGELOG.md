@@ -4,6 +4,14 @@ Notable repository changes are recorded here for future maintainers.
 
 ## 2026-09-28
 
+### PR #34 physical-device test
+
+- Recorded the PR #34 hardware run in `Info/verification/2026-09-28-pr34-hardware-test.md`: 29 of 31 device tests passed. Found: the launcher shortcut does not preserve an unsaved edit, the onboarding heading is unreadable in dark theme, and clipped Pocket cards lose their accessibility label. The phone was left on a release-signed `1.0.3` with the user's backup restored.
+- The "Nuevo gasto" static shortcut now targets `NewExpenseShortcutActivity`, an invisible, non-exported activity in its own task. Launchers always start static shortcuts with `NEW_TASK | CLEAR_TASK`, which destroyed the running `MainActivity` and any unsaved form. The trampoline forwards only the fixed action, with `CLEAR_TOP | SINGLE_TOP`, so a running `MainActivity` receives `onNewIntent` and keeps the edit underneath.
+- `PocketTheme` provides the palette's `onBackground` as the default content color. Screens drawn directly on the window, such as onboarding, were using Compose's black default, which was unreadable on the dark window background added in this PR.
+- The dashboard and Pockets-list Pocket cards each carry a single accessibility label (name, availability, budget, status). The visible texts it repeats are hidden from accessibility services but stay available to tests. A card clipped at the list edge still announces its Pocket, and screen readers do not read each card twice. The Pockets list "Gestionar" button remains reachable.
+- The "Comparar periodos" summary table measures its widest amount. When an amount cannot fit beside the label, as at large font scales, each label moves above its values, so numbers such as "7,500.00" are no longer split across lines. Each row is still announced once: its cells are hidden from accessibility services, because the row's spoken description already covers them.
+
 ### PR #34 review follow-up
 
 - Merged `main` after PR #33 and advanced the development build to `1.0.3` (`versionCode` 4), because PR #33 had already taken `1.0.2`. The notification settings screen keeps PR #33's redesign under the shared top app bar, and PR #33's "open Movements" alert action sits beside the new-expense request counter in `MainActivity`.
