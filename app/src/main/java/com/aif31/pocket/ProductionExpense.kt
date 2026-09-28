@@ -37,6 +37,7 @@ import com.aif31.pocket.ui.ChoiceOption
 import com.aif31.pocket.ui.SegmentedChoice
 import com.aif31.pocket.ui.SingleChoiceChips
 import com.aif31.pocket.ui.TimeOfDayPickerDialog
+import com.aif31.pocket.ui.formatPeriodRange
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -415,7 +416,20 @@ internal fun ProductionMovementScreen(
             }
             item {
                 Text("¿De qué Pocket?", style = MaterialTheme.typography.titleLarge)
-                val availableByPocket = state.pockets.associate { it.pocket.id to it.availabilityMinor }
+                // Availability belongs to one period: show the one the entered date falls in, which is not the current
+                // period when a past Movement is edited or a past date is chosen.
+                val enteredPeriod = runCatching { LocalDate.parse(localDate) }.getOrNull()?.let { enteredDate ->
+                    state.periods.firstOrNull { enteredDate >= it.start && enteredDate < it.endExclusive }
+                } ?: state.currentPeriod
+                val availableByPocket = (state.pocketSummariesByPeriod[enteredPeriod?.id] ?: state.pockets)
+                    .associate { it.pocket.id to it.availabilityMinor }
+                if (enteredPeriod != null && enteredPeriod.id != state.currentPeriod?.id) {
+                    Text(
+                        "Disponible en ${formatPeriodRange(enteredPeriod.start, enteredPeriod.endExclusive)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 val fontScale = LocalDensity.current.fontScale
                 BoxWithConstraints {
                 // Column count follows the width available per unit of text size, so names never split mid-word.
@@ -433,9 +447,7 @@ internal fun ProductionMovementScreen(
                                 PocketChoice(
                                     name = pocket.pocket.name,
                                     iconKey = pocket.pocket.iconKey,
-                                    available = availableByPocket[pocket.pocket.id]?.let {
-                                        availableText(it, state.currentPeriod?.accountingCurrency ?: accountingCurrency)
-                                    },
+                                    available = availableByPocket[pocket.pocket.id]?.let { availableText(it, accountingCurrency) },
                                     selected = selectedPocket == pocket.pocket.id,
                                     onSelect = {
                                         selectedPocket = pocket.pocket.id

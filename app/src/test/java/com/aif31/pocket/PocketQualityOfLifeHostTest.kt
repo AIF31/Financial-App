@@ -332,21 +332,7 @@ class PocketQualityOfLifeHostTest {
 
     @Test
     fun new_expense_shortcut_opens_over_an_edit_form_and_returns_to_its_draft() {
-        val ledger = ledgerWithPreviousPeriod()
-        runBlocking {
-            val state = ledger.state.first { it.currentPeriod?.start == LocalDate.of(2026, 2, 25) }
-            ledger.execute(
-                LedgerCommand.AddMovement(
-                    id = "current-spend",
-                    pocketId = state.pockets.first { it.pocket.name == "Supermercado" }.pocket.id,
-                    type = MovementType.EXPENSE,
-                    accountingAmountMinor = 1_200,
-                    occurredAtUtcMillis = Instant.parse("2026-02-26T08:00:00Z").toEpochMilli(),
-                    localDate = LocalDate.of(2026, 2, 26),
-                    merchant = "Café",
-                ),
-            )
-        }
+        val ledger = ledgerWithCurrentCafeSpend()
         var request by mutableIntStateOf(0)
         compose.setContent { PocketApp(ledger, newExpenseRequest = request) }
 
@@ -364,6 +350,85 @@ class PocketQualityOfLifeHostTest {
         compose.onNodeWithContentDescription("Cerrar").performClick()
         compose.waitUntilExactlyOneExists(hasText("Editar movimiento"), 5_000)
         compose.onNodeWithTag("movement_amount").assertTextContains("45.00", substring = true)
+    }
+
+    @Test
+    fun saving_the_new_expense_opened_over_an_edit_returns_to_that_edit_with_its_draft() {
+        val ledger = ledgerWithCurrentCafeSpend()
+        var request by mutableIntStateOf(0)
+        compose.setContent { PocketApp(ledger, newExpenseRequest = request) }
+
+        compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        compose.onNodeWithText("Movimientos").performClick()
+        compose.onNodeWithText("Café").performClick()
+        compose.onNodeWithText("Editar").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Editar movimiento"), 5_000)
+        compose.onNodeWithTag("movement_amount").performTextReplacement("45.00")
+
+        request = 1
+        compose.waitUntilExactlyOneExists(hasText("Nuevo gasto"), 5_000)
+        compose.onNodeWithTag("movement_amount").performTextInput("5.00")
+        compose.onNodeWithTag("movement_pocket_Supermercado").performClick()
+        compose.onNodeWithText("Guardar gasto", substring = true).performClick()
+
+        compose.waitUntil(5_000) { runBlocking { ledger.state.first() }.movements.any { it.accountingAmountMinor == 500L } }
+        compose.waitUntilExactlyOneExists(hasText("Editar movimiento"), 5_000)
+        compose.onNodeWithTag("movement_amount").assertTextContains("45.00", substring = true)
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE) // Real text measurement; legacy mode fakes glyph widths.
+    @Config(qualifiers = "w384dp-h823dp") // The Galaxy S23 width where "Movimientos" was cut off.
+    fun root_navigation_labels_are_shown_in_full_at_a_large_font_size() {
+        val ledger = ledgerWithPreviousPeriod()
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.5f)) { PocketApp(ledger) }
+        }
+        compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+
+        for (label in listOf("Inicio", "Movimientos", "Pockets", "Ajustes")) {
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNode(hasText(label) and hasAnyAncestor(hasClickAction()), useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val layout = layouts.single()
+            assertEquals("$label wraps", 1, layout.lineCount)
+            assertFalse("$label is cut off with an ellipsis", layout.isLineEllipsized(0))
+        }
+    }
+
+    @Test
+    fun editing_a_movement_from_an_earlier_period_shows_that_periods_pocket_availability() {
+        compose.setContent { PocketApp(ledgerWithPreviousPeriod()) }
+        compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        compose.onNodeWithText("Movimientos").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Mercado anterior"), 5_000)
+        compose.onNodeWithText("Mercado anterior").performClick()
+        compose.onNodeWithText("Editar").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Editar movimiento"), 5_000)
+
+        // In 25 Jan – 24 Feb, Supermercado had no budget and SAR 31.00 of spending; the current period has neither.
+        compose.onNodeWithTag("movement_pocket_Supermercado").assertTextContains("SAR -31.00 disponibles", substring = true)
+        compose.onNodeWithText("Disponible en 25 ene – 24 feb 2026", substring = true).assertExists()
+    }
+
+    /** Current period (from 25 Feb) with a SAR 12.00 "Café" expense in Supermercado. */
+    private fun ledgerWithCurrentCafeSpend(): RoomPocketLedger {
+        val ledger = ledgerWithPreviousPeriod()
+        runBlocking {
+            val state = ledger.state.first { it.currentPeriod?.start == LocalDate.of(2026, 2, 25) }
+            ledger.execute(
+                LedgerCommand.AddMovement(
+                    id = "current-spend",
+                    pocketId = state.pockets.first { it.pocket.name == "Supermercado" }.pocket.id,
+                    type = MovementType.EXPENSE,
+                    accountingAmountMinor = 1_200,
+                    occurredAtUtcMillis = Instant.parse("2026-02-26T08:00:00Z").toEpochMilli(),
+                    localDate = LocalDate.of(2026, 2, 26),
+                    merchant = "Café",
+                ),
+            )
+        }
+        return ledger
     }
 
     @Test

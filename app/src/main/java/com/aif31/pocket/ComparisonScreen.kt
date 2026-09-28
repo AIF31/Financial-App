@@ -115,9 +115,17 @@ internal fun ComparisonScreen(
                         )
                         when {
                             comparison == null -> Text("Elige un periodo para comparar.")
-                            baseline == null -> Text(
-                                "Los periodos usan monedas distintas sin un tipo congelado entre ellos; se muestran por separado.",
-                            )
+                            baseline == null -> {
+                                // No frozen rate links the two currencies: each pace stays in its own currency, with no
+                                // difference computed between them.
+                                comparison.baseline.averageDailySpendMinor?.let {
+                                    Text("Periodo comparado: ${MoneyText.format(it, comparison.baseline.accountingCurrency)} al día")
+                                }
+                                Text(
+                                    "Los periodos usan monedas distintas sin un tipo congelado entre ellos; " +
+                                        "se muestran por separado, sin diferencia.",
+                                )
+                            }
                             else -> {
                                 baseline.averageDailySpendMinor?.let {
                                     Text("Periodo comparado: ${MoneyText.format(it, currency)} al día")
@@ -179,6 +187,9 @@ private class SummaryRow(val label: String, val amount: Boolean, val value: (Per
 private fun ComparisonTable(current: PeriodInsights, baseline: PeriodInsights?) {
     fun money(value: Long, insights: PeriodInsights) = MoneyText.format(value, insights.accountingCurrency)
     val rows = listOf(
+        SummaryRow("Gasto diario promedio", amount = true) { insights ->
+            insights.averageDailySpendMinor?.let { money(it, insights) } ?: "—"
+        },
         SummaryRow("Fondos nuevos", amount = true) { money(it.newFundsMinor, it) },
         SummaryRow("Asignado a Pockets", amount = true) { money(it.budgetedMinor, it) },
         SummaryRow("Rollover recibido", amount = true) { money(it.rolloverMinor, it) },

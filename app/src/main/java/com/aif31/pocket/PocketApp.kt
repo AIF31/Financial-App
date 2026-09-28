@@ -65,7 +65,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import com.aif31.pocket.ui.ChoiceOption
 import com.aif31.pocket.ui.SegmentedChoice
@@ -95,6 +94,12 @@ import com.aif31.pocket.fx.ExchangeRateRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.ui.graphics.takeOrElse
+import androidx.compose.ui.unit.sp
 
 @Serializable
 private enum class RootScreen(val label: String, val icon: ImageVector) {
@@ -409,9 +414,13 @@ fun PocketApp(
                 exchangeRates = exchangeRates,
                 onDismiss = { backStack.removeLastOrNull() },
                 onSaved = {
-                    navigateRoot(
-                        if (movementRoute.movementId == null) RootScreen.DASHBOARD else RootScreen.MOVEMENTS,
-                    )
+                    // A form stacked over another Movement form (the launcher shortcut over an edit) returns to it
+                    // with its draft; only a form opened from a root screen goes back to that screen.
+                    if (backStack.getOrNull(backStack.lastIndex - 1) is MovementRoute) {
+                        backStack.removeLastOrNull()
+                    } else {
+                        navigateRoot(if (movementRoute.movementId == null) RootScreen.DASHBOARD else RootScreen.MOVEMENTS)
+                    }
                     appScope.launch {
                         snackbar.showSnackbar(
                             if (movementRoute.movementId == null) "Gasto guardado" else "Movimiento actualizado",
@@ -453,7 +462,7 @@ fun PocketApp(
                             selected = screen == destination,
                             onClick = { navigateRoot(destination) },
                             icon = { Icon(destination.icon, contentDescription = destination.label) },
-                            label = { Text(destination.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            label = { RootDestinationLabel(destination.label) },
                         )
                     }
                 }
@@ -493,7 +502,7 @@ fun PocketApp(
                                     selected = screen == destination,
                                     onClick = { navigateRoot(destination) },
                                     icon = { Icon(destination.icon, contentDescription = destination.label) },
-                                    label = { Text(destination.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    label = { RootDestinationLabel(destination.label) },
                                 )
                             }
                         }
@@ -746,5 +755,20 @@ private fun MovementDialog(
         onlineFxEnabled = onlineFxEnabled,
         exchangeRates = exchangeRates,
         initialPocketId = initialPocketId,
+    )
+}
+
+/**
+ * A root destination's name on one line at every font size. It shrinks to fit instead of ending in an ellipsis or
+ * breaking mid-word, so "Movimientos" stays recognizable at large font scales.
+ */
+@Composable
+private fun RootDestinationLabel(label: String) {
+    val style = LocalTextStyle.current
+    BasicText(
+        label,
+        style = style.copy(color = style.color.takeOrElse { LocalContentColor.current }),
+        maxLines = 1,
+        autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = style.fontSize, stepSize = 0.5.sp),
     )
 }

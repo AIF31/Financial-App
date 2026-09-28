@@ -12,6 +12,15 @@ Notable repository changes are recorded here for future maintainers.
 - The dashboard and Pockets-list Pocket cards each carry a single accessibility label (name, availability, budget, status). The visible texts it repeats are hidden from accessibility services but stay available to tests. A card clipped at the list edge still announces its Pocket, and screen readers do not read each card twice. The Pockets list "Gestionar" button remains reachable.
 - The "Comparar periodos" summary table measures its widest amount. When an amount cannot fit beside the label, as at large font scales, each label moves above its values, so numbers such as "7,500.00" are no longer split across lines. Each row is still announced once: its cells are hidden from accessibility services, because the row's spoken description already covers them.
 
+### PR #34 review findings
+
+Fixes from `docs/audits/2026-09-28-pr34-review.md`. Behavior that was new rather than wrong is now written into `Info/UI-UX-Design-Philosophy.md`.
+
+- Saving a new expense opened by the launcher shortcut over an unsaved edit now returns to that edit with its draft. Previously only closing the new form did; saving reset navigation to a root screen and discarded the edit.
+- Root navigation labels shrink to fit on one line instead of ending in an ellipsis, so "Movimientos" is shown in full at large font scales.
+- Comparing periods in different accounting currencies with no frozen boundary rate between them now shows the compared period's daily average in its own currency, with no difference computed. The summary table gains a "Gasto diario promedio" row.
+- The Movement form's Pocket choices show availability for the period that contains the entered date, in that period's currency, and name that period when it is not the current one. They previously showed the current period's availability for past dates.
+
 ### Time format and notification setup
 
 - The time picker in the Movement form and the daily reminder follows the phone's 12- or 24-hour clock setting instead of always using a 24-hour dial. The stored time is unchanged. On a 12-hour phone, the Movement form's "Hora (HH:mm)" field also shows the time in that format, for example "10:16 p. m.".
