@@ -113,6 +113,9 @@ class PocketAppFlowTest {
         compose.onNodeWithText("Guardar gasto", substring = true).performClick()
 
         compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        // The save confirmation sits over the lower list. Compose reports only a control's uncovered part, so
+        // checking while it shows measures whatever control it happens to cover rather than the control itself.
+        compose.waitUntilDoesNotExist(hasText("Gasto guardado"), 10_000)
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasContentDescription("Mostrar métricas del periodo"))
         compose.onNodeWithContentDescription("Mostrar métricas del periodo").assertIsDisplayed()
         compose.onNodeWithContentDescription("Mostrar métricas del periodo").performSemanticsAction(SemanticsActions.OnClick)
