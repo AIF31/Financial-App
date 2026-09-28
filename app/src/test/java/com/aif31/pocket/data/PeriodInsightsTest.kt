@@ -74,6 +74,61 @@ class PeriodInsightsTest {
     }
 
     @Test
+    fun rollover_counts_as_funds_and_overspending_wins_over_missing_new_funds() {
+        val rolloverOnly = periodsWithoutNewFunds()
+        val onPlan = state(
+            today = LocalDate.of(2026, 3, 5),
+            elapsedDays = 9,
+            periods = rolloverOnly,
+            summaries = mapOf(march.id to listOf(summary(market, budget = 0, rollover = 50_000, expense = 1_000))),
+        )
+        val fastPace = state(
+            today = LocalDate.of(2026, 3, 5),
+            elapsedDays = 9,
+            periods = rolloverOnly,
+            summaries = mapOf(march.id to listOf(summary(market, budget = 0, rollover = 10_000, expense = 9_000))),
+        )
+        val overspent = state(
+            today = LocalDate.of(2026, 3, 5),
+            elapsedDays = 9,
+            periods = rolloverOnly,
+            summaries = mapOf(march.id to listOf(summary(market, budget = 0, rollover = 10_000, expense = 15_000))),
+        )
+        val spentWithoutFunds = state(
+            today = LocalDate.of(2026, 3, 5),
+            elapsedDays = 9,
+            periods = rolloverOnly,
+            summaries = mapOf(march.id to listOf(summary(market, budget = 0, expense = 500))),
+        )
+
+        assertEquals(SpendPaceStatus.ON_PLAN, PeriodInsights.of(onPlan, march.id)!!.paceStatus)
+        assertEquals(SpendPaceStatus.OVER_PACE, PeriodInsights.of(fastPace, march.id)!!.paceStatus)
+        assertEquals(SpendPaceStatus.OVERSPENT, PeriodInsights.of(overspent, march.id)!!.paceStatus)
+        assertEquals(SpendPaceStatus.OVERSPENT, PeriodInsights.of(spentWithoutFunds, march.id)!!.paceStatus)
+    }
+
+    @Test
+    fun movements_dated_after_today_are_reported_separately_from_the_curve() {
+        val state = state(
+            today = LocalDate.of(2026, 2, 27),
+            elapsedDays = 3,
+            summaries = mapOf(march.id to listOf(summary(market, budget = 30_000, expense = 1_700, refund = 100))),
+            movements = listOf(
+                movement("today", march, LocalDate.of(2026, 2, 27), 1_000),
+                movement("later", march, LocalDate.of(2026, 3, 10), 700),
+                movement("later-refund", march, LocalDate.of(2026, 3, 11), 100, MovementType.REFUND),
+            ),
+        )
+
+        val insights = PeriodInsights.of(state, march.id)!!
+
+        assertEquals(listOf(0L, 0L, 1_000L), insights.cumulativeNetSpendByDayMinor)
+        assertEquals(600L, insights.netSpendAfterTodayMinor)
+        assertEquals(insights.netSpendMinor, insights.cumulativeNetSpendByDayMinor.last() + insights.netSpendAfterTodayMinor)
+        assertEquals(0L, PeriodInsights.of(state, february.id)!!.netSpendAfterTodayMinor)
+    }
+
+    @Test
     fun closed_period_uses_every_day_and_has_no_forward_looking_metrics() {
         val state = state(
             today = LocalDate.of(2026, 3, 5),
@@ -266,6 +321,8 @@ class PeriodInsightsTest {
             currentLocalDate = today,
         )
     }
+
+    private fun periodsWithoutNewFunds() = listOf(february, march.copy(newFundsMinor = 0), april)
 
     private fun pocket(id: String, name: String) = Pocket(id, name, PocketIconKey.forName(name), 0, false, false)
 

@@ -48,10 +48,19 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
 
-private val shortDate = DateTimeFormatter.ofPattern("d MMM", Locale.forLanguageTag("es"))
+private val spanish = Locale.forLanguageTag("es")
+private val shortDate = DateTimeFormatter.ofPattern("d MMM", spanish)
+private val shortDateWithYear = DateTimeFormatter.ofPattern("d MMM yyyy", spanish)
 
-internal fun formatPeriodRange(start: LocalDate, endExclusive: LocalDate): String =
-    "${start.format(shortDate)} – ${endExclusive.minusDays(1).format(shortDate)}"
+/**
+ * "25 feb – 24 mar 2026", or "25 dic 2026 – 24 ene 2027" across a year change. The year is always present so
+ * the same dates in different years stay distinguishable in pickers and editors.
+ */
+internal fun formatPeriodRange(start: LocalDate, endExclusive: LocalDate): String {
+    val end = endExclusive.minusDays(1)
+    val startText = start.format(if (start.year == end.year) shortDate else shortDateWithYear)
+    return "$startText – ${end.format(shortDateWithYear)}"
+}
 
 internal fun daysLeftText(days: Int): String = when (days) {
     0 -> "Último día del periodo"
@@ -203,6 +212,7 @@ internal fun CumulativeSpendChart(
     modifier: Modifier = Modifier,
     currentLabel: String = "Este periodo",
     baselineLabel: String = "Periodo anterior",
+    footnote: String? = null,
 ) {
     val lineColor = MaterialTheme.colorScheme.primary
     val baselineColor = MaterialTheme.colorScheme.outline
@@ -277,7 +287,20 @@ internal fun CumulativeSpendChart(
             if (baseline != null) LegendItem(baselineLabel, baselineColor, LineStyle.DASHED)
             if (budget != null) LegendItem(budgetLabel, budgetColor, LineStyle.DOTTED)
         }
+        footnote?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = axisColor) }
     }
+}
+
+/**
+ * Explains where the current period's curve stops: it runs through today, so Movements dated later in the
+ * period are in the totals but not yet on the curve. Null for closed periods.
+ */
+internal fun PeriodInsights.chartCutoffNote(): String? {
+    if (!inProgress) return null
+    val throughToday = "Hasta hoy, día $elapsedDays de $totalDays."
+    if (netSpendAfterTodayMinor == 0L) return throughToday
+    return "$throughToday No incluye ${MoneyText.format(netSpendAfterTodayMinor, accountingCurrency)} " +
+        "netos con fecha posterior a hoy, que sí cuentan en el gasto neto."
 }
 
 @Composable

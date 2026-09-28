@@ -43,6 +43,8 @@ data class PeriodInsights(
     val paceStatus: SpendPaceStatus,
     /** Net spending accumulated at the end of each elapsed day, starting with the period's first day. */
     val cumulativeNetSpendByDayMinor: List<Long>,
+    /** Net spend of Movements dated after today: counted in [netSpendMinor] but not yet on the daily curve. */
+    val netSpendAfterTodayMinor: Long,
     val pockets: List<PocketPeriodSummary>,
 ) {
     val accountingCurrency: SupportedCurrency get() = period.accountingCurrency
@@ -67,12 +69,15 @@ data class PeriodInsights(
             val budgeted = pockets.map { it.budgetMinor }.sumMoneyExact()
             val rollover = pockets.map { it.rolloverMinor }.sumMoneyExact()
             val availableBudget = Math.addExact(budgeted, rollover)
+            // Rollover is spendable money too, so a period funded only by rollover still has a plan.
+            val periodFunds = Math.addExact(period.newFundsMinor, rollover)
             val remainingDays = if (inProgress) totalDays - elapsedDays else 0
             val projected = if (inProgress) PocketMath.project(netSpend, elapsedDays, totalDays).amountMinor else null
             // Match the ledger's net spend, which only counts Pockets present in this period's snapshot.
             val snapshotPocketIds = pockets.mapTo(HashSet()) { it.pocket.id }
             val periodMovements = state.movements.filter { it.periodId == period.id && it.pocketId in snapshotPocketIds }
             val expenses = periodMovements.filter { it.type == MovementType.EXPENSE }
+            val netSpendAfterToday = if (inProgress) periodMovements.filter { it.localDate > today }.netSpendMinor() else 0L
             return PeriodInsights(
                 period = period,
                 inProgress = inProgress,
@@ -95,12 +100,13 @@ data class PeriodInsights(
                 budgetUsedPercent = availableBudget.takeIf { it > 0 }?.let { (netSpend * 100 / it).toInt() },
                 periodElapsedPercent = if (totalDays == 0) 0 else elapsedDays * 100 / totalDays,
                 paceStatus = when {
-                    period.newFundsMinor <= 0L -> SpendPaceStatus.NO_FUNDS
                     availability < 0L -> SpendPaceStatus.OVERSPENT
-                    (projected ?: netSpend) > period.newFundsMinor -> SpendPaceStatus.OVER_PACE
+                    periodFunds <= 0L -> SpendPaceStatus.NO_FUNDS
+                    (projected ?: netSpend) > periodFunds -> SpendPaceStatus.OVER_PACE
                     else -> SpendPaceStatus.ON_PLAN
                 },
                 cumulativeNetSpendByDayMinor = cumulativeByDay(period, elapsedDays, periodMovements),
+                netSpendAfterTodayMinor = netSpendAfterToday,
                 pockets = pockets,
             )
         }

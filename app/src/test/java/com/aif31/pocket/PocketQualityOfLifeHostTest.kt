@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
@@ -23,6 +24,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.waitUntilDoesNotExist
@@ -97,8 +100,13 @@ class PocketQualityOfLifeHostTest {
         compose.onNodeWithText("Comparar periodos").performSemanticsAction(SemanticsActions.OnClick)
 
         compose.waitUntilExactlyOneExists(hasTestTag("comparison_list"), 5_000)
-        compose.onNodeWithTag("comparison_baseline").assertTextContains("25 ene – 24 feb", substring = true)
+        compose.onNodeWithTag("comparison_baseline").assertTextContains("25 ene – 24 feb 2026", substring = true)
         compose.onNodeWithTag("comparison_list").performScrollToNode(hasText("Resumen"))
+        compose.onNodeWithTag("comparison_list").performScrollToNode(hasContentDescription("Gasto neto. ", substring = true))
+        compose.onNode(
+            hasContentDescription("Gasto neto. 25 feb – 24 mar 2026: SAR", substring = true) and
+                hasContentDescription(". 25 ene – 24 feb 2026: SAR", substring = true),
+        ).assertExists()
         compose.onNodeWithTag("comparison_list").performScrollToNode(hasText("Gasto diario promedio por Pocket"))
         compose.onNodeWithContentDescription("Atrás").performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 5_000)
@@ -110,8 +118,10 @@ class PocketQualityOfLifeHostTest {
         compose.setContent { PocketApp(ledger) }
 
         compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
-        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasContentDescription("Registrar gasto en Supermercado"))
-        compose.onNodeWithContentDescription("Registrar gasto en Supermercado").performClick()
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasTestTag("pocket_row_Supermercado"))
+        compose.onNodeWithTag("pocket_row_Supermercado")
+            .assert(SemanticsMatcher("labelled for quick entry") { it.config.getOrElseNullable(SemanticsActions.OnClick) { null }?.label == "Registrar gasto en Supermercado" })
+            .performClick()
 
         compose.waitUntilExactlyOneExists(hasTestTag("movement_form"), 5_000)
         compose.onNodeWithTag("movement_form").performScrollToNode(hasTestTag("movement_pocket_Supermercado"))
@@ -199,6 +209,56 @@ class PocketQualityOfLifeHostTest {
 
         request = 2
         compose.waitUntilExactlyOneExists(hasTestTag("movement_form"), 5_000)
+    }
+
+    @Test
+    fun new_expense_shortcut_opens_over_an_edit_form_and_returns_to_its_draft() {
+        val ledger = ledgerWithPreviousPeriod()
+        runBlocking {
+            val state = ledger.state.first { it.currentPeriod?.start == LocalDate.of(2026, 2, 25) }
+            ledger.execute(
+                LedgerCommand.AddMovement(
+                    id = "current-spend",
+                    pocketId = state.pockets.first { it.pocket.name == "Supermercado" }.pocket.id,
+                    type = MovementType.EXPENSE,
+                    accountingAmountMinor = 1_200,
+                    occurredAtUtcMillis = Instant.parse("2026-02-26T08:00:00Z").toEpochMilli(),
+                    localDate = LocalDate.of(2026, 2, 26),
+                    merchant = "Café",
+                ),
+            )
+        }
+        var request by mutableIntStateOf(0)
+        compose.setContent { PocketApp(ledger, newExpenseRequest = request) }
+
+        compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        compose.onNodeWithText("Movimientos").performClick()
+        compose.onNodeWithText("Café").performClick()
+        compose.onNodeWithText("Editar").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Editar movimiento"), 5_000)
+        compose.onNodeWithTag("movement_amount").performTextReplacement("45.00")
+
+        request = 1
+        compose.waitUntilExactlyOneExists(hasText("Nuevo gasto"), 5_000)
+        compose.onNodeWithTag("movement_amount").assert(hasText("45.00", substring = true).not())
+
+        compose.onNodeWithContentDescription("Cerrar").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Editar movimiento"), 5_000)
+        compose.onNodeWithTag("movement_amount").assertTextContains("45.00", substring = true)
+    }
+
+    @Test
+    fun pockets_header_opens_the_pockets_tab() {
+        val ledger = ledgerWithPreviousPeriod()
+        compose.setContent { PocketApp(ledger) }
+
+        compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Ver todos"))
+        compose.onNodeWithText("Ver todos")
+            .assert(SemanticsMatcher("labelled for Pockets") { it.config.getOrElseNullable(SemanticsActions.OnClick) { null }?.label == "Ver todos los Pockets" })
+            .performClick()
+
+        compose.waitUntilExactlyOneExists(hasTestTag("pockets_list"), 5_000)
     }
 
     @Test

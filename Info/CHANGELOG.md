@@ -2,6 +2,21 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-09-28
+
+### PR #34 review follow-up
+
+- Pace status counts rollover as period funds. A period funded only by rollover gets a real pace status instead of "Asigna fondos". Negative availability now always reports overspending, even with zero new funds.
+- A "Nuevo gasto" shortcut delivered while an edit or suggestion form is open now opens a new-expense form above it. Closing that form returns to the edit with its unsaved changes. Each Movement form route carries its own instance id, and its draft is kept in the route state holder until the route closes.
+- Period labels always include the year ("25 feb – 24 mar 2026"), so pickers and the period-funds editor distinguish the same dates in different years.
+- The cumulative spend chart for the current period says it runs through today. When Movements are dated later in the period, it states the net amount that is in the totals but not yet on the curve (`PeriodInsights.netSpendAfterTodayMinor`).
+- Each comparison-table row is announced with each value's period, for example "Gasto neto. 25 feb – 24 mar 2026: SAR 100.00. 25 ene – 24 feb 2026: SAR 80.00".
+- The PR's CI failure in [`PocketAppFlowTest`](https://github.com/AIF31/Financial-App/actions/runs/36359066486) was caused by scroll position, not an undersized control. Controls at the right end of Inicio rows scrolled partly under the floating action button or the bottom navigation bar. Compose reports only a control's uncovered area, so the checker saw 2–34 dp targets. The local managed device has different insets from CI and found this on the per-Pocket "+" button.
+  - The Inicio Pocket card is now itself the "Registrar gasto en …" target, with the "+" as a visual cue.
+  - The whole "Tus Pockets" header row now opens Pockets. It is labelled "Ver todos los Pockets" and replaces the separate "Ver todos" text button.
+  - The accessibility checks are unchanged. A suppression for results cut by the floating action button or navigation bar was tried and removed in review, because it could also have hidden a genuinely small control.
+  - Two alternatives were rejected. Ending root lists at the bottom bar made hidden controls show as clipped slivers. Scrolling the card to a fixed position before expanding it only moved the overlap to another control.
+
 ## 2026-09-27
 
 ### Period insights, comparison, and UX quality pass (`1.0.2`, `versionCode` 3)

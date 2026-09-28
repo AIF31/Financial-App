@@ -408,6 +408,7 @@ private fun PeriodDetailsSection(
                         availableBudgetMinor = insights.availableBudgetMinor,
                         currency = currency,
                         currentLabel = "Este periodo",
+                        footnote = insights.chartCutoffNote(),
                     )
                 }
                 // Any other period can be chosen on the comparison screen, even without a predecessor.

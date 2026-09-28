@@ -30,6 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
@@ -42,6 +44,7 @@ import com.aif31.pocket.ui.CumulativeSpendChart
 import com.aif31.pocket.ui.MoneyText
 import com.aif31.pocket.ui.PocketComparisonBars
 import com.aif31.pocket.ui.PocketTopAppBar
+import com.aif31.pocket.ui.chartCutoffNote
 import com.aif31.pocket.ui.formatPeriodRange
 import com.aif31.pocket.ui.merchantOrPocket
 import androidx.compose.foundation.layout.Spacer
@@ -138,6 +141,7 @@ internal fun ComparisonScreen(
                             currency = currency,
                             currentLabel = "Periodo elegido",
                             baselineLabel = "Comparado",
+                            footnote = insights.chartCutoffNote(),
                         )
                     }
                 }
@@ -182,14 +186,20 @@ private fun ComparisonTable(current: PeriodInsights, baseline: PeriodInsights?) 
         SummaryRow("Gastos registrados", amount = false) { it.expenseCount.toString() },
         SummaryRow("Mayor gasto", amount = true) { insights -> insights.largestExpense?.let { money(it.accountingAmountMinor, insights) } ?: "—" },
     )
+    val currentName = formatPeriodRange(current.period.start, current.period.endExclusive)
+    val baselineName = baseline?.let { formatPeriodRange(it.period.start, it.period.endExclusive) }
     Column {
-        TableHeader(
-            formatPeriodRange(current.period.start, current.period.endExclusive),
-            baseline?.let { formatPeriodRange(it.period.start, it.period.endExclusive) },
-        )
+        TableHeader(currentName, baselineName)
         HorizontalDivider()
         rows.forEach { row ->
-            TableRow(row.label, row.value(current), baseline?.let(row.value), if (row.amount) FontFamily.Monospace else null)
+            val currentValue = row.value(current)
+            val baselineValue = baseline?.let(row.value)
+            // Screen readers do not see the column headers, so each value is announced with its period.
+            val spoken = buildString {
+                append("${row.label}. $currentName: $currentValue")
+                if (baselineName != null && baselineValue != null) append(". $baselineName: $baselineValue")
+            }
+            TableRow(row.label, currentValue, baselineValue, if (row.amount) FontFamily.Monospace else null, spoken)
         }
         current.largestExpense?.let { movement ->
             Text(
@@ -214,10 +224,10 @@ private fun TableHeader(current: String, baseline: String?) {
 }
 
 @Composable
-private fun TableRow(label: String, current: String, baseline: String?, valueFont: FontFamily?) {
+private fun TableRow(label: String, current: String, baseline: String?, valueFont: FontFamily?, spokenDescription: String) {
     val style = MaterialTheme.typography.bodyMedium
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 8.dp).semantics(mergeDescendants = true) {},
+        Modifier.fillMaxWidth().padding(vertical = 8.dp).clearAndSetSemantics { contentDescription = spokenDescription },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, style = style, modifier = Modifier.weight(1.1f), color = MaterialTheme.colorScheme.onSurfaceVariant)

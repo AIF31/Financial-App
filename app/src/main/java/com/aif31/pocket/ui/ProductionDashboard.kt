@@ -19,8 +19,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
@@ -30,7 +34,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -181,13 +184,29 @@ internal fun ActionableDashboardContent(
             }
         }
         item {
+            // The whole header opens Pockets. A separate "Ver todos" button at the row's end would sit in the
+            // floating action button's column, where it can scroll into place almost entirely covered.
             Row(
-                modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 760.dp)
+                    .heightIn(min = 48.dp)
+                    .clip(MaterialTheme.shapes.small)
+                    .clickable(onClickLabel = "Ver todos los Pockets", role = Role.Button, onClick = onManagePockets),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Tus Pockets", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
-                TextButton(onClick = onManagePockets) { Text("Ver todos") }
+                Text(
+                    "Tus Pockets",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f).semantics { heading() },
+                )
+                Text("Ver todos", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
             }
         }
         if (activePockets.isEmpty()) {
@@ -360,8 +379,13 @@ private fun PocketProgressRow(
 ) {
     val status = summary.budgetStatus
     val colors = status.presentation()
+    // The whole card records a spend in this Pocket. A separate small button at the row's end would sit in the
+    // floating action button's column, where a partly covered target is too small to use reliably.
     Card(
-        modifier = modifier,
+        modifier = modifier
+            .clip(CardDefaults.shape)
+            .clickable(onClickLabel = "Registrar gasto en ${summary.pocket.name}", onClick = onRecordExpense)
+            .testTag("pocket_row_${summary.pocket.name}"),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -384,8 +408,12 @@ private fun PocketProgressRow(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                FilledTonalIconButton(onClick = onRecordExpense) {
-                    Icon(Icons.Default.Add, contentDescription = "Registrar gasto en ${summary.pocket.name}")
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.padding(8.dp))
                 }
             }
             LinearProgressIndicator(

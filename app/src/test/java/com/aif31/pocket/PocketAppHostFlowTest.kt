@@ -183,8 +183,8 @@ class PocketAppHostFlowTest {
 
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("SAR 200.00 disponibles"))
         compose.onNodeWithText("SAR 200.00 disponibles").assertIsDisplayed()
-        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasTestTag("rollover_Supermercado"))
-        compose.onNodeWithTag("rollover_Supermercado").assertIsDisplayed()
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasTestTag("pocket_row_Supermercado"))
+        compose.onNodeWithTag("rollover_Supermercado", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("Movimientos").performClick()
         compose.onNodeWithText("- SAR 100.00").assertIsDisplayed()
     }
@@ -1010,7 +1010,7 @@ class PocketAppHostFlowTest {
         compose.waitUntilExactlyOneExists(hasText("Pockets"), 5_000)
         compose.onNodeWithText("Pockets").performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("pockets_list"), 5_000)
-        compose.onNodeWithText("25 feb – 24 mar").performClick()
+        compose.onNodeWithText("25 feb – 24 mar 2026").performClick()
         compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Retirado este periodo"))
 
         compose.onNodeWithText("Retirado este periodo").assertIsDisplayed()
@@ -1101,7 +1101,7 @@ class PocketAppHostFlowTest {
         compose.waitUntilExactlyOneExists(hasText("Pockets"), 5_000)
         compose.onNodeWithText("Pockets").performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("pockets_list"), 5_000)
-        compose.onNodeWithText("25 mar – 24 abr").performClick()
+        compose.onNodeWithText("25 mar – 24 abr 2026").performClick()
         compose.onNodeWithText("Vista histórica · Solo lectura").assertIsDisplayed()
         compose.onNodeWithText("Moneda del periodo · SAR").assertIsDisplayed()
         compose.onNodeWithText("Asignado").assertIsDisplayed()
@@ -1193,8 +1193,8 @@ class PocketAppHostFlowTest {
         compose.onAllNodesWithText("Cambiar moneda", substring = true).assertCountEquals(0)
 
         compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("period_selector"))
-        compose.onNodeWithTag("period_selector").performScrollToNode(hasText("25 feb – 24 mar"))
-        compose.onNodeWithText("25 feb – 24 mar").performClick()
+        compose.onNodeWithTag("period_selector").performScrollToNode(hasText("25 feb – 24 mar 2026"))
+        compose.onNodeWithText("25 feb – 24 mar 2026").performClick()
         compose.onNodeWithText("Moneda del periodo · SAR").assertIsDisplayed()
         compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Presupuesto SAR 100.00"))
         compose.onNodeWithText("Presupuesto SAR 100.00").assertIsDisplayed()

@@ -86,6 +86,7 @@ import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
 import com.aif31.pocket.ui.ActionableDashboardContent
 import com.aif31.pocket.ui.SettingsSection
+import java.util.UUID
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.coroutines.flow.flowOf
@@ -115,7 +116,17 @@ private data class MovementRoute(
     val movementId: String? = null,
     val suggestionId: String? = null,
     val pocketId: String? = null,
-) : PocketRoute
+    /**
+     * Identifies this form instance so its draft survives while another form is stacked above it. Required
+     * rather than defaulted: serialization omits defaults, so a default would be regenerated on restore.
+     */
+    val instanceId: String,
+) : PocketRoute {
+    val isNewExpense: Boolean get() = movementId == null && suggestionId == null
+}
+
+private fun movementForm(movementId: String? = null, suggestionId: String? = null, pocketId: String? = null) =
+    MovementRoute(movementId, suggestionId, pocketId, instanceId = UUID.randomUUID().toString())
 
 @Serializable
 private data class ComparisonRoute(val periodId: String, val baselinePeriodId: String?) : PocketRoute
@@ -341,8 +352,15 @@ fun PocketApp(
     val settingsSection = (currentRoute as? SettingsDetailRoute)?.section
     val snackbar = remember { SnackbarHostState() }
     val appScope = rememberCoroutineScope()
-    // Keeps each root destination's saveable state (scroll, search, filters) while other routes are shown.
+    // Keeps each root destination's saveable state (scroll, search, filters) while other routes are shown,
+    // and each open Movement form's draft while another form is stacked above it.
     val rootStateHolder = rememberSaveableStateHolder()
+    val openFormIds = backStack.mapNotNull { (it as? MovementRoute)?.instanceId }
+    var knownFormIds by remember { mutableStateOf(emptyList<String>()) }
+    LaunchedEffect(openFormIds) {
+        (knownFormIds - openFormIds.toSet()).forEach(rootStateHolder::removeState)
+        knownFormIds = openFormIds
+    }
 
     fun navigateRoot(destination: RootScreen) {
         backStack[0] = RootRoute(destination)
@@ -356,7 +374,8 @@ fun PocketApp(
     var handledNewExpenseRequest by rememberSaveable { mutableIntStateOf(0) }
     LaunchedEffect(newExpenseRequest, state.currentPeriod.id) {
         if (newExpenseRequest > handledNewExpenseRequest) {
-            if (backStack.lastOrNull() !is MovementRoute) backStack.add(MovementRoute())
+            // An edit or suggestion form stays underneath; only an already open new-expense form is reused.
+            if ((backStack.lastOrNull() as? MovementRoute)?.isNewExpense != true) backStack.add(movementForm())
             handledNewExpenseRequest = newExpenseRequest
         }
     }
@@ -376,27 +395,29 @@ fun PocketApp(
             )
             return
         }
-        MovementDialog(
-            state = state,
-            ledger = ledger,
-            defaultExpenseCurrency = preferenceState.defaultExpenseCurrency,
-            onlineFxEnabled = preferenceState.onlineFxEnabled,
-            exchangeRates = exchangeRates,
-            onDismiss = { backStack.removeLastOrNull() },
-            onSaved = {
-                navigateRoot(
-                    if (movementRoute.movementId == null) RootScreen.DASHBOARD else RootScreen.MOVEMENTS,
-                )
-                appScope.launch {
-                    snackbar.showSnackbar(
-                        if (movementRoute.movementId == null) "Gasto guardado" else "Movimiento actualizado",
+        rootStateHolder.SaveableStateProvider(movementRoute.instanceId) {
+            MovementDialog(
+                state = state,
+                ledger = ledger,
+                defaultExpenseCurrency = preferenceState.defaultExpenseCurrency,
+                onlineFxEnabled = preferenceState.onlineFxEnabled,
+                exchangeRates = exchangeRates,
+                onDismiss = { backStack.removeLastOrNull() },
+                onSaved = {
+                    navigateRoot(
+                        if (movementRoute.movementId == null) RootScreen.DASHBOARD else RootScreen.MOVEMENTS,
                     )
-                }
-            },
-            initialMovement = movementBeingEdited,
-            suggestion = suggestion,
-            initialPocketId = movementRoute.pocketId,
-        )
+                    appScope.launch {
+                        snackbar.showSnackbar(
+                            if (movementRoute.movementId == null) "Gasto guardado" else "Movimiento actualizado",
+                        )
+                    }
+                },
+                initialMovement = movementBeingEdited,
+                suggestion = suggestion,
+                initialPocketId = movementRoute.pocketId,
+            )
+        }
         return
     }
 
@@ -439,7 +460,7 @@ fun PocketApp(
                     if (rootNavigationVisible) {
                         when (screen) {
                             RootScreen.DASHBOARD -> ExtendedFloatingActionButton(
-                                onClick = { backStack.add(MovementRoute()) },
+                                onClick = { backStack.add(movementForm()) },
                                 icon = { Icon(Icons.Default.Add, contentDescription = "Registrar gasto") },
                                 text = { Text("Registrar gasto") },
                                 modifier = Modifier.testTag("contextual_add"),
@@ -447,7 +468,7 @@ fun PocketApp(
                                 contentColor = MaterialTheme.colorScheme.onTertiary,
                             )
                             RootScreen.MOVEMENTS -> FloatingActionButton(
-                                onClick = { backStack.add(MovementRoute()) },
+                                onClick = { backStack.add(movementForm()) },
                                 modifier = Modifier.testTag("contextual_add"),
                                 containerColor = MaterialTheme.colorScheme.tertiary,
                                 contentColor = MaterialTheme.colorScheme.onTertiary,
@@ -481,7 +502,7 @@ fun PocketApp(
                         state = state,
                         padding = padding,
                         onManagePockets = { navigateRoot(RootScreen.POCKETS) },
-                        onRecordExpenseIn = { backStack.add(MovementRoute(pocketId = it)) },
+                        onRecordExpenseIn = { backStack.add(movementForm(pocketId = it)) },
                         onComparePeriods = { openComparison(state.currentPeriod.id) },
                     )
                     RootScreen.MOVEMENTS -> MovementsScreen(
@@ -490,9 +511,9 @@ fun PocketApp(
                         snackbar = snackbar,
                         padding = padding,
                         undoWindowMillis = undoWindowMillis,
-                        onRecordExpense = { backStack.add(MovementRoute()) },
-                        onEditMovement = { backStack.add(MovementRoute(it.id)) },
-                        onReviewSuggestion = { backStack.add(MovementRoute(suggestionId = it)) },
+                        onRecordExpense = { backStack.add(movementForm()) },
+                        onEditMovement = { backStack.add(movementForm(movementId = it.id)) },
+                        onReviewSuggestion = { backStack.add(movementForm(suggestionId = it)) },
                     )
                     RootScreen.POCKETS -> PocketsScreen(state, ledger, padding, onComparePeriod = ::openComparison)
                     RootScreen.SETTINGS -> SettingsScreen(
