@@ -430,6 +430,7 @@ fun PocketApp(
                 initialMovement = movementBeingEdited,
                 suggestion = suggestion,
                 initialPocketId = movementRoute.pocketId,
+                snackbarHostState = snackbar,
             )
         }
         return
@@ -742,6 +743,7 @@ private fun MovementDialog(
     initialMovement: Movement? = null,
     suggestion: com.aif31.pocket.data.MovementSuggestion? = null,
     initialPocketId: String? = null,
+    snackbarHostState: SnackbarHostState? = null,
 ) {
     ProductionMovementScreen(
         state = state,
@@ -755,6 +757,7 @@ private fun MovementDialog(
         onlineFxEnabled = onlineFxEnabled,
         exchangeRates = exchangeRates,
         initialPocketId = initialPocketId,
+        snackbarHostState = snackbarHostState,
     )
 }
 

@@ -141,7 +141,7 @@ The in-app action and launcher shortcut must open this same route and preserve t
 - Validation appears near the relevant field and is announced accessibly.
 - Advanced fields do not block the common case.
 - Dismissing or navigating back must not accidentally save.
-- Save success is clear and brief; it does not delay the user's return to context.
+- Save success is clear and brief; it does not delay the user's return to context. The confirmation appears on the surface the user returns to, including a Movement form beneath the one that was saved.
 - Pocket choices show availability for the budget period that contains the entered date, in that period's accounting currency. When that is not the current period, the form names the period the figures belong to.
 - The time picker follows the phone's 12- or 24-hour clock setting. The stored time does not depend on it.
 - Existing refund, conversion, date/time, note, and payment behavior remains intact.
@@ -159,7 +159,7 @@ The dashboard should lead naturally to recording an expense and managing a relev
 
 Dashboard values must come from the same domain calculations used elsewhere. The UI must not reimplement financial rules.
 
-Supporting metrics live behind the "Ver detalles" disclosure on the availability card and come from `PeriodInsights`/`PeriodComparison`. Period comparisons use average daily spending so an in-progress period is compared fairly with a closed one. A period in a different accounting currency is converted only through the adjacent frozen boundary rate. Without one, both periods' daily averages are shown side by side, each in its own currency and without a difference. The chart then shows only the chosen period, and the per-Pocket comparison is omitted, because amounts in two currencies cannot share one scale. The detailed comparison is a subordinate "Comparar periodos" route, not a root destination; the same period metrics appear in the Pockets period view, including historical periods.
+Supporting metrics live behind the "Ver detalles" disclosure on the availability card and come from `PeriodInsights`/`PeriodComparison`. Period comparisons use average daily spending so an in-progress period is compared fairly with a closed one. A period in a different accounting currency is converted only through the adjacent frozen boundary rate. Without one, both periods' daily averages are shown side by side, each in its own currency and without a difference, on Inicio's "Ver detalles" as well as in "Comparar periodos". The chart then shows only the chosen period, and the per-Pocket comparison is omitted, because amounts in two currencies cannot share one scale. The detailed comparison is a subordinate "Comparar periodos" route, not a root destination; the same period metrics appear in the Pockets period view, including historical periods.
 
 ### 7.3 Pockets
 

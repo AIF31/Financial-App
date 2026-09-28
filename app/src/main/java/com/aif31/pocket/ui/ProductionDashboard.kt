@@ -324,7 +324,15 @@ private fun HeroDetails(
         val baseline = comparison?.convertedBaseline
         when {
             comparison == null -> Text("Aún no existe un periodo anterior", color = muted)
-            baseline == null -> Text("El periodo anterior usa otra moneda sin un tipo congelado.", color = muted)
+            // No frozen rate links the currencies: the previous pace stays in its own currency, with no difference.
+            baseline == null -> MetricRow(
+                label = "Promedio diario del periodo anterior",
+                value = comparison.baseline.averageDailySpendMinor
+                    ?.let { MoneyText.format(it, comparison.baseline.accountingCurrency) } ?: "—",
+                supporting = "Usa otra moneda sin un tipo congelado; no se calcula la diferencia.",
+                color = onPrimary,
+                supportingColor = muted,
+            )
             else -> MetricRow(
                 label = "Promedio diario del periodo anterior",
                 value = baseline.averageDailySpendMinor?.let(::money) ?: "—",

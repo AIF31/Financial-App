@@ -374,6 +374,9 @@ class PocketQualityOfLifeHostTest {
         compose.waitUntil(5_000) { runBlocking { ledger.state.first() }.movements.any { it.accountingAmountMinor == 500L } }
         compose.waitUntilExactlyOneExists(hasText("Editar movimiento"), 5_000)
         compose.onNodeWithTag("movement_amount").assertTextContains("45.00", substring = true)
+        // The save is confirmed on the edit the user returns to, not only after that edit closes.
+        compose.waitUntilExactlyOneExists(hasText("Gasto guardado"), 5_000)
+        compose.onNodeWithText("Gasto guardado").assertIsDisplayed()
     }
 
     @Test

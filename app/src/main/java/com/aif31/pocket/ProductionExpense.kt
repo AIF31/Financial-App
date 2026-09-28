@@ -68,6 +68,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -131,6 +133,8 @@ internal fun ProductionMovementScreen(
     onlineFxEnabled: Boolean = false,
     exchangeRates: ExchangeRateRepository? = null,
     initialPocketId: String? = null,
+    /** The app's messages, such as a save confirmation, shown while this form covers the root screens. */
+    snackbarHostState: SnackbarHostState? = null,
 ) {
     val stateKey = initialMovement?.id ?: suggestion?.id
     val initialAccountingCurrency = state.periods.firstOrNull { it.id == initialMovement?.periodId }?.accountingCurrency
@@ -307,6 +311,7 @@ internal fun ProductionMovementScreen(
     }
 
     Scaffold(
+        snackbarHost = { snackbarHostState?.let { SnackbarHost(it) } },
         topBar = {
             PocketTopAppBar(
                 title = when {
