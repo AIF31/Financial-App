@@ -6,6 +6,7 @@ Notable repository changes are recorded here for future maintainers.
 
 ### PR #34 review follow-up
 
+- Merged `main` after PR #33 and advanced the development build to `1.0.3` (`versionCode` 4), because PR #33 had already taken `1.0.2`. The notification settings screen keeps PR #33's redesign under the shared top app bar, and PR #33's "open Movements" alert action sits beside the new-expense request counter in `MainActivity`.
 - Pace status counts rollover as period funds. A period funded only by rollover gets a real pace status instead of "Asigna fondos". Negative availability now always reports overspending, even with zero new funds.
 - A "Nuevo gasto" shortcut delivered while an edit or suggestion form is open now opens a new-expense form above it. Closing that form returns to the edit with its unsaved changes. Each Movement form route carries its own instance id, and its draft is kept in the route state holder until the route closes.
 - Period labels always include the year ("25 feb – 24 mar 2026"), so pickers and the period-funds editor distinguish the same dates in different years.
@@ -19,7 +20,19 @@ Notable repository changes are recorded here for future maintainers.
 
 ## 2026-09-27
 
-### Period insights, comparison, and UX quality pass (`1.0.2`, `versionCode` 3)
+### Notification capture: auto-recording, alerts, and settings
+
+- Detected bank payments for a known merchant are now recorded as Movements in that merchant's last Pocket; new merchants and foreign currencies stay in a **Por revisar** inbox. Accepted in [ADR 0002](../docs/adr/0002-auto-record-notification-payments-for-known-merchants.md); `CONTEXT.md` and the [beta spec](../docs/product/NOTIFICATION_ASSISTANCE_BETA.md) are updated.
+- Fixed missed captures from SMS apps: each message in a conversation notification is now parsed and identified separately, so new bank SMS no longer overwrite earlier ones and OTPs no longer hide purchases. The parser now reads SAB-style multi-line and point-of-sale texts, extracts their merchants, rejects credits, and reads a bare `$` as the USD or MXN default currency.
+- Added a heads-up alert for each newly detected payment, which opens Movements when tapped; the lock screen shows only a redacted version.
+- Redesigned **Captura desde notificaciones**: setup checklist, auto-record and alert switches, app search, suggested finance and messaging apps, and selected apps pinned on top, each shown with icon and name. Movements shows a **Detectado** label on auto-recorded Movements.
+- Advanced the development build to `1.0.2` (`versionCode` 3).
+- Follow-up fixes, each covered by a test that failed first: re-posted conversations no longer inflate beta parser counts; `Compra en línea … en OXXO` reads `OXXO` as the merchant; a bank app updating its notification with the same text no longer duplicates the payment; a purchase in a new, not-yet-opened budget period catches up periods and still auto-records; and foreign-currency alerts always ask for the conversion. Review-card times now use the budget zone, matching Movements.
+- Verification: a fresh full host unit run passed 224 tests, and the release and androidTest sources compiled. The flow and each fix except the bank-app update were exercised on the Pixel_10_Pro emulator with synthetic SMS. It was not tested on the physical phone or with real bank messages.
+- PR #33 review fixes: merchant memory now uses only the newest matching expense, and sends the payment to review if that expense's Pocket is archived rather than falling back to an older Pocket. Merchant matching also drops punctuation (`K.F.C` matches `KFC`). Both were test-first. Review hints use the currency of the suggestion's own period. Each app row in settings is a single toggleable checkbox keyed by package; this was checked on the emulator.
+- Known issue: `PocketAppHostFlowTest.restore_confirmation_disables_duplicate_submissions_until_the_result_arrives` failed once (dialog created on a background thread) and then passed three isolated reruns and a full rerun. It is unrelated to this change and is flagged for a separate fix.
+
+### Period insights, comparison, and UX quality pass
 
 - Added `PeriodInsights` and `PeriodComparison` (`data/PeriodInsights.kt`): read-only metrics derived from the ledger's Pocket summaries and Movements — average daily spend, spend available per remaining day, projection, funds used versus period elapsed, cumulative daily spend, largest expense, and per-Pocket averages. Comparisons use average daily spending; a different accounting currency is converted only through the adjacent frozen boundary rate, otherwise the periods are shown side by side without deltas.
 - Inicio: the Disponible card gains a "Ver detalles" disclosure with spend pace and the previous-period daily average, plus a "Comparar periodos" entry. Status wording and icon now reflect overspending and pace; day counts are pluralized. Each Pocket row has a quick "Registrar gasto en …" action that opens the shared quick-entry route with that Pocket preselected.

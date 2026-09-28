@@ -62,7 +62,7 @@ internal enum class SettingsSection(
     ),
     NOTIFICATION_ASSISTANCE(
         "Captura desde notificaciones",
-        "Sugerencias experimentales de apps que tú elijas",
+        "Registra gastos leídos de tu banco o SMS · Experimental",
         Icons.Default.NotificationsActive,
     ),
     PAYMENT_METHODS(

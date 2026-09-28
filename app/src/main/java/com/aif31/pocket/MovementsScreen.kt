@@ -1,5 +1,6 @@
 package com.aif31.pocket
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,11 +24,15 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -59,6 +64,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -73,7 +79,12 @@ import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.Movement
+import com.aif31.pocket.data.MovementSuggestion
 import com.aif31.pocket.data.MovementType
+import com.aif31.pocket.notifications.ReviewReason
+import com.aif31.pocket.notifications.appLabel
+import com.aif31.pocket.notifications.isAutoRecordedMovement
+import com.aif31.pocket.notifications.reviewHint
 import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.data.PocketLedger
 import com.aif31.pocket.data.netSpendMinor
@@ -158,21 +169,46 @@ internal fun MovementsScreen(
             Text("Movimientos", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { heading() })
         }
         if (state.movementSuggestions.isNotEmpty()) {
-            item { Text("Sugerencias para revisar · Experimental", style = MaterialTheme.typography.titleMedium) }
-            items(state.movementSuggestions, key = { "suggestion-${it.id}" }) { suggestion ->
-                Card(onClick = { onReviewSuggestion(suggestion.id) }, modifier = Modifier.fillMaxWidth().testTag("movement_suggestion")) {
-                    Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column(Modifier.weight(1f)) {
-                            Text(suggestion.merchant ?: "Pago detectado")
-                            Text(suggestion.sourcePackage, style = MaterialTheme.typography.bodySmall)
-                        }
-                        Text(MoneyText.format(suggestion.amountMinor, suggestion.currency), fontFamily = FontFamily.Monospace)
-                    }
-                    Row(Modifier.padding(horizontal = 8.dp)) {
-                        TextButton(onClick = { onReviewSuggestion(suggestion.id) }) { Text("Revisar") }
-                        TextButton(onClick = { scope.launch { ledger.execute(LedgerCommand.RejectSuggestion(suggestion.id)) } }) { Text("Descartar") }
+            item(key = "suggestions-header") {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Por revisar", style = MaterialTheme.typography.titleMedium)
+                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.tertiary) {
+                        Text(
+                            state.movementSuggestions.size.toString(),
+                            color = MaterialTheme.colorScheme.onTertiary,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        )
                     }
                 }
+                Text(
+                    "Gastos leídos de tus notificaciones que necesitan un Pocket o una conversión.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            items(state.movementSuggestions, key = { "suggestion-${it.id}" }) { suggestion ->
+                SuggestionCard(
+                    suggestion = suggestion,
+                    // The payment's own period decides whether it needs a conversion, not the current one.
+                    accountingCurrency = Instant.ofEpochMilli(suggestion.effectiveAtUtcMillis)
+                        .atZone(BUDGET_ZONE).toLocalDate()
+                        .let { date -> state.periods.firstOrNull { !date.isBefore(it.start) && date.isBefore(it.endExclusive) } }
+                        ?.accountingCurrency ?: state.currentPeriod?.accountingCurrency,
+                    today = state.currentLocalDate,
+                    onReview = { onReviewSuggestion(suggestion.id) },
+                    onDiscard = {
+                        scope.launch {
+                            if (ledger.execute(LedgerCommand.RejectSuggestion(suggestion.id)) == LedgerResult.Success) {
+                                snackbar.showSnackbar("Sugerencia descartada")
+                            }
+                        }
+                    },
+                )
             }
         }
         item {
@@ -363,6 +399,67 @@ private fun SwipeToDeleteMovement(
 }
 
 @Composable
+private fun SuggestionCard(
+    suggestion: MovementSuggestion,
+    accountingCurrency: SupportedCurrency?,
+    today: LocalDate,
+    onReview: () -> Unit,
+    onDiscard: () -> Unit,
+) {
+    val context = LocalContext.current
+    val source = remember(suggestion.sourcePackage) { appLabel(context, suggestion.sourcePackage) }
+    val detectedAt = Instant.ofEpochMilli(suggestion.effectiveAtUtcMillis).atZone(BUDGET_ZONE)
+    val hint = if (accountingCurrency != null && suggestion.currency != accountingCurrency) {
+        reviewHint(ReviewReason.FOREIGN_CURRENCY)
+    } else {
+        reviewHint(ReviewReason.NEW_MERCHANT)
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth().testTag("movement_suggestion").clickable(onClick = onReview),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surface, modifier = Modifier.size(44.dp)) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
+                }
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    suggestion.merchant ?: "Comercio sin identificar",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                Text(
+                    "$source · ${formatMovementDate(detectedAt.toLocalDate(), today)} " +
+                        detectedAt.format(DateTimeFormatter.ofPattern("HH:mm")),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+            }
+            Text(
+                "- " + MoneyText.format(suggestion.amountMinor, suggestion.currency),
+                style = MaterialTheme.typography.titleMedium,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            TextButton(onClick = onDiscard, modifier = Modifier.testTag("discard_suggestion")) { Text("Descartar") }
+            FilledTonalButton(onClick = onReview, modifier = Modifier.testTag("review_suggestion")) { Text("Revisar") }
+        }
+    }
+}
+
+@Composable
 private fun MovementCard(
     movement: Movement,
     accountingCurrency: SupportedCurrency,
@@ -440,7 +537,26 @@ private fun MovementCard(
                         color = MaterialTheme.colorScheme.primaryContainer,
                         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     ) {
-                        Text("Devolución", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            val detected = !isRefund && isAutoRecordedMovement(movement.id)
+                            Icon(
+                                if (detected) Icons.Default.NotificationsActive else Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Text(
+                                when {
+                                    isRefund -> "Devolución"
+                                    detected -> "Detectado"
+                                    else -> "Confirmado"
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
                     }
                 }
                 Text(time, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
@@ -554,3 +670,9 @@ private fun formatMovementDate(date: LocalDate, today: LocalDate): String {
         else -> formatted.replaceFirstChar { it.titlecase(Locale.forLanguageTag("es")) }
     }
 }
+
+
+private fun minorNumber(minor: Long): String = MoneyText.grouped(minor)
+
+/** Same budget zone the expense form stores, so suggestion times and periods match the Movement they become. */
+private val BUDGET_ZONE: ZoneId = ZoneId.of("Asia/Riyadh")

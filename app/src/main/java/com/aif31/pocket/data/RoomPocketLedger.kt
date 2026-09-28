@@ -440,7 +440,9 @@ class RoomPocketLedger(
                 createOnly = command.submissionId != null,
             ))
             if (movementResult == LedgerResult.Success) {
-                dao.putMovementSuggestion(suggestion.asTombstone("CONFIRMED"))
+                dao.putMovementSuggestion(suggestion.asTombstone(if (command.automatic) "AUTO_RECORDED" else "CONFIRMED"))
+                // Automatic records carry no human correction signal, so they stay out of beta metrics.
+                if (command.automatic) return@withTransaction movementResult
                 val confirmedAmount = command.movement.originalAmountMinor ?: command.movement.accountingAmountMinor
                 corrections = (confirmedAmount != suggestion.amountMinor) to
                     (command.movement.originalCurrencyCode != suggestion.currencyCode)

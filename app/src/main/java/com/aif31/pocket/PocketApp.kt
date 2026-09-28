@@ -157,6 +157,7 @@ fun PocketApp(
     onPickBackup: () -> Unit = {},
     onRequestNotificationPermission: () -> Unit = {},
     notificationPermissionRevision: Int = 0,
+    openMovementsRevision: Int = 0,
     onSuccessfulRestore: () -> Unit = {},
     onRestoreCompleted: (String) -> Unit = {},
     undoWindowMillis: Long = 5_000,
@@ -369,6 +370,10 @@ fun PocketApp(
 
     fun openComparison(periodId: String) {
         backStack.add(ComparisonRoute(periodId, PeriodComparison.previousPeriodId(state, periodId)))
+    }
+
+    LaunchedEffect(openMovementsRevision) {
+        if (openMovementsRevision > 0) navigateRoot(RootScreen.MOVEMENTS)
     }
 
     var handledNewExpenseRequest by rememberSaveable { mutableIntStateOf(0) }

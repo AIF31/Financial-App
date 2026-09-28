@@ -37,7 +37,7 @@ Positive availability carried from an opted-in Pocket into the next period. Nega
 _Avoid_: Funds, income
 
 **Movement**:
-A manually recorded expense or refund assigned to one Pocket and one budget period. Expenses increase net spending; refunds reduce it.
+An expense or refund assigned to one Pocket and one budget period. Expenses increase net spending; refunds reduce it. The person records it, or Pocket auto-records a notification payment for a known merchant (see ADR 0002).
 _Avoid_: Transaction import, transfer
 
 **Payment method**:
@@ -61,8 +61,16 @@ An explicit accounting adjustment that moves positive rollover from a Pocket bei
 _Avoid_: Income, refund, discarded rollover
 
 **Movement suggestion**:
-A normalized, temporary candidate derived from an allowed app's notification. It becomes a Movement only after confirmation, never stores raw notification text, and expires after 30 days while pending.
-_Avoid_: Imported transaction, automatic Movement
+A normalized, temporary candidate derived from one message in an allowed app's notification. It becomes a Movement after confirmation or through auto-recording, never stores raw notification text, and expires after 30 days while pending.
+_Avoid_: Imported transaction
+
+**Auto-recording**:
+Turning a Movement suggestion into a Movement without review, only when its merchant's most recent expense sits in an active Pocket and its currency equals the period's accounting currency. Anything else stays a suggestion.
+_Avoid_: Bank sync, automatic categorization
+
+**Merchant memory**:
+The Pocket of the most recent expense whose merchant matches after ignoring case and punctuation. It is derived from existing Movements and is not stored separately.
+_Avoid_: Rule, category mapping
 
 **Experimental notification parser**:
 An opt-in beta parser for English and Spanish notifications from user-selected apps. It is generic, is tested with synthetic notifications, and makes no claim of supporting a particular bank.
