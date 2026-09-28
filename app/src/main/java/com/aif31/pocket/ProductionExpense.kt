@@ -1,8 +1,10 @@
 package com.aif31.pocket
 
+import android.text.format.DateFormat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
@@ -531,6 +533,9 @@ internal fun ProductionMovementScreen(
                     Text("Fecha y hora", style = MaterialTheme.typography.titleMedium)
                     val today = state.currentLocalDate
                     val parsedDate = runCatching { LocalDate.parse(localDate) }.getOrNull()
+                    val parsedTime = runCatching { LocalTime.parse(localTime) }.getOrNull()
+                    // The field is typed as HH:mm; on a 12-hour phone, the time is echoed in the phone's format.
+                    val twelveHourTime = parsedTime?.takeUnless { DateFormat.is24HourFormat(LocalContext.current) }
                     SingleChoiceChips(
                         options = listOf(ChoiceOption(today, "Hoy"), ChoiceOption(today.minusDays(1), "Ayer")),
                         selected = parsedDate,
@@ -556,6 +561,7 @@ internal fun ProductionMovementScreen(
                         value = localTime,
                         onValueChange = { localTime = it },
                         label = { Text("Hora (HH:mm)") },
+                        supportingText = twelveHourTime?.let { { Text(it.format(twelveHourClock)) } },
                         singleLine = true,
                         trailingIcon = {
                             IconButton(onClick = { timePickerVisible = true }) {
@@ -596,6 +602,7 @@ internal fun ProductionMovementScreen(
 }
 
 private val longDate = DateTimeFormatter.ofPattern("EEEE d 'de' MMMM yyyy", Locale.forLanguageTag("es"))
+private val twelveHourClock = DateTimeFormatter.ofPattern("h:mm a", Locale.forLanguageTag("es"))
 
 /** Radio-style Pocket card: artwork, name, and current availability, with selected semantics. */
 @Composable
