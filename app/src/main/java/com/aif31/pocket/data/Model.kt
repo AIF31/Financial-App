@@ -198,7 +198,13 @@ sealed interface LedgerCommand {
         val accountingCurrency: SupportedCurrency? = null,
         val createOnly: Boolean = false,
     ) : LedgerCommand
-    data class ConfirmSuggestion(val suggestionId: String, val movement: AddMovement, val submissionId: String? = null) : LedgerCommand
+    data class ConfirmSuggestion(
+        val suggestionId: String,
+        val movement: AddMovement,
+        val submissionId: String? = null,
+        /** Recorded by notification auto-recording rather than a person reviewing the form. */
+        val automatic: Boolean = false,
+    ) : LedgerCommand
     data class RejectSuggestion(val suggestionId: String) : LedgerCommand
     data class DeleteMovement(val movementId: String) : LedgerCommand
     data class RestoreMovement(val movement: Movement) : LedgerCommand

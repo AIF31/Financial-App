@@ -35,6 +35,7 @@ class MainActivity : ComponentActivity() {
     private val recovery by viewModels<RecoveryViewModel>()
     private lateinit var dateCoordinator: ForegroundDateCoordinator
     private var notificationPermissionRevision by mutableIntStateOf(0)
+    private var openMovementsRevision by mutableIntStateOf(0)
 
     private val createBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri == null) {
@@ -103,6 +104,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         val openExpense = intent?.action == ACTION_NEW_EXPENSE
+        if (savedInstanceState == null && intent?.action == ACTION_OPEN_MOVEMENTS) openMovementsRevision++
         setContent {
             PocketTheme {
                 PocketApp(
@@ -131,9 +133,16 @@ class MainActivity : ComponentActivity() {
                         if (android.os.Build.VERSION.SDK_INT >= 33) requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                     },
                     notificationPermissionRevision = notificationPermissionRevision,
+                    openMovementsRevision = openMovementsRevision,
                 )
             }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == ACTION_OPEN_MOVEMENTS) openMovementsRevision++
     }
 
     private suspend fun catchUpPeriods(): Boolean {
@@ -247,6 +256,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val ACTION_NEW_EXPENSE = "com.aif31.pocket.NEW_EXPENSE"
+        const val ACTION_OPEN_MOVEMENTS = "com.aif31.pocket.OPEN_MOVEMENTS"
         private const val MAX_BACKUP_BYTES = 10 * 1024 * 1024
     }
 }
