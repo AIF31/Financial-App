@@ -6,11 +6,11 @@ Pocket is a local-first Android app for one person to budget declared funds acro
 
 Pocket supports Android 8.0 (API 26) and newer.
 
-**[Download Pocket 1.0.0 for Android](https://github.com/AIF31/Financial-App/releases/download/v1.0.0/Pocket-v1.0.0.apk)**
+**[Download Pocket 1.0.5 for Android](https://github.com/AIF31/Financial-App/releases/download/v1.0.5/Pocket-v1.0.5.apk)**
 
 This is the latest published APK. The source on `main` can include changes that have not been released yet.
 
-1. Open the download link on the Android device and save `Pocket-v1.0.0.apk`.
+1. Open the download link on the Android device and save `Pocket-v1.0.5.apk`.
 2. Open the downloaded APK from the browser notification or the device's **Downloads** folder.
 3. If prompted, allow that browser or file manager to **Install unknown apps**, then return to the installer.
 4. Tap **Install**, then **Open**.

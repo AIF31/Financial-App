@@ -51,7 +51,7 @@ Use synthetic values and generic labels in all manual checks:
 
 - Packaged manifest permits network access for opt-in exchange-rate lookup and disables cleartext traffic.
 - `android:allowBackup="false"`; backup and restore use the app's explicit document flow.
-- The launcher activity is the only app-owned exported component.
+- The launcher activity is the only app-owned exported activity. The notification listener service is exported only to the system through `BIND_NOTIFICATION_LISTENER_SERVICE`.
 - Exported WorkManager/ProfileInstaller components are guarded by system-only `BIND_JOB_SERVICE` or `DUMP` permissions.
 - Internal providers, services, and receivers are non-exported.
 - The reminder notification uses an explicit immutable `PendingIntent` and private lock-screen visibility.
