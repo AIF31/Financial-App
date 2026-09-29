@@ -2,6 +2,18 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-09-29
+
+### PR #34 review follow-up fixes
+
+Fixes for the five findings of the review at `74a214b`, which were still open when PR #34 merged. The [2026-09-29 audit](../docs/audits/2026-09-29-pr34-review.md) records each finding, its fix and its test. The development build advances to `1.0.4` (`versionCode` 5).
+
+- Auto-recorded expenses in the Movement's own currency show the **Detectado** badge in Movements again. PR #34 had limited the badge to refunds, which made the check unreachable. Refunds keep **Devolución**, and ordinary manual expenses stay unlabelled.
+- In "Comparar periodos", each Pocket's daily average for an in-progress period counts only spending dated through today, like the headline pace. The same applies when the in-progress period is the baseline. Net spend totals still include later-dated Movements.
+- Budget used and the comparison's percentage change are computed with `PocketMath.percent`, the checked calculation the Pocket summary already used. Previously, amounts above about 9.2 × 10¹⁶ minor units wrapped around and gave wrong percentages. A percentage too large to represent is not shown.
+- `Info/UI-UX-Design-Philosophy.md` section 6 now describes the launcher shortcut exactly. An edit or suggestion form gets a new-expense form stacked above it; an already open new-expense form is reused with its draft.
+- The dated audits for PR #34's review rounds, `docs/audits/2026-09-28-pr34-review.md` and `docs/audits/2026-09-29-pr34-review.md`, are now committed with the resolution of every finding. The 2026-09-28 changelog entry cited the first audit before it was in the repository.
+
 ## 2026-09-28
 
 ### PR #34 physical-device test
