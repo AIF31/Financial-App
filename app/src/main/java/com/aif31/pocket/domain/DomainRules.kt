@@ -164,17 +164,11 @@ object PocketMath {
         val availableBudget = Math.addExact(budgetMinor, rolloverMinor)
         val netSpend = Math.subtractExact(expensesMinor, refundsMinor)
         val availability = Math.subtractExact(availableBudget, netSpend)
-        val consumed = when {
-            availableBudget == 0L && netSpend <= 0L -> BigInteger.ZERO
-            availableBudget == 0L -> BigInteger.valueOf(100)
-            else -> BigInteger.valueOf(netSpend)
-                .multiply(BigInteger.valueOf(100))
-                .divide(BigInteger.valueOf(availableBudget))
+        val consumedPercent = when {
+            availableBudget == 0L && netSpend <= 0L -> 0
+            availableBudget == 0L -> 100
+            else -> requireNotNull(percent(netSpend, availableBudget)) { "El porcentaje supera el rango admitido" }
         }
-        require(consumed in BigInteger.valueOf(Int.MIN_VALUE.toLong())..BigInteger.valueOf(Int.MAX_VALUE.toLong())) {
-            "El porcentaje supera el rango admitido"
-        }
-        val consumedPercent = consumed.toInt()
         return PocketSummary(
             budgetMinor = budgetMinor,
             rolloverMinor = rolloverMinor,
@@ -184,6 +178,18 @@ object PocketMath {
             atRisk = consumedPercent >= 80,
             exhausted = consumedPercent >= 100,
         )
+    }
+
+    /**
+     * [partMinor] as a whole percentage of [wholeMinor], truncated toward zero. Computed without overflow for any
+     * amounts; null when the percentage itself does not fit an [Int].
+     */
+    fun percent(partMinor: Long, wholeMinor: Long): Int? {
+        require(wholeMinor > 0)
+        val percent = BigInteger.valueOf(partMinor)
+            .multiply(BigInteger.valueOf(100))
+            .divide(BigInteger.valueOf(wholeMinor))
+        return runCatching { percent.intValueExact() }.getOrNull()
     }
 
     fun rollover(allocatedMinor: Long, netSpendMinor: Long, enabled: Boolean): Long =

@@ -106,7 +106,7 @@ data class PeriodInsights(
                 averageDailySpendMinor = elapsedDays.takeIf { it > 0 }?.let { netSpendThroughToday / it },
                 safeDailySpendMinor = if (inProgress && availability > 0) availability / (remainingDays + 1) else null,
                 projectedSpendMinor = projected,
-                budgetUsedPercent = availableBudget.takeIf { it > 0 }?.let { (netSpend * 100 / it).toInt() },
+                budgetUsedPercent = availableBudget.takeIf { it > 0 }?.let { PocketMath.percent(netSpend, it) },
                 periodElapsedPercent = if (totalDays == 0) 0 else elapsedDays * 100 / totalDays,
                 paceStatus = when {
                     availability < 0L -> SpendPaceStatus.OVERSPENT
@@ -214,7 +214,7 @@ data class PeriodComparison(
             if (current != null && baseline != null) Math.subtractExact(current, baseline) else null
 
         private fun percentOf(delta: Long?, base: Long?): Int? =
-            if (delta != null && base != null && base > 0) (delta * 100 / base).toInt() else null
+            if (delta != null && base != null && base > 0) PocketMath.percent(delta, base) else null
 
         private fun conversion(state: LedgerState, current: Period, baseline: Period): ((Long) -> Long)? {
             if (current.accountingCurrency == baseline.accountingCurrency) return { it }

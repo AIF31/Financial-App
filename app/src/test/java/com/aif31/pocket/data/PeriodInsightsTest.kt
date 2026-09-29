@@ -55,6 +55,18 @@ class PeriodInsightsTest {
     }
 
     @Test
+    fun budget_used_stays_exact_for_amounts_whose_hundredfold_exceeds_a_long() {
+        // 5 × 10¹⁷ of 10¹⁸ minor units: valid amounts, but 5 × 10¹⁷ × 100 does not fit in a Long.
+        val state = state(
+            today = LocalDate.of(2026, 3, 5),
+            elapsedDays = 9,
+            summaries = mapOf(march.id to listOf(summary(market, budget = 1_000_000_000_000_000_000, expense = 500_000_000_000_000_000))),
+        )
+
+        assertEquals(50, PeriodInsights.of(state, march.id)!!.budgetUsedPercent)
+    }
+
+    @Test
     fun pace_status_reports_overspending_and_projection_above_new_funds() {
         val overspent = state(
             today = LocalDate.of(2026, 3, 5),
@@ -270,6 +282,24 @@ class PeriodInsightsTest {
         assertEquals(100L, rows.getValue("travel").baselineAverageDailyMinor)
         assertEquals(-100, rows.getValue("travel").averageDailyDeltaPercent)
         assertEquals(listOf("market", "travel"), comparison.pockets.map { it.pocket.id })
+    }
+
+    @Test
+    fun comparison_percentages_stay_exact_for_amounts_whose_hundredfold_exceeds_a_long() {
+        // 2 × 10¹⁷ a day over 9 days against 10¹⁶ a day over February's 31: a 1,900% rise.
+        val state = state(
+            today = LocalDate.of(2026, 3, 5),
+            elapsedDays = 9,
+            summaries = mapOf(
+                march.id to listOf(summary(market, budget = 2_000_000_000_000_000_000, expense = 1_800_000_000_000_000_000)),
+                february.id to listOf(summary(market, budget = 2_000_000_000_000_000_000, expense = 310_000_000_000_000_000)),
+            ),
+        )
+
+        val comparison = PeriodComparison.of(state, march.id, february.id)!!
+
+        assertEquals(1_900, comparison.convertedBaseline!!.averageDailyDeltaPercent)
+        assertEquals(1_900, comparison.pockets.single().averageDailyDeltaPercent)
     }
 
     @Test
