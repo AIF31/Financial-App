@@ -1,11 +1,23 @@
 package com.aif31.pocket
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Insights
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -18,9 +30,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -30,14 +44,16 @@ import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.domain.sumMoneyExact
 import com.aif31.pocket.settings.*
 import com.aif31.pocket.ui.*
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: PaddingValues) {
+internal fun PocketsScreen(
+    state: LedgerState,
+    ledger: PocketLedger,
+    padding: PaddingValues,
+    onComparePeriod: (periodId: String) -> Unit = {},
+) {
     var selected by remember { mutableStateOf<PocketPeriodSummary?>(null) }
     var selectedPeriodId by rememberSaveable(state.currentPeriod?.id) { mutableStateOf(state.currentPeriod?.id) }
     var editing by remember { mutableStateOf<PocketPeriodSummary?>(null) }
@@ -102,30 +118,41 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
             }
         }
         item {
+            val periodListState = rememberLazyListState(
+                initialFirstVisibleItemIndex = state.periods.indexOfFirst { it.id == selectedPeriodId }.coerceAtLeast(0),
+            )
             LazyRow(
+                state = periodListState,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.testTag("period_selector"),
             ) {
                 items(state.periods, key = { it.id }) { period ->
+                    val isSelected = selectedPeriodId == period.id
                     Surface(
                         shape = MaterialTheme.shapes.extraLarge,
-                        color = if (selectedPeriodId == period.id) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainer
-                        },
+                        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                        contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                        border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                         modifier = Modifier
                             .testTag("period_${period.id}")
-                            .clickable { selectedPeriodId = period.id },
+                            .clip(MaterialTheme.shapes.extraLarge)
+                            .selectable(selected = isSelected, role = Role.Tab) { selectedPeriodId = period.id },
                     ) {
                         Column(
                             modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
                             Text(
-                                formatPeriodRange(period.start, period.endExclusive.minusDays(1)),
-                                color = MaterialTheme.colorScheme.primary,
+                                formatPeriodRange(period.start, period.endExclusive),
                                 style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                listOfNotNull(
+                                    "Actual".takeIf { period.id == state.currentPeriod?.id },
+                                    period.accountingCurrency.name,
+                                ).joinToString(" · "),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             if (period.isTransition) {
                                 Text(
@@ -159,6 +186,14 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
                         "${money(unallocatedForPeriodMinor)} sin asignar",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    selectedPeriod?.let { period ->
+                        PeriodDetailsSection(
+                            state = state,
+                            periodId = period.id,
+                            initiallyExpanded = isHistorical,
+                            onCompare = { onComparePeriod(period.id) },
+                        )
+                    }
                 }
             }
         }
@@ -188,36 +223,42 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
             }
         }
         items(activePockets, key = { it.pocket.id }) { summary ->
-            val statusText = when {
-                summary.exhausted -> "Agotado"
-                summary.atRisk -> "En riesgo"
-                summary.budgetMinor <= 0L -> "Sin presupuesto"
-                else -> "En buen ritmo"
-            }
-            val statusColor = when {
-                summary.exhausted -> MaterialTheme.colorScheme.error
-                summary.atRisk || summary.budgetMinor <= 0L -> MaterialTheme.colorScheme.tertiary
-                else -> MaterialTheme.colorScheme.primary
-            }
+            val status = summary.budgetStatus
+            val presentation = status.presentation()
+            val statusColor = presentation.indicator
+            val available = availableText(summary.availabilityMinor, selectedCurrency)
+            val budget = "Presupuesto ${money(summary.budgetMinor)}"
+            // The card's label already says all of this; exposing the pieces too would make screen readers repeat it.
+            val coveredByLabel = Modifier.semantics { hideFromAccessibility() }
             Card(
                 Modifier
                     .fillMaxWidth()
                     .testTag("pocket_${summary.pocket.name}")
-                    .clickable { selected = summary },
+                    .clickable { selected = summary }
+                    // A card scrolled partly out of view exposes only its visible children, so it carries its own label.
+                    .semantics {
+                        contentDescription = listOf(
+                            summary.pocket.name,
+                            available.text,
+                            "${summary.consumedPercent}% consumido",
+                            budget,
+                            presentation.label,
+                        ).joinToString(". ")
+                    },
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.Top,
                 ) {
-                    PocketGlyph(summary.pocket.iconKey)
+                    PocketArtworkPlate(summary.pocket.iconKey, plateSize = 56.dp)
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                            Text(summary.pocket.name, style = MaterialTheme.typography.titleMedium, modifier = coveredByLabel.weight(1f))
                             if (!isHistorical) {
                                 IconButton(
                                     onClick = { selected = summary },
@@ -228,10 +269,10 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
                             }
                         }
                         Text(
-                            "${money(summary.availabilityMinor)} disponibles",
-                            color = statusColor,
+                            available,
+                            color = if (summary.availabilityMinor < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.titleMedium,
-                            fontFamily = FontFamily.Monospace,
+                            modifier = coveredByLabel,
                         )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -240,10 +281,12 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
                         ) {
                             LinearProgressIndicator(
                                 progress = { (summary.consumedPercent / 100f).coerceIn(0f, 1f) },
-                                modifier = Modifier.weight(1f).height(6.dp),
+                                modifier = coveredByLabel.weight(1f).height(6.dp),
                                 color = statusColor,
+                                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                drawStopIndicator = {},
                             )
-                            Text("${summary.consumedPercent}%", color = statusColor)
+                            Text("${summary.consumedPercent}%", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = coveredByLabel)
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -251,25 +294,12 @@ internal fun PocketsScreen(state: LedgerState, ledger: PocketLedger, padding: Pa
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                "Presupuesto ${money(summary.budgetMinor)}",
+                                budget,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.bodySmall,
+                                modifier = coveredByLabel,
                             )
-                            Surface(
-                                shape = MaterialTheme.shapes.extraLarge,
-                                color = if (summary.budgetMinor <= 0L) {
-                                    MaterialTheme.colorScheme.tertiaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.primaryContainer
-                                },
-                            ) {
-                                Text(
-                                    statusText,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    color = statusColor,
-                                    style = MaterialTheme.typography.labelMedium,
-                                )
-                            }
+                            PocketStatusBadge(status, coveredByLabel)
                         }
                     }
                 }
@@ -346,21 +376,80 @@ private fun PocketSummaryMetric(label: String, value: String, modifier: Modifier
 }
 
 @Composable
-private fun PocketGlyph(iconKey: PocketIconKey) {
-    Surface(
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        modifier = Modifier.size(56.dp),
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            PocketArtwork(iconKey, contentDescription = null, modifier = Modifier.size(46.dp))
+private fun PeriodDetailsSection(
+    state: LedgerState,
+    periodId: String,
+    initiallyExpanded: Boolean,
+    onCompare: () -> Unit,
+) {
+    var expanded by rememberSaveable(periodId) { mutableStateOf(initiallyExpanded) }
+    val insights = remember(state, periodId) { PeriodInsights.of(state, periodId) } ?: return
+    val comparison = remember(state, periodId) {
+        PeriodComparison.previousPeriodId(state, periodId)?.let { PeriodComparison.of(state, periodId, it) }
+    }
+    val currency = insights.accountingCurrency
+    fun money(minor: Long) = MoneyText.format(minor, currency)
+    Column(Modifier.fillMaxWidth()) {
+        HorizontalDivider()
+        DisclosureRow(
+            expanded = expanded,
+            onExpandedChange = { expanded = it },
+            label = if (expanded) "Ocultar detalles del periodo" else "Ver detalles del periodo",
+        )
+        AnimatedVisibility(visible = expanded, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                MetricRow("Fondos nuevos", money(insights.newFundsMinor))
+                MetricRow(
+                    "Gasto neto",
+                    money(insights.netSpendMinor),
+                    supporting = "${insights.expenseCount} gastos · ${money(insights.refundMinor)} en devoluciones",
+                )
+                SpendPaceMetrics(insights)
+                insights.largestExpense?.let { movement ->
+                    MetricRow("Mayor gasto", money(movement.accountingAmountMinor), supporting = movement.merchantOrPocket)
+                }
+                val baseline = comparison?.convertedBaseline
+                when {
+                    comparison == null -> ComparisonNote("No hay un periodo anterior para comparar.")
+                    baseline == null -> ComparisonNote("El periodo anterior usa otra moneda sin un tipo congelado; ábrelo en Comparar para verlos por separado.")
+                    else -> MetricRow(
+                        "Frente al periodo anterior",
+                        baseline.averageDailySpendMinor?.let { "${money(it)}/día" } ?: "—",
+                        supporting = baseline.averageDailyDeltaMinor?.let { spendDeltaText(it, baseline.averageDailyDeltaPercent, currency) },
+                    )
+                }
+                if (insights.elapsedDays > 0) {
+                    CumulativeSpendChart(
+                        current = insights.cumulativeNetSpendByDayMinor,
+                        baseline = baseline?.cumulativeNetSpendByDayMinor,
+                        totalDays = insights.totalDays,
+                        availableBudgetMinor = insights.availableBudgetMinor,
+                        currency = currency,
+                        currentLabel = "Este periodo",
+                        footnote = insights.chartCutoffNote(),
+                    )
+                }
+                // Any other period can be chosen on the comparison screen, even without a predecessor.
+                if (state.periods.size > 1) {
+                    OutlinedButton(onClick = onCompare, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                        Icon(Icons.Default.Insights, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.size(8.dp))
+                        Text("Comparar periodos")
+                    }
+                }
+            }
         }
     }
 }
 
-private fun formatPeriodRange(start: java.time.LocalDate, end: java.time.LocalDate): String {
-    val formatter = DateTimeFormatter.ofPattern("d MMM", Locale.forLanguageTag("es"))
-    return "${start.format(formatter)} – ${end.format(formatter)}"
+@Composable
+private fun ComparisonNote(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(vertical = 6.dp),
+    )
 }
 
 @Composable
@@ -384,6 +473,7 @@ private fun PocketEditorDialog(
                     onValueChange = { name = it },
                     label = { Text("Nombre") },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     modifier = Modifier.fillMaxWidth().testTag("pocket_name"),
                 )
                 Text("Elige un icono", style = MaterialTheme.typography.titleSmall)
@@ -408,7 +498,7 @@ private fun PocketEditorDialog(
                                     containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
                                 ),
                             ) {
-                                PocketArtwork(option.key, contentDescription = null, modifier = Modifier.size(48.dp))
+                                PocketArtworkPlate(option.key, plateSize = 52.dp, selected = isSelected)
                             }
                         }
                     }
@@ -523,11 +613,19 @@ private fun PocketManagementDialog(
                     TextButton(
                         onClick = { scope.launch { ledger.execute(LedgerCommand.MovePocket(summary.pocket.id, -1)) } },
                         modifier = Modifier.semantics { contentDescription = "Mover ${summary.pocket.name} arriba" },
-                    ) { Text("Subir") }
+                    ) {
+                        Icon(Icons.Default.ArrowUpward, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.size(4.dp))
+                        Text("Subir")
+                    }
                     TextButton(
                         onClick = { scope.launch { ledger.execute(LedgerCommand.MovePocket(summary.pocket.id, 1)) } },
                         modifier = Modifier.semantics { contentDescription = "Mover ${summary.pocket.name} abajo" },
-                    ) { Text("Bajar") }
+                    ) {
+                        Icon(Icons.Default.ArrowDownward, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.size(4.dp))
+                        Text("Bajar")
+                    }
                 }
                 OutlinedButton(onClick = onEdit, modifier = Modifier.fillMaxWidth()) { Text("Editar Pocket") }
                 if (confirmingArchive) {

@@ -6,8 +6,12 @@ import android.provider.Settings
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -101,6 +105,24 @@ class NotificationAssistanceSettingsTest {
 
         compose.onNodeWithText("Acceso a notificaciones no concedido").assertIsDisplayed()
         assertEquals(ledgerBeforeRevocation, runBlocking { Triple(dao.periods(), dao.pockets(), dao.movements()) })
+    }
+
+    @Test fun with_no_source_app_chosen_the_setup_step_jumps_to_the_app_search() {
+        compose.setContent {
+            NotificationAssistanceSettings(
+                preferences = AppPreferences(),
+                preferencesStore = null,
+                padding = PaddingValues(),
+                onBack = {},
+            )
+        }
+        compose.onNodeWithText("Ninguna app seleccionada").assertIsDisplayed()
+        // The search field sits below the setup and behaviour cards, out of view on a phone screen.
+        compose.onNodeWithTag("notification_app_search").assertIsNotDisplayed()
+
+        compose.onNodeWithText("Elegir apps").performClick()
+
+        compose.onNodeWithTag("notification_app_search").assertIsDisplayed().assertIsFocused()
     }
 
     private class TestLifecycleOwner : LifecycleOwner {

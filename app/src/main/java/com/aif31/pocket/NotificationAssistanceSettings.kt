@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -36,7 +37,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -48,6 +48,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -67,6 +69,8 @@ import com.aif31.pocket.notifications.NotificationBetaMetricsSnapshot
 import com.aif31.pocket.notifications.appLabel
 import com.aif31.pocket.settings.AppPreferences
 import com.aif31.pocket.settings.PreferencesStore
+import com.aif31.pocket.ui.PocketTopAppBar
+import androidx.compose.foundation.layout.WindowInsets
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -178,147 +182,165 @@ internal fun NotificationAssistanceSettings(
         }
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(padding),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item {
-            TextButton(onClick = onBack) { Text("Atrás") }
-            Text("Captura desde notificaciones", style = MaterialTheme.typography.headlineMedium)
-            Text(
-                "Pocket lee los avisos de pago de las apps que elijas y registra el gasto por ti. " +
-                    "Experimental · inglés y español · SAR, USD y MXN.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Configuración", style = MaterialTheme.typography.titleMedium)
-                    SetupStep(
-                        done = accessGranted,
-                        title = if (accessGranted) "Acceso a notificaciones concedido" else "Acceso a notificaciones no concedido",
-                        detail = "Android te pedirá activar Pocket en la lista de acceso a notificaciones.",
-                        action = if (accessGranted) "Administrar acceso" else "Conceder acceso",
-                        onAction = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
-                    )
-                    HorizontalDivider()
-                    SetupStep(
-                        done = selectedPackages.isNotEmpty(),
-                        title = when (selectedPackages.size) {
-                            0 -> "Ninguna app seleccionada"
-                            1 -> "1 app seleccionada"
-                            else -> "${selectedPackages.size} apps seleccionadas"
-                        },
-                        detail = "Elige tu banco o, si recibes SMS del banco, tu app de mensajes.",
-                    )
-                    HorizontalDivider()
-                    SetupStep(
-                        done = alertsAllowed || !preferences.notificationDetectionAlerts,
-                        title = if (alertsAllowed) "Avisos de Pocket permitidos" else "Avisos de Pocket bloqueados",
-                        detail = "Necesarios para ver el aviso emergente cuando se detecta un gasto.",
-                        action = if (alertsAllowed) null else "Permitir avisos",
-                        onAction = {
-                            if (android.os.Build.VERSION.SDK_INT >= 33 && !NotificationManagerCompat.from(context).areNotificationsEnabled()) {
-                                onRequestNotificationPermission()
-                            } else {
-                                context.startActivity(
-                                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                                        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                )
-                            }
-                        },
-                    )
-                }
-            }
-        }
-        item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Comportamiento", style = MaterialTheme.typography.titleMedium)
-                    SettingSwitch(
-                        title = "Registrar automáticamente",
-                        detail = "Si ya registraste ese comercio, Pocket usa el mismo Pocket. " +
-                            "Comercios nuevos o monedas extranjeras quedan en Movimientos para revisar.",
-                        checked = preferences.notificationAutoRecord,
-                        enabled = preferencesStore != null,
-                        testTag = "notification_auto_record",
-                        onCheckedChange = { savePreference { setNotificationAutoRecord(it) } },
-                    )
-                    SettingSwitch(
-                        title = "Aviso al detectar un gasto",
-                        detail = "Muestra un aviso breve con el importe, el comercio y el Pocket.",
-                        checked = preferences.notificationDetectionAlerts,
-                        enabled = preferencesStore != null,
-                        testTag = "notification_detection_alerts",
-                        onCheckedChange = { savePreference { setNotificationDetectionAlerts(it) } },
-                    )
-                }
-            }
-            saveError?.let { message ->
-                Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
-            }
-        }
-        diagnostics?.let { metrics ->
+    val listState = rememberLazyListState()
+    val searchFocus = remember { FocusRequester() }
+    // Items before the search field: introduction, setup, behaviour and, when shown, diagnostics.
+    val searchIndex = if (diagnostics == null) 3 else 4
+
+    Column(Modifier.fillMaxSize().padding(padding)) {
+        PocketTopAppBar("Captura desde notificaciones", onBack, windowInsets = WindowInsets(0))
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             item {
                 Text(
-                    "Diagnóstico beta local: ${metrics.parserSuccesses}/${metrics.parserAttempts} detectadas, " +
-                        "${metrics.parserFailures} fallidas. ${metrics.correctedConfirmations}/${metrics.confirmations} " +
-                        "confirmaciones corregidas (${(metrics.correctionRate * 100).toInt()}%); " +
-                        "importe ${metrics.amountCorrections}, moneda ${metrics.currencyCorrections}. " +
-                        "El tamaño mínimo de la muestra sigue pendiente.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
-        item {
-            Text("Apps de origen", style = MaterialTheme.typography.titleMedium)
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                placeholder = { Text("Buscar app") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) { Icon(Icons.Default.Clear, contentDescription = "Borrar búsqueda") }
-                    }
-                },
-                singleLine = true,
-                shape = MaterialTheme.shapes.extraLarge,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).testTag("notification_app_search"),
-            )
-        }
-        fun section(key: String, title: String, list: List<SourceApp>) {
-            if (list.isEmpty()) return
-            item(key = "header-$key") {
-                Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-            }
-            // Keyed by package alone, so a row keeps its identity and focus when it moves between sections.
-            items(list, key = { it.packageName }) { app ->
-                SourceAppRow(
-                    app = app,
-                    selected = app.packageName in selectedPackages,
-                    enabled = preferencesStore != null && savingPackage == null,
-                    onCheckedChange = { toggle(app, it) },
-                )
-            }
-        }
-        section("selected", "Seleccionadas", chosenApps)
-        section("suggested", "Sugeridas: bancos, pagos y mensajes", suggestedApps)
-        section("all", if (query.isBlank()) "Todas las apps" else "Resultados", otherApps)
-        if (chosenApps.isEmpty() && suggestedApps.isEmpty() && otherApps.isEmpty()) {
-            item { Text("Ninguna app coincide con “${query.trim()}”.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-                Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(
-                    "Pocket no guarda el texto de las notificaciones. Revisa Movimientos de vez en cuando: " +
-                        "algunos avisos pueden no reconocerse.",
-                    style = MaterialTheme.typography.bodySmall,
+                    "Pocket lee los avisos de pago de las apps que elijas y registra el gasto por ti. " +
+                        "Experimental · inglés y español · SAR, USD y MXN.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Configuración", style = MaterialTheme.typography.titleMedium)
+                        SetupStep(
+                            done = accessGranted,
+                            title = if (accessGranted) "Acceso a notificaciones concedido" else "Acceso a notificaciones no concedido",
+                            detail = "Android te pedirá activar Pocket en la lista de acceso a notificaciones.",
+                            action = if (accessGranted) "Administrar acceso" else "Conceder acceso",
+                            onAction = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+                        )
+                        HorizontalDivider()
+                        SetupStep(
+                            done = selectedPackages.isNotEmpty(),
+                            title = when (selectedPackages.size) {
+                                0 -> "Ninguna app seleccionada"
+                                1 -> "1 app seleccionada"
+                                else -> "${selectedPackages.size} apps seleccionadas"
+                            },
+                            detail = "Elige tu banco o, si recibes SMS del banco, tu app de mensajes.",
+                            action = if (selectedPackages.isEmpty()) "Elegir apps" else null,
+                            onAction = {
+                                scope.launch {
+                                    listState.animateScrollToItem(searchIndex)
+                                    searchFocus.requestFocus()
+                                }
+                            },
+                        )
+                        HorizontalDivider()
+                        SetupStep(
+                            done = alertsAllowed || !preferences.notificationDetectionAlerts,
+                            title = if (alertsAllowed) "Avisos de Pocket permitidos" else "Avisos de Pocket bloqueados",
+                            detail = "Necesarios para ver el aviso emergente cuando se detecta un gasto.",
+                            action = if (alertsAllowed) null else "Permitir avisos",
+                            onAction = {
+                                if (android.os.Build.VERSION.SDK_INT >= 33 && !NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                                    onRequestNotificationPermission()
+                                } else {
+                                    context.startActivity(
+                                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                    )
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Comportamiento", style = MaterialTheme.typography.titleMedium)
+                        SettingSwitch(
+                            title = "Registrar automáticamente",
+                            detail = "Si ya registraste ese comercio, Pocket usa el mismo Pocket. " +
+                                "Comercios nuevos o monedas extranjeras quedan en Movimientos para revisar.",
+                            checked = preferences.notificationAutoRecord,
+                            enabled = preferencesStore != null,
+                            testTag = "notification_auto_record",
+                            onCheckedChange = { savePreference { setNotificationAutoRecord(it) } },
+                        )
+                        SettingSwitch(
+                            title = "Aviso al detectar un gasto",
+                            detail = "Muestra un aviso breve con el importe, el comercio y el Pocket.",
+                            checked = preferences.notificationDetectionAlerts,
+                            enabled = preferencesStore != null,
+                            testTag = "notification_detection_alerts",
+                            onCheckedChange = { savePreference { setNotificationDetectionAlerts(it) } },
+                        )
+                    }
+                }
+                saveError?.let { message ->
+                    Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                }
+            }
+            diagnostics?.let { metrics ->
+                item {
+                    Text(
+                        "Diagnóstico beta local: ${metrics.parserSuccesses}/${metrics.parserAttempts} detectadas, " +
+                            "${metrics.parserFailures} fallidas. ${metrics.correctedConfirmations}/${metrics.confirmations} " +
+                            "confirmaciones corregidas (${(metrics.correctionRate * 100).toInt()}%); " +
+                            "importe ${metrics.amountCorrections}, moneda ${metrics.currencyCorrections}. " +
+                            "El tamaño mínimo de la muestra sigue pendiente.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            item {
+                Text("Apps de origen", style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text("Buscar app") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { query = "" }) { Icon(Icons.Default.Clear, contentDescription = "Borrar búsqueda") }
+                        }
+                    },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.extraLarge,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                        .focusRequester(searchFocus)
+                        .testTag("notification_app_search"),
+                )
+            }
+            fun section(key: String, title: String, list: List<SourceApp>) {
+                if (list.isEmpty()) return
+                item(key = "header-$key") {
+                    Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                }
+                // Keyed by package alone, so a row keeps its identity and focus when it moves between sections.
+                items(list, key = { it.packageName }) { app ->
+                    SourceAppRow(
+                        app = app,
+                        selected = app.packageName in selectedPackages,
+                        enabled = preferencesStore != null && savingPackage == null,
+                        onCheckedChange = { toggle(app, it) },
+                    )
+                }
+            }
+            section("selected", "Seleccionadas", chosenApps)
+            section("suggested", "Sugeridas: bancos, pagos y mensajes", suggestedApps)
+            section("all", if (query.isBlank()) "Todas las apps" else "Resultados", otherApps)
+            if (chosenApps.isEmpty() && suggestedApps.isEmpty() && otherApps.isEmpty()) {
+                item { Text("Ninguna app coincide con “${query.trim()}”.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "Pocket no guarda el texto de las notificaciones. Revisa Movimientos de vez en cuando: " +
+                            "algunos avisos pueden no reconocerse.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

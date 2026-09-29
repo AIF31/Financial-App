@@ -1,12 +1,16 @@
 package com.aif31.pocket.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -93,12 +97,35 @@ private val PocketTypography = Typography(
     ),
 )
 
+/**
+ * Semantic roles for Pocket illustrations. The artwork is drawn in dark teal, so dark theme uses a light plate
+ * rather than a dark container.
+ */
+@Immutable
+internal data class ArtworkColors(val plate: Color, val selectedPlate: Color, val ink: Color)
+
+private val LightArtworkColors = ArtworkColors(
+    plate = LightColors.primaryContainer,
+    selectedPlate = LightColors.surface,
+    ink = LightColors.primary,
+)
+
+private val DarkArtworkColors = ArtworkColors(
+    plate = Color(0xFFD5EAE4),
+    selectedPlate = Color(0xFFE6F2EE),
+    ink = Color(0xFF0B5B59),
+)
+
+internal val LocalArtworkColors = staticCompositionLocalOf { LightArtworkColors }
+
 @Composable
 fun PocketTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors,
-        shapes = PocketShapes,
-        typography = PocketTypography,
-        content = content,
-    )
+    val dark = isSystemInDarkTheme()
+    val colors = if (dark) DarkColors else LightColors
+    CompositionLocalProvider(LocalArtworkColors provides if (dark) DarkArtworkColors else LightArtworkColors) {
+        MaterialTheme(colorScheme = colors, shapes = PocketShapes, typography = PocketTypography) {
+            // Screens drawn straight on the window, such as onboarding, have no Surface to set a content color.
+            CompositionLocalProvider(LocalContentColor provides colors.onBackground, content = content)
+        }
+    }
 }

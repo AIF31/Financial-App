@@ -103,6 +103,7 @@ Navigation improvements may introduce subordinate routes for focused tasks such 
 - Back from a subordinate task returns to the correct originating surface.
 - Back from a root destination follows Android platform expectations.
 - The launcher shortcut and the in-app expense action open the same quick-entry route.
+- Opening the launcher shortcut while a Movement form is open stacks a new form above it. Closing or saving the new form returns to the form beneath, which keeps its unsaved draft.
 - Partially entered safe state should survive configuration changes and ordinary navigation where practical.
 - Navigation actions need stable semantics for tests and accessibility.
 
@@ -140,7 +141,9 @@ The in-app action and launcher shortcut must open this same route and preserve t
 - Validation appears near the relevant field and is announced accessibly.
 - Advanced fields do not block the common case.
 - Dismissing or navigating back must not accidentally save.
-- Save success is clear and brief; it does not delay the user's return to context.
+- Save success is clear and brief; it does not delay the user's return to context. The confirmation appears on the surface the user returns to, including a Movement form beneath the one that was saved.
+- Pocket choices show availability for the budget period that contains the entered date, in that period's accounting currency. When that is not the current period, the form names the period the figures belong to.
+- The time picker follows the phone's 12- or 24-hour clock setting. The stored time does not depend on it.
 - Existing refund, conversion, date/time, note, and payment behavior remains intact.
 
 ### 7.2 Dashboard
@@ -155,6 +158,8 @@ The dashboard is actionable. Its hierarchy is:
 The dashboard should lead naturally to recording an expense and managing a relevant Pocket. Avoid presenting every metric with equal weight or placing every item in an identical card.
 
 Dashboard values must come from the same domain calculations used elsewhere. The UI must not reimplement financial rules.
+
+Supporting metrics live behind the "Ver detalles" disclosure on the availability card and come from `PeriodInsights`/`PeriodComparison`. Period comparisons use average daily spending so an in-progress period is compared fairly with a closed one. For an in-progress period, pace (the daily average and its projection) counts Movements dated through today. Movements dated later are spending already committed: they count once in the projection and in period totals, availability, and budget used, but are never averaged over past days or extrapolated. A period in a different accounting currency is converted only through the adjacent frozen boundary rate. Without one, both periods' daily averages are shown side by side, each in its own currency and without a difference, on Inicio's "Ver detalles" as well as in "Comparar periodos". The chart then shows only the chosen period, and the per-Pocket comparison is omitted, because amounts in two currencies cannot share one scale. The detailed comparison is a subordinate "Comparar periodos" route, not a root destination; the same period metrics appear in the Pockets period view, including historical periods.
 
 ### 7.3 Pockets
 
@@ -193,6 +198,8 @@ Ajustes remains a root bottom-bar destination. Within it, group controls into re
 
 Backup and restore must communicate scope, consequences, success, and failure clearly. They are reliability workflows, not secondary decoration.
 
+In notification capture setup, a step that is not done offers the action that completes it. When no source app is chosen, that action takes the user to the app search.
+
 ### 7.6 Onboarding and restore
 
 Onboarding should establish the minimum viable financial setup with clear progress and recovery. Restoration must remain discoverable where the existing product permits it. Completion may use a warmer expressive moment, but instructions and validation remain calm and precise.
@@ -204,7 +211,7 @@ Onboarding should establish the minimum viable financial setup with clear progre
 - Place the primary daily action within comfortable thumb reach without hiding bottom navigation.
 - Use a coherent 4 dp / 8 dp spacing rhythm.
 - Maintain at least 48 dp interactive targets unless a documented platform component provides equivalent usability.
-- Support large font scaling without clipping essential values or actions.
+- Support large font scaling without clipping essential values or actions. Root destination labels stay whole on one line, shrinking to fit rather than ending in an ellipsis or breaking mid-word.
 - Avoid fixed widths that only fit one phone.
 - Keep dense metadata secondary to the decision or action the screen supports.
 

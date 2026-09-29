@@ -1,13 +1,25 @@
 package com.aif31.pocket
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -17,7 +29,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -31,8 +42,6 @@ import com.aif31.pocket.fx.QuoteFailure
 import com.aif31.pocket.settings.*
 import com.aif31.pocket.ui.*
 import java.time.LocalTime
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
@@ -165,7 +174,7 @@ private fun CurrencySettingsRoute(
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-        TextButton(onClick = onBack) { Text("Atrás") }
+        PocketTopAppBar(SettingsSection.CURRENCY.title, onBack, windowInsets = WindowInsets(0))
         CurrencySettingsContent(
             state = CurrencySettingsUiState(
                 currentCurrency = currentCurrency,
@@ -268,310 +277,450 @@ private fun SettingsDetailScreen(
     }
     val selectedFundsPeriod = state.periods.firstOrNull { it.id == selectedFundsPeriodId }
     val selectedFundsCurrency = selectedFundsPeriod?.accountingCurrency ?: SupportedCurrency.SAR
+    val focusManager = LocalFocusManager.current
+    fun resetTemplateForm() {
+        editingTemplate = null
+        templateName = ""
+        templateAmount = ""
+        templatePocketId = null
+        templateMethodId = null
+        templateInputCurrency = preferences.defaultExpenseCurrency
+    }
+    var reminderPickerVisible by rememberSaveable { mutableStateOf(false) }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(padding).testTag("settings_list"),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                TextButton(onClick = onBack) { Text("Atrás") }
-                Text(section.title, style = MaterialTheme.typography.headlineMedium)
-            }
-        }
-        if (section == SettingsSection.PERIOD) {
-            item {
-                Text("Periodo y fondos", style = MaterialTheme.typography.titleLarge)
-            Text("${selectedFundsPeriod?.start} – ${selectedFundsPeriod?.endExclusive?.minusDays(1)} · Asia/Riyadh")
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(state.periods, key = { it.id }) { period ->
-                    TextButton(onClick = {
-                        selectedFundsPeriodId = period.id
-                        funds = minorNumber(period.newFundsMinor)
-                    }) { Text(if (period.id == selectedFundsPeriodId) "✓ ${period.start}" else period.start.toString()) }
-                }
-            }
-            OutlinedTextField(
-                funds,
-                { funds = it },
-                label = { Text("Fondos nuevos ${selectedFundsCurrency.name}") },
-                modifier = Modifier.testTag("period_funds"),
-            )
-            Button(onClick = {
-                scope.launch {
-                    val value = runCatching { Money.parse(funds, selectedFundsCurrency.name).minor }.getOrNull() ?: run {
-                        message = "Escribe fondos válidos"
-                        return@launch
-                    }
-                    when (val result = ledger.execute(LedgerCommand.UpdatePeriodFunds(selectedFundsPeriodId ?: return@launch, value))) {
-                        LedgerResult.Success -> message = "Fondos guardados"
-                        is LedgerResult.Rejected -> message = result.message
-                        is LedgerResult.Deleted -> Unit
-                    }
-                }
-            }) { Text("Guardar fondos") }
-            message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-            OutlinedTextField(
-                futureDay,
-                { futureDay = it.filter(Char::isDigit).take(2) },
-                label = { Text("Día de inicio para periodos futuros") },
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = {
-                    val day = futureDay.toIntOrNull()
-                    if (day == null || day !in 1..31) {
-                        message = "Escribe un día entre 1 y 31"
-                    } else {
-                        scope.launch {
-                            preferencesStore?.setFuturePeriodStartDay(day)
-                            message = "Día de inicio guardado"
+    Column(Modifier.fillMaxSize().padding(padding)) {
+        PocketTopAppBar(section.title, onBack, windowInsets = WindowInsets(0))
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().testTag("settings_list"),
+            contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (section == SettingsSection.PERIOD) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SectionHeader("Fondos del periodo")
+                        SingleChoiceChips(
+                            options = state.periods.sortedByDescending { it.start }.map { period ->
+                                ChoiceOption(period.id, formatPeriodRange(period.start, period.endExclusive))
+                            },
+                            selected = selectedFundsPeriodId,
+                            onSelect = { id ->
+                                selectedFundsPeriodId = id
+                                state.periods.firstOrNull { it.id == id }?.let { funds = minorNumber(it.newFundsMinor) }
+                            },
+                        )
+                        Text(
+                            "Zona horaria de los periodos: Asia/Riyadh",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        OutlinedTextField(
+                            funds,
+                            { funds = it },
+                            label = { Text("Fondos nuevos ${selectedFundsCurrency.name}") },
+                            prefix = { Text(selectedFundsCurrency.name) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                            modifier = Modifier.fillMaxWidth().testTag("period_funds"),
+                        )
+                        Button(onClick = {
+                            scope.launch {
+                                val value = runCatching { Money.parse(funds, selectedFundsCurrency.name).minor }.getOrNull() ?: run {
+                                    message = "Escribe fondos válidos"
+                                    return@launch
+                                }
+                                when (val result = ledger.execute(LedgerCommand.UpdatePeriodFunds(selectedFundsPeriodId ?: return@launch, value))) {
+                                    LedgerResult.Success -> message = "Fondos guardados"
+                                    is LedgerResult.Rejected -> message = result.message
+                                    is LedgerResult.Deleted -> Unit
+                                }
+                            }
+                        }) { Text("Guardar fondos") }
+                        message?.let { StatusMessage(it) }
+                        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                        SectionHeader("Próximos periodos")
+                        OutlinedTextField(
+                            futureDay,
+                            { futureDay = it.filter(Char::isDigit).take(2) },
+                            label = { Text("Día de inicio para periodos futuros") },
+                            supportingText = { Text("Solo afecta a los periodos que aún no existen.") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = {
+                                val day = futureDay.toIntOrNull()
+                                if (day == null || day !in 1..31) {
+                                    message = "Escribe un día entre 1 y 31"
+                                } else {
+                                    scope.launch {
+                                        preferencesStore?.setFuturePeriodStartDay(day)
+                                        message = "Día de inicio guardado"
+                                    }
+                                }
+                            }) { Text("Guardar día") }
+                            OutlinedButton(onClick = {
+                                scope.launch {
+                                    val result = ledger.execute(LedgerCommand.CreateNextPeriod(futureDay.toIntOrNull()))
+                                    message = if (result is LedgerResult.Success) "Periodo siguiente creado con presupuestos y rollover." else (result as? LedgerResult.Rejected)?.message
+                                }
+                            }) { Text("Crear periodo siguiente") }
                         }
                     }
-                }) { Text("Guardar día") }
-                OutlinedButton(onClick = {
-                    scope.launch {
-                        val result = ledger.execute(LedgerCommand.CreateNextPeriod(futureDay.toIntOrNull()))
-                        message = if (result is LedgerResult.Success) "Periodo siguiente creado con presupuestos y rollover." else (result as? LedgerResult.Rejected)?.message
-                    }
-                }) { Text("Crear periodo siguiente") }
+                }
             }
-            }
-        }
-        if (section == SettingsSection.REMINDERS) {
-            item {
-                Text("Recordatorio diario", style = MaterialTheme.typography.titleLarge)
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(when (reminderStatus) {
-                    ReminderStatus.Off -> if (preferences.reminderAwaitingConfirmation) "Desactivado · confirma en este dispositivo" else "Desactivado"
-                    ReminderStatus.PermissionRequired -> "Permiso necesario"
-                    ReminderStatus.Scheduled -> "Programado"
-                    ReminderStatus.Failed -> "No se pudo programar"
-                })
-                Switch(
-                    checked = preferences.reminderEnabled,
-                    onCheckedChange = { enabled ->
-                        val time = runCatching { LocalTime.parse(reminderTime) }.getOrNull()
-                        if (time == null) {
-                            message = "Escribe una hora válida en formato HH:mm"
-                        } else {
-                            scope.launch {
-                                try {
-                                    preferencesStore?.setReminder(enabled, time)
-                                    reminderStatus = reminderScheduler?.applyAndCheck(enabled, time)
-                                        ?: if (enabled) ReminderStatus.Failed else ReminderStatus.Off
-                                    reminderPermissionRationaleVisible = reminderStatus == ReminderStatus.PermissionRequired
-                                    message = if (enabled) null else "Recordatorio desactivado"
-                                } catch (_: Exception) {
-                                    reminderStatus = ReminderStatus.Failed
-                                    message = "No se pudo programar el recordatorio"
+            if (section == SettingsSection.REMINDERS) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Recordatorio", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    when (reminderStatus) {
+                                        ReminderStatus.Off -> if (preferences.reminderAwaitingConfirmation) "Desactivado · confirma en este dispositivo" else "Desactivado"
+                                        ReminderStatus.PermissionRequired -> "Permiso necesario"
+                                        ReminderStatus.Scheduled -> "Programado"
+                                        ReminderStatus.Failed -> "No se pudo programar"
+                                    },
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = preferences.reminderEnabled,
+                                onCheckedChange = { enabled ->
+                                    val time = runCatching { LocalTime.parse(reminderTime) }.getOrNull()
+                                    if (time == null) {
+                                        message = "Escribe una hora válida en formato HH:mm"
+                                    } else {
+                                        scope.launch {
+                                            try {
+                                                preferencesStore?.setReminder(enabled, time)
+                                                reminderStatus = reminderScheduler?.applyAndCheck(enabled, time)
+                                                    ?: if (enabled) ReminderStatus.Failed else ReminderStatus.Off
+                                                reminderPermissionRationaleVisible = reminderStatus == ReminderStatus.PermissionRequired
+                                                message = if (enabled) null else "Recordatorio desactivado"
+                                            } catch (_: Exception) {
+                                                reminderStatus = ReminderStatus.Failed
+                                                message = "No se pudo programar el recordatorio"
+                                            }
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.testTag("reminder_switch"),
+                            )
+                        }
+                        OutlinedTextField(
+                            reminderTime,
+                            { reminderTime = it },
+                            label = { Text("Hora (HH:mm)") },
+                            singleLine = true,
+                            trailingIcon = {
+                                IconButton(onClick = { reminderPickerVisible = true }) {
+                                    Icon(Icons.Default.Schedule, contentDescription = "Elegir hora")
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("reminder_time"),
+                        )
+                        Button(onClick = {
+                            val time = runCatching { LocalTime.parse(reminderTime) }.getOrNull()
+                            if (time == null) {
+                                message = "Escribe una hora válida en formato HH:mm"
+                            } else {
+                                scope.launch {
+                                    try {
+                                        preferencesStore?.setReminder(preferences.reminderEnabled, time)
+                                        reminderStatus = reminderScheduler?.applyAndCheck(preferences.reminderEnabled, time)
+                                            ?: if (preferences.reminderEnabled) ReminderStatus.Failed else ReminderStatus.Off
+                                        message = "Horario guardado"
+                                    } catch (_: Exception) {
+                                        reminderStatus = ReminderStatus.Failed
+                                        message = "No se pudo programar el recordatorio"
+                                    }
+                                }
+                            }
+                        }) { Text("Guardar horario") }
+                        message?.let { StatusMessage(it) }
+                        if (reminderStatus == ReminderStatus.Failed && preferences.reminderEnabled) {
+                            Text("Comprueba los ajustes de notificaciones y vuelve a intentarlo.")
+                            TextButton(onClick = {
+                                scope.launch {
+                                    reminderStatus = try {
+                                        reminderScheduler?.applyAndCheck(true, preferences.reminderTime) ?: ReminderStatus.Failed
+                                    } catch (_: Exception) { ReminderStatus.Failed }
+                                }
+                            }) { Text("Reintentar") }
+                        }
+                        if (reminderStatus == ReminderStatus.PermissionRequired) {
+                            Text("Permite las notificaciones para recibir el recordatorio.")
+                            TextButton(onClick = { reminderPermissionRationaleVisible = true }) { Text("Revisar permiso") }
+                        }
+                        Text("La entrega es aproximada y puede retrasarse según el dispositivo.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("El recordatorio no muestra importes en la pantalla bloqueada.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (reminderPermissionRationaleVisible) {
+                            Card(Modifier.fillMaxWidth()) {
+                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("Permiso de notificaciones", style = MaterialTheme.typography.titleMedium)
+                                    Text("Pocket usa este permiso solo para enviar el recordatorio diario que acabas de activar. No muestra importes ni comparte tus datos.")
+                                    Button(onClick = {
+                                        reminderPermissionRationaleVisible = false
+                                        onRequestNotificationPermission()
+                                    }) { Text("Permitir notificaciones") }
                                 }
                             }
                         }
-                    },
-                    modifier = Modifier.testTag("reminder_switch"),
-                )
-            }
-            OutlinedTextField(reminderTime, { reminderTime = it }, label = { Text("Hora (HH:mm)") }, modifier = Modifier.testTag("reminder_time"))
-            Button(onClick = {
-                val time = runCatching { LocalTime.parse(reminderTime) }.getOrNull()
-                if (time == null) {
-                    message = "Escribe una hora válida en formato HH:mm"
-                } else {
-                    scope.launch {
-                        try {
-                            preferencesStore?.setReminder(preferences.reminderEnabled, time)
-                            reminderStatus = reminderScheduler?.applyAndCheck(preferences.reminderEnabled, time)
-                                ?: if (preferences.reminderEnabled) ReminderStatus.Failed else ReminderStatus.Off
-                            message = "Horario guardado"
-                        } catch (_: Exception) {
-                            reminderStatus = ReminderStatus.Failed
-                            message = "No se pudo programar el recordatorio"
-                        }
-                    }
-                }
-            }) { Text("Guardar horario") }
-            message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-            if (reminderStatus == ReminderStatus.Failed && preferences.reminderEnabled) {
-                Text("Comprueba los ajustes de notificaciones y vuelve a intentarlo.")
-                TextButton(onClick = {
-                    scope.launch {
-                        reminderStatus = try {
-                            reminderScheduler?.applyAndCheck(true, preferences.reminderTime) ?: ReminderStatus.Failed
-                        } catch (_: Exception) { ReminderStatus.Failed }
-                    }
-                }) { Text("Reintentar") }
-            }
-            if (reminderStatus == ReminderStatus.PermissionRequired) {
-                Text("Permite las notificaciones para recibir el recordatorio.")
-                TextButton(onClick = { reminderPermissionRationaleVisible = true }) { Text("Revisar permiso") }
-            }
-            Text("La entrega es aproximada y puede retrasarse según el dispositivo.")
-            Text("El recordatorio no muestra importes en la pantalla bloqueada.")
-            if (reminderPermissionRationaleVisible) {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Permiso de notificaciones", style = MaterialTheme.typography.titleMedium)
-                        Text("Pocket usa este permiso solo para enviar el recordatorio diario que acabas de activar. No muestra importes ni comparte tus datos.")
-                        Button(onClick = {
-                            reminderPermissionRationaleVisible = false
-                            onRequestNotificationPermission()
-                        }) { Text("Permitir notificaciones") }
                     }
                 }
             }
-            }
-        }
-        if (section == SettingsSection.PAYMENT_METHODS) {
-            item {
-                Text("Métodos de pago", style = MaterialTheme.typography.titleLarge)
-            Text("Método predeterminado", style = MaterialTheme.typography.titleMedium)
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (section == SettingsSection.PAYMENT_METHODS) {
                 item {
-                    OutlinedButton(
-                        onClick = { scope.launch { ledger.execute(LedgerCommand.SetDefaultPaymentMethod(null)) } },
-                        modifier = Modifier
-                            .testTag("default_payment_none")
-                            .semantics { selected = state.defaultPaymentMethodId == null },
-                    ) {
-                        Text(if (state.defaultPaymentMethodId == null) "✓ Ninguno" else "Ninguno")
-                    }
-                }
-                items(state.paymentMethods.filterNot { it.archived }, key = { "default_${it.id}" }) { method ->
-                    OutlinedButton(
-                        onClick = { scope.launch { ledger.execute(LedgerCommand.SetDefaultPaymentMethod(method.id)) } },
-                        modifier = Modifier
-                            .testTag("default_payment_${method.name}")
-                            .semantics { selected = state.defaultPaymentMethodId == method.id },
-                    ) {
-                        Text(if (state.defaultPaymentMethodId == method.id) "✓ ${method.name}" else method.name)
-                    }
-                }
-            }
-            OutlinedTextField(methodName, { methodName = it }, label = { Text("Nombre") })
-            Button(onClick = {
-                scope.launch {
-                    when (val result = ledger.execute(LedgerCommand.UpsertPaymentMethod(editingMethod, methodName))) {
-                        LedgerResult.Success -> { methodName = ""; editingMethod = null; message = "Método guardado" }
-                        is LedgerResult.Rejected -> message = result.message
-                        is LedgerResult.Deleted -> Unit
-                    }
-                }
-            }) { Text(if (editingMethod == null) "Añadir método" else "Guardar método") }
-            message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-        }
-        items(state.paymentMethods, key = { it.id }) { method ->
-            Card(
-                Modifier
-                    .fillMaxWidth()
-                    .testTag("payment_method_${method.name}")
-                    .clickable { editingMethod = method.id; methodName = method.name },
-            ) {
-                Row(Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(method.name + if (method.archived) " (archivado)" else "")
-                    TextButton(onClick = { scope.launch { ledger.execute(LedgerCommand.ArchivePaymentMethod(method.id, !method.archived)) } }) {
-                        Text(if (method.archived) "Restaurar" else "Archivar")
-                    }
-                }
-            }
-            }
-        }
-        if (section == SettingsSection.TEMPLATES) {
-            item {
-                Text("Plantillas recurrentes", style = MaterialTheme.typography.titleLarge)
-            Text("Solo precargan el formulario; nunca crean gastos automáticamente.")
-            OutlinedTextField(templateName, { templateName = it }, label = { Text("Nombre de plantilla") })
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SupportedCurrency.entries.forEach { currency ->
-                    OutlinedButton(onClick = { templateInputCurrency = currency }) {
-                        Text(if (templateInputCurrency == currency) "✓ ${currency.name}" else currency.name)
-                    }
-                }
-            }
-            OutlinedTextField(
-                templateAmount,
-                { templateAmount = it },
-                label = { Text("Importe ${templateInputCurrency.name}") },
-            )
-            Text("Pocket")
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(state.pockets.filterNot { it.pocket.archived || it.retiredThisPeriod }, key = { it.pocket.id }) { pocket ->
-                    OutlinedButton(
-                        onClick = { templatePocketId = pocket.pocket.id },
-                        modifier = Modifier.testTag("template_pocket_${pocket.pocket.name}"),
-                    ) {
-                        Text(if (templatePocketId == pocket.pocket.id) "✓ ${pocket.pocket.name}" else pocket.pocket.name)
-                    }
-                }
-            }
-            Text("Método de pago (opcional)")
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                item { OutlinedButton(onClick = { templateMethodId = null }) { Text(if (templateMethodId == null) "✓ Ninguno" else "Ninguno") } }
-                items(state.paymentMethods.filterNot { it.archived }, key = { it.id }) { method ->
-                    OutlinedButton(
-                        onClick = { templateMethodId = method.id },
-                        modifier = Modifier.testTag("template_method_${method.name}"),
-                    ) {
-                        Text(if (templateMethodId == method.id) "✓ ${method.name}" else method.name)
-                    }
-                }
-            }
-            Button(onClick = {
-                scope.launch {
-                    val pocketId = templatePocketId ?: run { message = "Selecciona un Pocket"; return@launch }
-                    val amount = runCatching { Money.parse(templateAmount, templateInputCurrency.name).minor }.getOrNull()
-                        ?: run { message = "Escribe un importe válido"; return@launch }
-                    when (val result = ledger.execute(
-                        LedgerCommand.UpsertTemplate(
-                            id = editingTemplate,
-                            name = templateName,
-                            amountMinor = amount,
-                            pocketId = pocketId,
-                            paymentMethodId = templateMethodId,
-                            inputCurrency = templateInputCurrency,
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SectionHeader("Método predeterminado")
+                        SingleChoiceChips(
+                            options = listOf(ChoiceOption<String?>(null, "Ninguno", "default_payment_none")) +
+                                state.paymentMethods.filterNot { it.archived }.map { ChoiceOption<String?>(it.id, it.name, "default_payment_${it.name}") },
+                            selected = state.defaultPaymentMethodId,
+                            onSelect = { id -> scope.launch { ledger.execute(LedgerCommand.SetDefaultPaymentMethod(id)) } },
                         )
-                    )) {
-                        LedgerResult.Success -> {
-                            templateName = ""; templateAmount = ""; templatePocketId = null; templateMethodId = null
-                            templateInputCurrency = preferences.defaultExpenseCurrency
-                            editingTemplate = null; message = "Plantilla guardada"
+                        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                        SectionHeader(if (editingMethod == null) "Añadir método" else "Editar método")
+                        OutlinedTextField(
+                            methodName,
+                            { methodName = it },
+                            label = { Text("Nombre") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = {
+                                scope.launch {
+                                    when (val result = ledger.execute(LedgerCommand.UpsertPaymentMethod(editingMethod, methodName))) {
+                                        LedgerResult.Success -> { methodName = ""; editingMethod = null; message = "Método guardado" }
+                                        is LedgerResult.Rejected -> message = result.message
+                                        is LedgerResult.Deleted -> Unit
+                                    }
+                                }
+                            }) { Text(if (editingMethod == null) "Añadir método" else "Guardar método") }
+                            if (editingMethod != null) {
+                                TextButton(onClick = { editingMethod = null; methodName = "" }) { Text("Cancelar edición") }
+                            }
                         }
-                        is LedgerResult.Rejected -> message = result.message
-                        is LedgerResult.Deleted -> Unit
+                        message?.let { StatusMessage(it) }
+                        SectionHeader("Tus métodos")
+                        Text("Toca un método para editarlo.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
                 }
-            }) { Text(if (editingTemplate == null) "Añadir plantilla" else "Guardar plantilla") }
-            message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-        }
-        items(state.templates, key = { it.id }) { template ->
-            Card(Modifier.fillMaxWidth().clickable {
-                editingTemplate = template.id
-                templateName = template.name
-                templateAmount = minorNumber(template.amountMinor)
-                templatePocketId = template.pocketId
-                templateMethodId = template.paymentMethodId
-                templateInputCurrency = template.inputCurrency
-            }) {
-                Row(Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("${template.name}: ${MoneyText.format(template.amountMinor, template.inputCurrency)}${if (template.archived) " (archivada)" else ""}")
-                    TextButton(onClick = { scope.launch { ledger.execute(LedgerCommand.ArchiveTemplate(template.id, !template.archived)) } }) {
-                        Text(if (template.archived) "Restaurar" else "Archivar")
+                items(state.paymentMethods, key = { it.id }) { method ->
+                    EditableRow(
+                        title = method.name + if (method.archived) " (archivado)" else "",
+                        editing = editingMethod == method.id,
+                        archived = method.archived,
+                        onEdit = { editingMethod = method.id; methodName = method.name },
+                        onToggleArchive = { scope.launch { ledger.execute(LedgerCommand.ArchivePaymentMethod(method.id, !method.archived)) } },
+                        modifier = Modifier.testTag("payment_method_${method.name}"),
+                    )
+                }
+            }
+            if (section == SettingsSection.TEMPLATES) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Solo precargan el formulario; nunca crean gastos automáticamente.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        SectionHeader(if (editingTemplate == null) "Nueva plantilla" else "Editar plantilla")
+                        OutlinedTextField(
+                            templateName,
+                            { templateName = it },
+                            label = { Text("Nombre de plantilla") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        SegmentedChoice(
+                            options = SupportedCurrency.entries.map { ChoiceOption(it, it.name) },
+                            selected = templateInputCurrency,
+                            onSelect = { templateInputCurrency = it },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            templateAmount,
+                            { templateAmount = it },
+                            label = { Text("Importe ${templateInputCurrency.name}") },
+                            prefix = { Text(templateInputCurrency.name) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text("Pocket", style = MaterialTheme.typography.titleSmall)
+                        SingleChoiceChips(
+                            options = state.pockets.filterNot { it.pocket.archived || it.retiredThisPeriod }
+                                .map { ChoiceOption<String?>(it.pocket.id, it.pocket.name, "template_pocket_${it.pocket.name}") },
+                            selected = templatePocketId,
+                            onSelect = { templatePocketId = it },
+                        )
+                        Text("Método de pago (opcional)", style = MaterialTheme.typography.titleSmall)
+                        SingleChoiceChips(
+                            options = listOf(ChoiceOption<String?>(null, "Ninguno")) +
+                                state.paymentMethods.filterNot { it.archived }.map { ChoiceOption<String?>(it.id, it.name, "template_method_${it.name}") },
+                            selected = templateMethodId,
+                            onSelect = { templateMethodId = it },
+                        )
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = {
+                                scope.launch {
+                                    val pocketId = templatePocketId ?: run { message = "Selecciona un Pocket"; return@launch }
+                                    val amount = runCatching { Money.parse(templateAmount, templateInputCurrency.name).minor }.getOrNull()
+                                        ?: run { message = "Escribe un importe válido"; return@launch }
+                                    when (val result = ledger.execute(
+                                        LedgerCommand.UpsertTemplate(
+                                            id = editingTemplate,
+                                            name = templateName,
+                                            amountMinor = amount,
+                                            pocketId = pocketId,
+                                            paymentMethodId = templateMethodId,
+                                            inputCurrency = templateInputCurrency,
+                                        )
+                                    )) {
+                                        LedgerResult.Success -> {
+                                            resetTemplateForm()
+                                            message = "Plantilla guardada"
+                                        }
+                                        is LedgerResult.Rejected -> message = result.message
+                                        is LedgerResult.Deleted -> Unit
+                                    }
+                                }
+                            }) { Text(if (editingTemplate == null) "Añadir plantilla" else "Guardar plantilla") }
+                            if (editingTemplate != null) {
+                                TextButton(onClick = ::resetTemplateForm) { Text("Cancelar edición") }
+                            }
+                        }
+                        message?.let { StatusMessage(it) }
+                        if (state.templates.isNotEmpty()) SectionHeader("Tus plantillas")
+                    }
+                }
+                items(state.templates, key = { it.id }) { template ->
+                    EditableRow(
+                        title = "${template.name}: ${MoneyText.format(template.amountMinor, template.inputCurrency)}${if (template.archived) " (archivada)" else ""}",
+                        editing = editingTemplate == template.id,
+                        archived = template.archived,
+                        onEdit = {
+                            editingTemplate = template.id
+                            templateName = template.name
+                            templateAmount = minorNumber(template.amountMinor)
+                            templatePocketId = template.pocketId
+                            templateMethodId = template.paymentMethodId
+                            templateInputCurrency = template.inputCurrency
+                        },
+                        onToggleArchive = { scope.launch { ledger.execute(LedgerCommand.ArchiveTemplate(template.id, !template.archived)) } },
+                    )
+                }
+            }
+            if (section == SettingsSection.DATA) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        DataAction(Icons.Default.Backup, "Crear backup completo", "Guarda todo tu historial en un archivo que puedes restaurar.", primary = true, onClick = onCreateBackup)
+                        DataAction(Icons.Default.Share, "Compartir backup", "Envía el backup a otra app o dispositivo.", onClick = onShareBackup)
+                        DataAction(Icons.Default.Restore, "Restaurar backup", "Reemplaza los datos actuales tras una vista previa.", onClick = onPickBackup)
+                        DataAction(Icons.Default.TableChart, "Exportar CSV", "Movimientos para hojas de cálculo.", onClick = onCreateCsv)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                            Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                            Text(
+                                "El backup y el CSV no están cifrados. El CSV no sirve para restaurar.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
-            }
         }
-        if (section == SettingsSection.DATA) {
-            item {
-                Text("Portabilidad", style = MaterialTheme.typography.titleLarge)
-            Button(onClick = onCreateBackup) { Text("Crear backup completo") }
-            OutlinedButton(onClick = onShareBackup) { Text("Compartir backup") }
-            OutlinedButton(onClick = onPickBackup) { Text("Restaurar backup") }
-            OutlinedButton(onClick = onCreateCsv) { Text("Exportar CSV") }
-                Text("El backup y el CSV no están cifrados. El CSV no sirve para restaurar.")
+    }
+    if (reminderPickerVisible) {
+        TimeOfDayPickerDialog(
+            initial = runCatching { LocalTime.parse(reminderTime) }.getOrNull() ?: preferences.reminderTime,
+            onPicked = { reminderTime = it.toString(); reminderPickerVisible = false },
+            onDismiss = { reminderPickerVisible = false },
+        )
+    }
+}
+
+@Composable
+private fun SectionHeader(text: String) {
+    Text(text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+}
+
+@Composable
+private fun StatusMessage(text: String) {
+    Text(text, color = MaterialTheme.colorScheme.primary, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+}
+
+@Composable
+private fun EditableRow(
+    title: String,
+    editing: Boolean,
+    archived: Boolean,
+    onEdit: () -> Unit,
+    onToggleArchive: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        onClick = onEdit,
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (editing) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Row(
+            Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp).fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                if (editing) Icons.Default.Edit else Icons.Default.EditNote,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+            Text(
+                title,
+                modifier = Modifier.weight(1f),
+                color = if (archived) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+            )
+            TextButton(onClick = onToggleArchive) { Text(if (archived) "Restaurar" else "Archivar") }
+        }
+    }
+}
+
+@Composable
+private fun DataAction(
+    icon: ImageVector,
+    title: String,
+    description: String,
+    onClick: () -> Unit,
+    primary: Boolean = false,
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (primary) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Row(
+            Modifier.padding(16.dp).fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = null)
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

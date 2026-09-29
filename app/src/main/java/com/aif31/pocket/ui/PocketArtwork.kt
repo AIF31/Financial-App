@@ -8,7 +8,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.res.painterResource
 import com.aif31.pocket.R
 import com.aif31.pocket.data.PocketIconKey
@@ -49,6 +58,7 @@ internal fun PocketArtwork(
     iconKey: PocketIconKey,
     contentDescription: String?,
     modifier: Modifier = Modifier,
+    iconTint: Color = MaterialTheme.colorScheme.primary,
 ) {
     val resource = iconKey.drawableResource()
     if (resource != null) {
@@ -63,7 +73,31 @@ internal fun PocketArtwork(
             imageVector = Icons.Default.MoreHoriz,
             contentDescription = contentDescription,
             modifier = modifier,
-            tint = MaterialTheme.colorScheme.primary,
+            tint = iconTint,
         )
+    }
+}
+
+/**
+ * Circular backdrop for Pocket illustrations, colored by the theme's artwork roles ([LocalArtworkColors]) so
+ * the dark-teal illustrations keep their contrast in both themes.
+ */
+@Composable
+internal fun PocketArtworkPlate(
+    iconKey: PocketIconKey,
+    plateSize: Dp,
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+) {
+    val colors = LocalArtworkColors.current
+    Surface(shape = CircleShape, color = if (selected) colors.selectedPlate else colors.plate, modifier = modifier.size(plateSize)) {
+        Box(contentAlignment = Alignment.Center) {
+            PocketArtwork(
+                iconKey,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize().padding(plateSize / 9),
+                iconTint = colors.ink,
+            )
+        }
     }
 }

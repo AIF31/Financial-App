@@ -10,6 +10,9 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.isSelected
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -180,8 +183,8 @@ class PocketAppHostFlowTest {
 
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("SAR 200.00 disponibles"))
         compose.onNodeWithText("SAR 200.00 disponibles").assertIsDisplayed()
-        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasTestTag("rollover_Supermercado"))
-        compose.onNodeWithTag("rollover_Supermercado").assertIsDisplayed()
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasTestTag("pocket_row_Supermercado"))
+        compose.onNodeWithTag("rollover_Supermercado", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("Movimientos").performClick()
         compose.onNodeWithText("- SAR 100.00").assertIsDisplayed()
     }
@@ -244,15 +247,16 @@ class PocketAppHostFlowTest {
         compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
         compose.onNodeWithTag("contextual_add").performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("movement_form"), 5_000)
-        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("✓ Tarjeta"))
-        compose.onNodeWithText("✓ Tarjeta").assertIsDisplayed()
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("Tarjeta"))
+        compose.onNodeWithText("Tarjeta").assertIsDisplayed().assertIsSelected()
 
         compose.onNodeWithTag("movement_form").performScrollToNode(hasText("Plantilla efectivo"))
         compose.onNodeWithText("Plantilla efectivo").performClick()
-        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("✓ Efectivo"))
-        compose.onNodeWithText("✓ Efectivo").assertIsDisplayed()
+        compose.onNodeWithTag("movement_form").performScrollToNode(hasText("Efectivo"))
+        compose.onNodeWithText("Efectivo").assertIsDisplayed().assertIsSelected()
+        compose.onNodeWithText("Tarjeta").assertIsNotSelected()
         compose.onNodeWithTag("movement_form").performScrollToNode(hasTestTag("movement_currency_USD"))
-        compose.onNodeWithTag("movement_currency_USD").assertTextContains("✓ USD")
+        compose.onNodeWithTag("movement_currency_USD").assertIsSelected()
         compose.onNodeWithTag("movement_amount").assert(
             SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("25.00"))
         )
@@ -285,22 +289,23 @@ class PocketAppHostFlowTest {
 
         compose.waitUntilExactlyOneExists(hasTestTag("settings_list"), 5_000)
         compose.onNodeWithTag("settings_list").performScrollToNode(hasTestTag("default_payment_Tarjeta"))
-        compose.onNodeWithTag("default_payment_Tarjeta").assertTextContains("✓ Tarjeta")
+        compose.onNodeWithTag("default_payment_Tarjeta").assertIsSelected()
 
         compose.onNodeWithTag("default_payment_none").performClick()
         // Room can commit before this screen's collector renders the new selection.
         compose.waitUntilExactlyOneExists(
-            hasTestTag("default_payment_none") and hasText("✓ Ninguno"), 5_000,
+            hasTestTag("default_payment_none") and isSelected(), 5_000,
         )
-        compose.onNodeWithTag("default_payment_none").assertTextContains("✓ Ninguno")
+        compose.onNodeWithTag("default_payment_none").assertIsSelected()
+        compose.onNodeWithTag("default_payment_Tarjeta").assertIsNotSelected()
         assertEquals(null, runBlocking { ledger.state.first().defaultPaymentMethodId })
 
         compose.onNodeWithTag("default_payment_Efectivo").performClick()
         val cashId = runBlocking { ledger.state.first().paymentMethods.single { it.name == "Efectivo" }.id }
         compose.waitUntilExactlyOneExists(
-            hasTestTag("default_payment_Efectivo") and hasText("✓ Efectivo"), 5_000,
+            hasTestTag("default_payment_Efectivo") and isSelected(), 5_000,
         )
-        compose.onNodeWithTag("default_payment_Efectivo").assertTextContains("✓ Efectivo")
+        compose.onNodeWithTag("default_payment_Efectivo").assertIsSelected()
         assertEquals(cashId, runBlocking { ledger.state.first().defaultPaymentMethodId })
     }
 
@@ -922,6 +927,7 @@ class PocketAppHostFlowTest {
 
         compose.waitUntilExactlyOneExists(hasText("Pockets"), 5_000)
         compose.onNodeWithText("Pockets").performClick()
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Crear Pocket"))
         compose.onNodeWithText("Crear Pocket").performClick()
         listOf(
             "supermarket", "restaurant", "transport", "university", "health",
@@ -1004,7 +1010,7 @@ class PocketAppHostFlowTest {
         compose.waitUntilExactlyOneExists(hasText("Pockets"), 5_000)
         compose.onNodeWithText("Pockets").performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("pockets_list"), 5_000)
-        compose.onNodeWithText("25 feb – 24 mar").performClick()
+        compose.onNodeWithText("25 feb – 24 mar 2026").performClick()
         compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Retirado este periodo"))
 
         compose.onNodeWithText("Retirado este periodo").assertIsDisplayed()
@@ -1095,11 +1101,11 @@ class PocketAppHostFlowTest {
         compose.waitUntilExactlyOneExists(hasText("Pockets"), 5_000)
         compose.onNodeWithText("Pockets").performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("pockets_list"), 5_000)
-        compose.onNodeWithText("25 mar – 24 abr").performClick()
+        compose.onNodeWithText("25 mar – 24 abr 2026").performClick()
         compose.onNodeWithText("Vista histórica · Solo lectura").assertIsDisplayed()
         compose.onNodeWithText("Moneda del periodo · SAR").assertIsDisplayed()
         compose.onNodeWithText("Asignado").assertIsDisplayed()
-        compose.onNodeWithText("SAR 950.00 sin asignar").assertIsDisplayed()
+        compose.onNodeWithText("SAR 950.00 sin asignar").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("pocket_Viajes"))
         compose.onNodeWithTag("pocket_Viajes").assertIsDisplayed()
         compose.onAllNodesWithText("Crear Pocket").assertCountEquals(0)
@@ -1187,8 +1193,8 @@ class PocketAppHostFlowTest {
         compose.onAllNodesWithText("Cambiar moneda", substring = true).assertCountEquals(0)
 
         compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("period_selector"))
-        compose.onNodeWithTag("period_selector").performScrollToNode(hasText("25 feb – 24 mar"))
-        compose.onNodeWithText("25 feb – 24 mar").performClick()
+        compose.onNodeWithTag("period_selector").performScrollToNode(hasText("25 feb – 24 mar 2026"))
+        compose.onNodeWithText("25 feb – 24 mar 2026").performClick()
         compose.onNodeWithText("Moneda del periodo · SAR").assertIsDisplayed()
         compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Presupuesto SAR 100.00"))
         compose.onNodeWithText("Presupuesto SAR 100.00").assertIsDisplayed()
@@ -1327,9 +1333,9 @@ class PocketAppHostFlowTest {
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasContentDescription("Mostrar métricas del periodo"))
         compose.onNodeWithContentDescription("Mostrar métricas del periodo").assertIsDisplayed()
         compose.onNodeWithContentDescription("Mostrar métricas del periodo").performSemanticsAction(SemanticsActions.OnClick)
-        compose.waitUntilExactlyOneExists(hasText("Ocultar más información"), 5_000)
-        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Ritmo diario del periodo anterior"))
-        compose.onNodeWithText("Ritmo diario del periodo anterior").assertIsDisplayed()
+        compose.waitUntilExactlyOneExists(hasText("Ocultar detalles"), 5_000)
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Promedio diario del periodo anterior"))
+        compose.onNodeWithText("Promedio diario del periodo anterior").assertIsDisplayed()
         compose.onNodeWithText("Pockets").performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("pockets_list"), 10_000)
         compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Periodo de transición"))
@@ -1361,7 +1367,7 @@ class PocketAppHostFlowTest {
         compose.onNodeWithTag("movement_amount").assert(
             SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("25.00"))
         )
-        compose.onNodeWithTag("movement_currency_SAR").assertTextContains("✓ SAR")
+        compose.onNodeWithTag("movement_currency_SAR").assertIsSelected()
         compose.onNodeWithTag("movement_form").performScrollToNode(hasText("Más detalles"))
         compose.onNodeWithText("Más detalles").performClick()
         compose.onNodeWithText("Comercio (opcional)").assert(
@@ -1697,11 +1703,11 @@ class PocketAppHostFlowTest {
         }
 
         compose.waitUntilExactlyOneExists(hasTestTag("movement_amount"), 5_000)
-        compose.onNodeWithTag("movement_currency_USD").assertTextContains("✓ USD")
+        compose.onNodeWithTag("movement_currency_USD").assertIsSelected()
         compose.onNodeWithTag("movement_amount").performTextInput("10.00")
         compose.onNodeWithTag("movement_pocket_Supermercado")
             .performSemanticsAction(SemanticsActions.OnClick)
-        compose.onNodeWithTag("movement_pocket_Supermercado").assertTextContains("✓ Supermercado")
+        compose.onNodeWithTag("movement_pocket_Supermercado").assertIsSelected()
         compose.waitUntilAtLeastOneExists(hasText("SAR 37.50"), 5_000)
         compose.onNodeWithText("Efectiva: 2026-02-25").assertIsDisplayed()
         compose.onNodeWithText("Fuente: SAMA_PARITY").assertIsDisplayed()

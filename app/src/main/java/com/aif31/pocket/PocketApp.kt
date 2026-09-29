@@ -23,7 +23,10 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -39,7 +42,6 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -47,10 +49,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,7 +62,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import com.aif31.pocket.ui.ChoiceOption
+import com.aif31.pocket.ui.SegmentedChoice
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavKey
@@ -67,6 +76,7 @@ import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.Movement
+import com.aif31.pocket.data.PeriodComparison
 import com.aif31.pocket.data.PocketLedger
 import com.aif31.pocket.domain.Money
 import com.aif31.pocket.domain.SupportedCurrency
@@ -75,6 +85,7 @@ import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
 import com.aif31.pocket.ui.ActionableDashboardContent
 import com.aif31.pocket.ui.SettingsSection
+import java.util.UUID
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.coroutines.flow.flowOf
@@ -83,6 +94,12 @@ import com.aif31.pocket.fx.ExchangeRateRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.ui.graphics.takeOrElse
+import androidx.compose.ui.unit.sp
 
 @Serializable
 private enum class RootScreen(val label: String, val icon: ImageVector) {
@@ -100,7 +117,24 @@ private sealed interface PocketRoute : NavKey
 private data class RootRoute(val screen: RootScreen) : PocketRoute
 
 @Serializable
-private data class MovementRoute(val movementId: String? = null, val suggestionId: String? = null) : PocketRoute
+private data class MovementRoute(
+    val movementId: String? = null,
+    val suggestionId: String? = null,
+    val pocketId: String? = null,
+    /**
+     * Identifies this form instance so its draft survives while another form is stacked above it. Required
+     * rather than defaulted: serialization omits defaults, so a default would be regenerated on restore.
+     */
+    val instanceId: String,
+) : PocketRoute {
+    val isNewExpense: Boolean get() = movementId == null && suggestionId == null
+}
+
+private fun movementForm(movementId: String? = null, suggestionId: String? = null, pocketId: String? = null) =
+    MovementRoute(movementId, suggestionId, pocketId, instanceId = UUID.randomUUID().toString())
+
+@Serializable
+private data class ComparisonRoute(val periodId: String, val baselinePeriodId: String?) : PocketRoute
 
 @Serializable
 private data class SettingsDetailRoute(val section: SettingsSection) : PocketRoute
@@ -112,6 +146,8 @@ fun PocketApp(
     exchangeRates: ExchangeRateRepository? = null,
     reminderScheduler: ReminderScheduler? = null,
     openNewExpense: Boolean = false,
+    /** Increments once per "new expense" launch (shortcut or onNewIntent); each value opens quick entry once. */
+    newExpenseRequest: Int = if (openNewExpense) 1 else 0,
     restoreCandidate: ByteArray? = null,
     onRestoreCandidateHandled: () -> Unit = {},
     operationMessage: String? = null,
@@ -294,7 +330,7 @@ fun PocketApp(
     }
     val state = observedState
     if (state == null) {
-        Text("Cargando…", modifier = Modifier.padding(24.dp))
+        CenteredProgress("Cargando…")
         return
     }
     if (state.needsOnboarding) {
@@ -310,7 +346,7 @@ fun PocketApp(
         return
     }
     if (state.currentPeriod == null) {
-        Text("Actualizando periodo…", modifier = Modifier.padding(24.dp))
+        CenteredProgress("Actualizando periodo…")
         return
     }
 
@@ -318,22 +354,39 @@ fun PocketApp(
     val currentRoute = backStack.last()
     val screen = backStack.filterIsInstance<RootRoute>().lastOrNull()?.screen ?: RootScreen.DASHBOARD
     val movementRoute = currentRoute as? MovementRoute
+    val comparisonRoute = currentRoute as? ComparisonRoute
     val settingsSection = (currentRoute as? SettingsDetailRoute)?.section
     val snackbar = remember { SnackbarHostState() }
     val appScope = rememberCoroutineScope()
+    // Keeps each root destination's saveable state (scroll, search, filters) while other routes are shown,
+    // and each open Movement form's draft while another form is stacked above it.
+    val rootStateHolder = rememberSaveableStateHolder()
+    val openFormIds = backStack.mapNotNull { (it as? MovementRoute)?.instanceId }
+    var knownFormIds by remember { mutableStateOf(emptyList<String>()) }
+    LaunchedEffect(openFormIds) {
+        (knownFormIds - openFormIds.toSet()).forEach(rootStateHolder::removeState)
+        knownFormIds = openFormIds
+    }
 
     fun navigateRoot(destination: RootScreen) {
         backStack[0] = RootRoute(destination)
         while (backStack.size > 1) backStack.removeLastOrNull()
     }
 
+    fun openComparison(periodId: String) {
+        backStack.add(ComparisonRoute(periodId, PeriodComparison.previousPeriodId(state, periodId)))
+    }
+
     LaunchedEffect(openMovementsRevision) {
         if (openMovementsRevision > 0) navigateRoot(RootScreen.MOVEMENTS)
     }
 
-    LaunchedEffect(openNewExpense, state.currentPeriod.id) {
-        if (openNewExpense && backStack.lastOrNull() !is MovementRoute) {
-            backStack.add(MovementRoute())
+    var handledNewExpenseRequest by rememberSaveable { mutableIntStateOf(0) }
+    LaunchedEffect(newExpenseRequest, state.currentPeriod.id) {
+        if (newExpenseRequest > handledNewExpenseRequest) {
+            // An edit or suggestion form stays underneath; only an already open new-expense form is reused.
+            if ((backStack.lastOrNull() as? MovementRoute)?.isNewExpense != true) backStack.add(movementForm())
+            handledNewExpenseRequest = newExpenseRequest
         }
     }
 
@@ -352,30 +405,52 @@ fun PocketApp(
             )
             return
         }
-        MovementDialog(
+        rootStateHolder.SaveableStateProvider(movementRoute.instanceId) {
+            MovementDialog(
+                state = state,
+                ledger = ledger,
+                defaultExpenseCurrency = preferenceState.defaultExpenseCurrency,
+                onlineFxEnabled = preferenceState.onlineFxEnabled,
+                exchangeRates = exchangeRates,
+                onDismiss = { backStack.removeLastOrNull() },
+                onSaved = {
+                    // A form stacked over another Movement form (the launcher shortcut over an edit) returns to it
+                    // with its draft; only a form opened from a root screen goes back to that screen.
+                    if (backStack.getOrNull(backStack.lastIndex - 1) is MovementRoute) {
+                        backStack.removeLastOrNull()
+                    } else {
+                        navigateRoot(if (movementRoute.movementId == null) RootScreen.DASHBOARD else RootScreen.MOVEMENTS)
+                    }
+                    appScope.launch {
+                        snackbar.showSnackbar(
+                            if (movementRoute.movementId == null) "Gasto guardado" else "Movimiento actualizado",
+                        )
+                    }
+                },
+                initialMovement = movementBeingEdited,
+                suggestion = suggestion,
+                initialPocketId = movementRoute.pocketId,
+                snackbarHostState = snackbar,
+            )
+        }
+        return
+    }
+
+    if (comparisonRoute != null) {
+        BackHandler { backStack.removeLastOrNull() }
+        ComparisonScreen(
             state = state,
-            ledger = ledger,
-            defaultExpenseCurrency = preferenceState.defaultExpenseCurrency,
-            onlineFxEnabled = preferenceState.onlineFxEnabled,
-            exchangeRates = exchangeRates,
-            onDismiss = { backStack.removeLastOrNull() },
-            onSaved = {
-                navigateRoot(
-                    if (movementRoute.movementId == null) RootScreen.DASHBOARD else RootScreen.MOVEMENTS,
-                )
-                appScope.launch {
-                    snackbar.showSnackbar(
-                        if (movementRoute.movementId == null) "Gasto guardado" else "Movimiento actualizado",
-                    )
-                }
-            },
-            initialMovement = movementBeingEdited,
-            suggestion = suggestion,
+            periodId = comparisonRoute.periodId,
+            baselinePeriodId = comparisonRoute.baselinePeriodId,
+            onPeriodsChange = { periodId, baselineId -> backStack[backStack.lastIndex] = ComparisonRoute(periodId, baselineId) },
+            onBack = { backStack.removeLastOrNull() },
         )
         return
     }
 
     BackHandler(enabled = backStack.size > 1) { backStack.removeLastOrNull() }
+    // Platform convention: back from another root tab returns to Inicio before leaving the app.
+    BackHandler(enabled = backStack.size == 1 && screen != RootScreen.DASHBOARD) { navigateRoot(RootScreen.DASHBOARD) }
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val useNavigationRail = maxWidth >= 600.dp
         val rootNavigationVisible = currentRoute is RootRoute
@@ -388,7 +463,7 @@ fun PocketApp(
                             selected = screen == destination,
                             onClick = { navigateRoot(destination) },
                             icon = { Icon(destination.icon, contentDescription = destination.label) },
-                            label = { Text(destination.label) },
+                            label = { RootDestinationLabel(destination.label) },
                         )
                     }
                 }
@@ -400,7 +475,7 @@ fun PocketApp(
                     if (rootNavigationVisible) {
                         when (screen) {
                             RootScreen.DASHBOARD -> ExtendedFloatingActionButton(
-                                onClick = { backStack.add(MovementRoute()) },
+                                onClick = { backStack.add(movementForm()) },
                                 icon = { Icon(Icons.Default.Add, contentDescription = "Registrar gasto") },
                                 text = { Text("Registrar gasto") },
                                 modifier = Modifier.testTag("contextual_add"),
@@ -408,7 +483,7 @@ fun PocketApp(
                                 contentColor = MaterialTheme.colorScheme.onTertiary,
                             )
                             RootScreen.MOVEMENTS -> FloatingActionButton(
-                                onClick = { backStack.add(MovementRoute()) },
+                                onClick = { backStack.add(movementForm()) },
                                 modifier = Modifier.testTag("contextual_add"),
                                 containerColor = MaterialTheme.colorScheme.tertiary,
                                 contentColor = MaterialTheme.colorScheme.onTertiary,
@@ -428,18 +503,22 @@ fun PocketApp(
                                     selected = screen == destination,
                                     onClick = { navigateRoot(destination) },
                                     icon = { Icon(destination.icon, contentDescription = destination.label) },
-                                    label = { Text(destination.label) },
+                                    label = { RootDestinationLabel(destination.label) },
                                 )
                             }
                         }
                     }
                 },
             ) { padding ->
-                when (screen) {
+                Crossfade(targetState = screen, animationSpec = tween(durationMillis = 150), label = "root") { shown ->
+                rootStateHolder.SaveableStateProvider(shown.name) {
+                when (shown) {
                     RootScreen.DASHBOARD -> DashboardScreen(
                         state = state,
                         padding = padding,
                         onManagePockets = { navigateRoot(RootScreen.POCKETS) },
+                        onRecordExpenseIn = { backStack.add(movementForm(pocketId = it)) },
+                        onComparePeriods = { openComparison(state.currentPeriod.id) },
                     )
                     RootScreen.MOVEMENTS -> MovementsScreen(
                         state = state,
@@ -447,11 +526,11 @@ fun PocketApp(
                         snackbar = snackbar,
                         padding = padding,
                         undoWindowMillis = undoWindowMillis,
-                        onRecordExpense = { backStack.add(MovementRoute()) },
-                        onEditMovement = { backStack.add(MovementRoute(it.id)) },
-                        onReviewSuggestion = { backStack.add(MovementRoute(suggestionId = it)) },
+                        onRecordExpense = { backStack.add(movementForm()) },
+                        onEditMovement = { backStack.add(movementForm(movementId = it.id)) },
+                        onReviewSuggestion = { backStack.add(movementForm(suggestionId = it)) },
                     )
-                    RootScreen.POCKETS -> PocketsScreen(state, ledger, padding)
+                    RootScreen.POCKETS -> PocketsScreen(state, ledger, padding, onComparePeriod = ::openComparison)
                     RootScreen.SETTINGS -> SettingsScreen(
                         state = state,
                         ledger = ledger,
@@ -476,8 +555,22 @@ fun PocketApp(
                         },
                     )
                 }
+                }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun CenteredProgress(label: String) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        CircularProgressIndicator()
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -548,29 +641,38 @@ private fun OnboardingScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Text("Moneda contable", style = MaterialTheme.typography.titleMedium)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SupportedCurrency.entries.forEach { currency ->
-                                OutlinedButton(onClick = { accountingCurrency = currency }) {
-                                    Text(if (accountingCurrency == currency) "✓ ${currency.name}" else currency.name)
-                                }
-                            }
-                        }
+                        SegmentedChoice(
+                            options = SupportedCurrency.entries.map { ChoiceOption(it, it.name) },
+                            selected = accountingCurrency,
+                            onSelect = { accountingCurrency = it },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                         OutlinedTextField(
                             value = funds,
-                            onValueChange = { funds = it },
+                            onValueChange = { funds = it; error = null },
                             label = { Text("Fondos nuevos (${accountingCurrency.name})") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            prefix = { Text(accountingCurrency.name) },
+                            singleLine = true,
+                            isError = error != null,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
                             modifier = Modifier.fillMaxWidth().testTag("new_funds"),
                         )
                         OutlinedTextField(
                             value = startDay,
-                            onValueChange = { startDay = it.filter(Char::isDigit).take(2) },
+                            onValueChange = { startDay = it.filter(Char::isDigit).take(2); error = null },
                             label = { Text("Día de inicio") },
                             supportingText = { Text("El periodo se renovará cada mes en este día.") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                             modifier = Modifier.fillMaxWidth().testTag("start_day"),
                         )
-                        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        error?.let {
+                            Text(
+                                it,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                        }
                     }
                 }
                 Button(
@@ -618,11 +720,15 @@ private fun DashboardScreen(
     state: LedgerState,
     padding: PaddingValues,
     onManagePockets: () -> Unit,
+    onRecordExpenseIn: (String) -> Unit,
+    onComparePeriods: () -> Unit,
 ) {
     ActionableDashboardContent(
         state = state,
         contentPadding = padding,
         onManagePockets = onManagePockets,
+        onRecordExpenseIn = onRecordExpenseIn,
+        onComparePeriods = onComparePeriods,
     )
 }
 @Composable
@@ -636,6 +742,8 @@ private fun MovementDialog(
     onSaved: () -> Unit,
     initialMovement: Movement? = null,
     suggestion: com.aif31.pocket.data.MovementSuggestion? = null,
+    initialPocketId: String? = null,
+    snackbarHostState: SnackbarHostState? = null,
 ) {
     ProductionMovementScreen(
         state = state,
@@ -648,5 +756,22 @@ private fun MovementDialog(
         defaultExpenseCurrency = defaultExpenseCurrency,
         onlineFxEnabled = onlineFxEnabled,
         exchangeRates = exchangeRates,
+        initialPocketId = initialPocketId,
+        snackbarHostState = snackbarHostState,
+    )
+}
+
+/**
+ * A root destination's name on one line at every font size. It shrinks to fit instead of ending in an ellipsis or
+ * breaking mid-word, so "Movimientos" stays recognizable at large font scales.
+ */
+@Composable
+private fun RootDestinationLabel(label: String) {
+    val style = LocalTextStyle.current
+    BasicText(
+        label,
+        style = style.copy(color = style.color.takeOrElse { LocalContentColor.current }),
+        maxLines = 1,
+        autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = style.fontSize, stepSize = 0.5.sp),
     )
 }

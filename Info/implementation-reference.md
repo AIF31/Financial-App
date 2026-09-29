@@ -8,7 +8,7 @@ The authoritative requirements are in GitHub Issue [AIF31/Financial-App#1](https
 
 ## Technology and architecture
 
-- Kotlin, Jetpack Compose, Material 3, and a single Activity.
+- Kotlin, Jetpack Compose, and Material 3, with one UI Activity (`MainActivity`) plus `NewExpenseShortcutActivity`, an invisible, non-exported trampoline for the static "Nuevo gasto" shortcut. It runs in its own task so the launcher's `CLEAR_TASK` cannot discard an open form, and forwards only the fixed new-expense action to `MainActivity`.
 - Room is the source of truth for financial records.
 - DataStore is limited to small preferences such as the future period start day and reminder configuration.
 - State flows toward Compose; user actions flow through the ledger/application interface.

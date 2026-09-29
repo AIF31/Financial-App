@@ -14,39 +14,65 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.SwipeToDismissBoxDefaults
+import androidx.compose.material3.SwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.ConversionStatus
 import com.aif31.pocket.data.LedgerCommand
@@ -59,11 +85,13 @@ import com.aif31.pocket.notifications.ReviewReason
 import com.aif31.pocket.notifications.appLabel
 import com.aif31.pocket.notifications.isAutoRecordedMovement
 import com.aif31.pocket.notifications.reviewHint
-import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.data.PocketLedger
+import com.aif31.pocket.data.netSpendMinor
+import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.ui.MoneyText
-import com.aif31.pocket.ui.PocketArtwork
+import com.aif31.pocket.ui.PocketArtworkPlate
+import com.aif31.pocket.ui.formatPeriodRange
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -83,18 +111,17 @@ internal fun MovementsScreen(
     onEditMovement: (Movement) -> Unit,
     onReviewSuggestion: (String) -> Unit = {},
 ) {
-    fun money(movement: Movement): String {
-        val currency = state.periods.firstOrNull { it.id == movement.periodId }?.accountingCurrency
-            ?: SupportedCurrency.SAR
-        return MoneyText.format(movement.accountingAmountMinor, currency)
-    }
+    fun currencyOf(movement: Movement): SupportedCurrency =
+        state.periods.firstOrNull { it.id == movement.periodId }?.accountingCurrency ?: SupportedCurrency.SAR
     var query by rememberSaveable { mutableStateOf("") }
-    var periodIndex by rememberSaveable { mutableStateOf(0) }
+    var periodIndex by rememberSaveable { mutableIntStateOf(0) }
     var selectedPocketId by rememberSaveable { mutableStateOf<String?>(null) }
-    var currencyIndex by rememberSaveable { mutableStateOf(0) }
-    var methodIndex by rememberSaveable { mutableStateOf(0) }
+    var currencyIndex by rememberSaveable { mutableIntStateOf(0) }
+    var methodIndex by rememberSaveable { mutableIntStateOf(0) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = state.movements.firstOrNull { it.id == selectedId }
+    val focusManager = LocalFocusManager.current
+    val haptics = LocalHapticFeedback.current
 
     val scope = rememberCoroutineScope()
     val periodOptions = listOf<String?>(null) + state.periods.map { it.id }
@@ -110,20 +137,36 @@ internal fun MovementsScreen(
             (currencyOptions.getOrNull(currencyIndex) == null || movement.originalCurrencyCode == currencyOptions[currencyIndex]) &&
             (methodOptions.getOrNull(methodIndex) == null || movement.paymentMethodId == methodOptions[methodIndex])
     }
-    val periodLabels = listOf("Todos los periodos") + state.periods.map { it.start.toString() }
+    val periodLabels = listOf("Todos los periodos") + state.periods.map { formatPeriodRange(it.start, it.endExclusive) }
     val pocketLabels = listOf("Todos los Pockets") + state.pocketCatalog.map { it.name }
     val currencyLabels = listOf("Todas las monedas") + currencyOptions.drop(1).map { it.orEmpty() }
     val methodLabels = listOf("Todos los métodos") + state.paymentMethods.map { it.name }
     val groupedMovements = filtered.groupBy { it.localDate }.entries.sortedByDescending { it.key }
     val filtersActive = query.isNotBlank() || periodIndex != 0 || selectedPocketId != null ||
         currencyIndex != 0 || methodIndex != 0
+
+    fun deleteWithUndo(movement: Movement) {
+        selectedId = null
+        scope.launch {
+            val result = ledger.execute(LedgerCommand.DeleteMovement(movement.id))
+            if (result is LedgerResult.Deleted) {
+                haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                val action = withTimeoutOrNull(undoWindowMillis) {
+                    snackbar.showSnackbar("Movimiento eliminado", "Deshacer", duration = SnackbarDuration.Indefinite)
+                }
+                if (action == SnackbarResult.ActionPerformed) ledger.execute(LedgerCommand.RestoreMovement(result.movement))
+                else snackbar.currentSnackbarData?.dismiss()
+            }
+        }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item {
-            Text("Movimientos", style = MaterialTheme.typography.headlineMedium)
+            Text("Movimientos", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { heading() })
         }
         if (state.movementSuggestions.isNotEmpty()) {
             item(key = "suggestions-header") {
@@ -174,21 +217,31 @@ internal fun MovementsScreen(
                 onValueChange = { query = it },
                 placeholder = { Text("Buscar comercio o nota") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = if (query.isNotEmpty()) {
+                    {
+                        IconButton(onClick = { query = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Borrar búsqueda")
+                        }
+                    }
+                } else {
+                    null
+                },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
                 shape = MaterialTheme.shapes.extraLarge,
                 modifier = Modifier.fillMaxWidth().testTag("history_search"),
             )
         }
         item {
-            Text("Filtros", style = MaterialTheme.typography.titleMedium)
             LazyRow(
                 modifier = Modifier.testTag("history_filters"),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                item { HistoryFilter("filter_period", periodLabels, periodIndex) { periodIndex = it } }
-                item { HistoryFilter("filter_pocket", pocketLabels, pocketIndex) { selectedPocketId = pocketOptions[it] } }
-                item { HistoryFilter("filter_currency", currencyLabels, currencyIndex) { currencyIndex = it } }
-                item { HistoryFilter("filter_method", methodLabels, methodIndex) { methodIndex = it } }
+                item { HistoryFilter("filter_period", "Periodo", periodLabels, periodIndex) { periodIndex = it } }
+                item { HistoryFilter("filter_pocket", "Pocket", pocketLabels, pocketIndex) { selectedPocketId = pocketOptions[it] } }
+                item { HistoryFilter("filter_currency", "Moneda", currencyLabels, currencyIndex) { currencyIndex = it } }
+                item { HistoryFilter("filter_method", "Método", methodLabels, methodIndex) { methodIndex = it } }
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -211,56 +264,138 @@ internal fun MovementsScreen(
                 }
             }
         }
-        if (filtered.isEmpty()) item { Text("No hay movimientos para estos filtros") }
-        groupedMovements.forEach { (date, movements) ->
-            item(key = "date-$date") {
-                Text(
-                    formatMovementDate(date, state.currentLocalDate),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
+        if (state.movements.isEmpty()) {
+            item {
+                EmptyHistory(
+                    title = "Aún no hay movimientos",
+                    body = "Registra tu primer gasto para ver aquí tu historial.",
+                    actionLabel = "Registrar gasto",
+                    onAction = onRecordExpense,
                 )
             }
-            items(movements, key = { it.id }) { movement ->
-                MovementCard(
-                    movement = movement,
-                    accountingCurrency = state.periods.firstOrNull { it.id == movement.periodId }?.accountingCurrency
-                        ?: SupportedCurrency.SAR,
-                    iconKey = state.pocketCatalog.firstOrNull { it.id == movement.pocketId }?.iconKey
-                        ?: PocketIconKey.forName(movement.pocketName),
-                    onClick = { selectedId = movement.id },
+        } else if (filtered.isEmpty()) {
+            item {
+                EmptyHistory(
+                    title = "No hay movimientos para estos filtros",
+                    body = "Prueba otra búsqueda o limpia los filtros.",
                 )
+            }
+        }
+        groupedMovements.forEach { (date, movements) ->
+            item(key = "date-$date") {
+                val dayNet = movements.netSpendMinor()
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp).semantics(mergeDescendants = true) { heading() },
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        formatMovementDate(date, state.currentLocalDate),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    if (movements.map(::currencyOf).distinct().size == 1) {
+                        val dayCurrency = currencyOf(movements.first())
+                        Text(
+                            if (dayNet < 0) "Devuelto en el día ${MoneyText.format(-dayNet, dayCurrency)}"
+                            else "Total del día ${MoneyText.format(dayNet, dayCurrency)}",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            items(movements, key = { it.id }) { movement ->
+                SwipeToDeleteMovement(
+                    onDelete = { deleteWithUndo(movement) },
+                    modifier = Modifier.animateItem(),
+                ) {
+                    MovementCard(
+                        movement = movement,
+                        accountingCurrency = currencyOf(movement),
+                        iconKey = state.pocketCatalog.firstOrNull { it.id == movement.pocketId }?.iconKey
+                            ?: PocketIconKey.forName(movement.pocketName),
+                        onClick = { selectedId = movement.id },
+                        onEdit = { onEditMovement(movement) },
+                        onDelete = { deleteWithUndo(movement) },
+                    )
+                }
             }
         }
     }
     selected?.let { movement ->
-        AlertDialog(
-            onDismissRequest = { selectedId = null },
-            title = { Text(movement.pocketName) },
-            text = { Text("${if (movement.type == MovementType.EXPENSE) "Gasto" else "Devolución"} ${money(movement)}\n${movement.localDate}") },
-            confirmButton = {
-                TextButton(onClick = { onEditMovement(movement); selectedId = null }) { Text("Editar") }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(onClick = {
-                        selectedId = null
-                        scope.launch {
-                            val result = ledger.execute(LedgerCommand.DeleteMovement(movement.id))
-                            if (result is LedgerResult.Deleted) {
-                                val action = withTimeoutOrNull(undoWindowMillis) {
-                                    snackbar.showSnackbar("Movimiento eliminado", "Deshacer", duration = SnackbarDuration.Indefinite)
-                                }
-                                if (action == SnackbarResult.ActionPerformed) ledger.execute(LedgerCommand.RestoreMovement(result.movement))
-                                else snackbar.currentSnackbarData?.dismiss()
-                            }
-                        }
-                    }) { Text("Eliminar") }
-                    TextButton(onClick = { selectedId = null }) { Text("Cerrar") }
-                }
-            },
+        MovementDetailDialog(
+            movement = movement,
+            accountingCurrency = currencyOf(movement),
+            onEdit = { onEditMovement(movement); selectedId = null },
+            onDelete = { deleteWithUndo(movement) },
+            onDismiss = { selectedId = null },
         )
     }
+}
 
+@Composable
+private fun EmptyHistory(title: String, body: String, actionLabel: String? = null, onAction: () -> Unit = {}) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.AutoMirrored.Filled.ReceiptLong, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(40.dp))
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(body, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            actionLabel?.let {
+                Button(onClick = onAction) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Text(it, modifier = Modifier.padding(start = 8.dp))
+                }
+            }
+        }
+    }
+}
+
+/** Swipe from the end edge to delete; the list's undo snackbar provides recovery. */
+@Composable
+private fun SwipeToDeleteMovement(
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    // Plain remember: an undone deletion re-enters the list under the same key and must start settled,
+    // not restore its dismissed position and delete itself again.
+    val threshold = SwipeToDismissBoxDefaults.positionalThreshold
+    val dismissState = remember { SwipeToDismissBoxState(SwipeToDismissBoxValue.Settled, threshold) }
+    val currentOnDelete by rememberUpdatedState(onDelete)
+    // Stable callback so the box's settle effect runs once per dismissal rather than on every recomposition.
+    val handleDismiss = remember { { value: SwipeToDismissBoxValue -> if (value == SwipeToDismissBoxValue.EndToStart) currentOnDelete() } }
+    SwipeToDismissBox(
+        state = dismissState,
+        modifier = modifier,
+        enableDismissFromStartToEnd = false,
+        onDismiss = handleDismiss,
+        backgroundContent = {
+            // Visual affordance only; the card exposes "Eliminar movimiento" as an accessibility action.
+            if (dismissState.dismissDirection != SwipeToDismissBoxValue.EndToStart) return@SwipeToDismissBox
+            val active = dismissState.targetValue == SwipeToDismissBoxValue.EndToStart
+            Surface(
+                modifier = Modifier.fillMaxSize().clearAndSetSemantics { },
+                shape = MaterialTheme.shapes.medium,
+                color = if (active) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                contentColor = if (active) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Eliminar", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(end = 8.dp))
+                    Icon(Icons.Default.Delete, contentDescription = null)
+                }
+            }
+        },
+        content = { content() },
+    )
 }
 
 @Composable
@@ -330,15 +465,26 @@ private fun MovementCard(
     accountingCurrency: SupportedCurrency,
     iconKey: PocketIconKey,
     onClick: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val isRefund = movement.type == MovementType.REFUND
     val amountColor = if (isRefund) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
     val time = Instant.ofEpochMilli(movement.occurredAtUtcMillis)
-        .atZone(java.time.ZoneId.of(movement.zoneId))
+        .atZone(ZoneId.of(movement.zoneId))
         .format(DateTimeFormatter.ofPattern("HH:mm"))
+    val converted = movement.originalCurrencyCode != accountingCurrency.name && movement.originalAmountMinor != null
 
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics {
+                customActions = listOf(
+                    CustomAccessibilityAction("Editar movimiento") { onEdit(); true },
+                    CustomAccessibilityAction("Eliminar movimiento") { onDelete(); true },
+                )
+            },
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -352,9 +498,9 @@ private fun MovementCard(
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     if (isRefund) {
-                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
                     } else {
-                        PocketArtwork(iconKey, contentDescription = null, modifier = Modifier.size(42.dp))
+                        PocketArtworkPlate(iconKey, plateSize = 52.dp)
                     }
                 }
             }
@@ -367,9 +513,10 @@ private fun MovementCard(
                 Text(
                     listOfNotNull(movement.pocketName, movement.paymentMethodName).joinToString(" · "),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
                 )
                 movement.note?.takeIf { it.isNotBlank() }?.let {
-                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, maxLines = 2)
                 }
             }
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -379,17 +526,16 @@ private fun MovementCard(
                     fontFamily = FontFamily.Monospace,
                     color = amountColor,
                 )
-                if (movement.originalCurrencyCode != accountingCurrency.name && movement.originalAmountMinor != null) {
-                    Text(
-                        "${movement.originalCurrencyCode} ${minorNumber(movement.originalAmountMinor)} · " +
-                            if (movement.conversionStatus == ConversionStatus.CONFIRMED) "Confirmado" else "Estimado",
+                when {
+                    converted -> Text(
+                        movement.originalAmountLabel(),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                     )
-                } else {
-                    Surface(
+                    isRefund -> Surface(
                         shape = MaterialTheme.shapes.small,
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -420,24 +566,85 @@ private fun MovementCard(
 }
 
 @Composable
+private fun MovementDetailDialog(
+    movement: Movement,
+    accountingCurrency: SupportedCurrency,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val zoned = Instant.ofEpochMilli(movement.occurredAtUtcMillis).atZone(ZoneId.of(movement.zoneId))
+    val isRefund = movement.type == MovementType.REFUND
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(movement.pocketName) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "${if (isRefund) "Devolución" else "Gasto"} ${MoneyText.format(movement.accountingAmountMinor, accountingCurrency)}",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontFamily = FontFamily.Monospace,
+                )
+                DetailLine("Fecha", zoned.format(DateTimeFormatter.ofPattern("EEEE d 'de' MMMM yyyy · HH:mm", Locale.forLanguageTag("es"))))
+                movement.merchant?.takeIf(String::isNotBlank)?.let { DetailLine("Comercio", it) }
+                movement.paymentMethodName?.let { DetailLine("Método de pago", it) }
+                movement.note?.takeIf(String::isNotBlank)?.let { DetailLine("Nota", it) }
+                if (movement.originalCurrencyCode != accountingCurrency.name && movement.originalAmountMinor != null) {
+                    DetailLine("Importe original", movement.originalAmountLabel())
+                    movement.conversionSource?.let { DetailLine("Fuente", it) }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onEdit) { Text("Editar") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(
+                    onClick = onDelete,
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text("Eliminar") }
+                TextButton(onClick = onDismiss) { Text("Cerrar") }
+            }
+        },
+    )
+}
+
+@Composable
+private fun DetailLine(label: String, value: String) {
+    Column(Modifier.semantics(mergeDescendants = true) {}) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@Composable
 private fun HistoryFilter(
     testTag: String,
+    name: String,
     labels: List<String>,
     selectedIndex: Int,
     onSelected: (Int) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val active = selectedIndex != 0
     Box {
-        OutlinedButton(
+        FilterChip(
+            selected = active,
             onClick = { expanded = true },
+            label = { Text(if (active) labels.getOrElse(selectedIndex) { name } else name) },
+            trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
             modifier = Modifier.testTag(testTag),
-        ) {
-            Text(labels.getOrElse(selectedIndex) { labels.first() })
-        }
+        )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             labels.forEachIndexed { index, label ->
                 DropdownMenuItem(
-                    text = { Text(if (index == selectedIndex) "✓ $label" else label) },
+                    text = { Text(label) },
+                    trailingIcon = if (index == selectedIndex) {
+                        { Icon(Icons.Default.Check, contentDescription = "Seleccionado") }
+                    } else {
+                        null
+                    },
                     onClick = {
                         onSelected(index)
                         expanded = false
@@ -449,10 +656,19 @@ private fun HistoryFilter(
     }
 }
 
+/** "USD 67.00 · Confirmado": the original amount with its conversion status. */
+private fun Movement.originalAmountLabel(): String =
+    "$originalCurrencyCode ${MoneyText.grouped(originalAmountMinor ?: 0)} · " +
+        if (conversionStatus == ConversionStatus.CONFIRMED) "Confirmado" else "Estimado"
+
 private fun formatMovementDate(date: LocalDate, today: LocalDate): String {
-    val formatter = DateTimeFormatter.ofPattern("d MMM", Locale.forLanguageTag("es"))
+    val formatter = DateTimeFormatter.ofPattern("EEE d MMM", Locale.forLanguageTag("es"))
     val formatted = date.format(formatter)
-    return if (date == today) "Hoy, $formatted" else formatted
+    return when (date) {
+        today -> "Hoy, ${date.format(DateTimeFormatter.ofPattern("d MMM", Locale.forLanguageTag("es")))}"
+        today.minusDays(1) -> "Ayer, ${date.format(DateTimeFormatter.ofPattern("d MMM", Locale.forLanguageTag("es")))}"
+        else -> formatted.replaceFirstChar { it.titlecase(Locale.forLanguageTag("es")) }
+    }
 }
 
 

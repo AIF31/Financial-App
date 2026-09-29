@@ -98,7 +98,7 @@ class ReminderWorker(context: Context, parameters: WorkerParameters) : Coroutine
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_pocket)
             .setContentTitle("Revisión diaria")
             .setContentText("Revisa si falta registrar algún gasto de hoy.")
             .setContentIntent(pendingIntent)

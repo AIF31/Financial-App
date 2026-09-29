@@ -4,12 +4,14 @@ import android.content.Intent
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -109,8 +111,7 @@ class PocketCriticalConfigurationTest {
             compose.onNodeWithText("Guardar fondos").performScrollTo().performClick()
             compose.waitUntil(10_000) { runBlocking { app.ledger.state.first().newFundsMinor == 120_000L } }
             compose.onNodeWithText("Crear periodo siguiente").performScrollTo().assertIsDisplayed()
-            compose.onNodeWithTag("settings_list").performScrollToNode(hasText("Atrás"))
-            compose.onNodeWithText("Atrás").performClick()
+            compose.onNodeWithContentDescription("Atrás").performClick()
 
             compose.onNodeWithText("Pockets").performClick()
             compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Crear Pocket"))
@@ -197,7 +198,7 @@ class PocketCriticalConfigurationTest {
             compose.onNodeWithTag("movement_amount").performTextInput("12.50")
             closeSoftKeyboard()
             compose.onNodeWithTag("movement_pocket_Supermercado").performClick()
-            compose.onNodeWithTag("movement_pocket_Supermercado").assertTextContains("✓ Supermercado")
+            compose.onNodeWithTag("movement_pocket_Supermercado").assertIsSelected()
             compose.waitUntil(10_000) {
                 compose.onNodeWithTag("movement_save").fetchSemanticsNode().config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled).not()
             }

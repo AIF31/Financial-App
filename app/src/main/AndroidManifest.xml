@@ -39,6 +39,14 @@
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
+        <!-- Static shortcut target in its own task, so the launcher's CLEAR_TASK cannot discard open forms. -->
+        <activity
+            android:name=".NewExpenseShortcutActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay" />
         <service
             android:name=".notifications.PocketNotificationListener"
             android:exported="true"

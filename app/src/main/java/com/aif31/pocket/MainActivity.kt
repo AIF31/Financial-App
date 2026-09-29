@@ -35,6 +35,8 @@ class MainActivity : ComponentActivity() {
     private val recovery by viewModels<RecoveryViewModel>()
     private lateinit var dateCoordinator: ForegroundDateCoordinator
     private var notificationPermissionRevision by mutableIntStateOf(0)
+    /** Count of "new expense" launches; PocketApp opens quick entry once per increment. */
+    private var newExpenseRequest by mutableIntStateOf(0)
     private var openMovementsRevision by mutableIntStateOf(0)
 
     private val createBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
@@ -103,7 +105,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        val openExpense = intent?.action == ACTION_NEW_EXPENSE
+        // A recreated activity restores its count instead of re-reading the launch intent, so rotation after
+        // saving does not reopen quick entry.
+        newExpenseRequest = savedInstanceState?.getInt(KEY_NEW_EXPENSE_REQUEST)
+            ?: if (isNewExpenseIntent(intent)) 1 else 0
         if (savedInstanceState == null && intent?.action == ACTION_OPEN_MOVEMENTS) openMovementsRevision++
         setContent {
             PocketTheme {
@@ -112,7 +117,7 @@ class MainActivity : ComponentActivity() {
                     preferences = (application as PocketApplication).preferences,
                     exchangeRates = (application as PocketApplication).exchangeRates,
                     reminderScheduler = (application as PocketApplication).reminderScheduler,
-                    openNewExpense = openExpense,
+                    newExpenseRequest = newExpenseRequest,
                     restoreCandidate = recovery.restoreCandidate,
                     onRestoreCandidateHandled = recovery::clearRestoreCandidate,
                     operationMessage = recovery.operationMessage,
@@ -139,11 +144,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onNewIntent(intent: android.content.Intent) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // Same validation as onCreate: only the explicit actions are honored; no extras are read.
         setIntent(intent)
+        if (isNewExpenseIntent(intent)) newExpenseRequest++
         if (intent.action == ACTION_OPEN_MOVEMENTS) openMovementsRevision++
     }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt(KEY_NEW_EXPENSE_REQUEST, newExpenseRequest)
+    }
+
+    private fun isNewExpenseIntent(intent: Intent?): Boolean = intent?.action == ACTION_NEW_EXPENSE
 
     private suspend fun catchUpPeriods(): Boolean {
         val application = application as PocketApplication
@@ -257,6 +271,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val ACTION_NEW_EXPENSE = "com.aif31.pocket.NEW_EXPENSE"
         const val ACTION_OPEN_MOVEMENTS = "com.aif31.pocket.OPEN_MOVEMENTS"
+        private const val KEY_NEW_EXPENSE_REQUEST = "new_expense_request"
         private const val MAX_BACKUP_BYTES = 10 * 1024 * 1024
     }
 }
