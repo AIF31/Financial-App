@@ -4,7 +4,7 @@ Pocket supports Android 8.0 (API 26) and newer. It requires no account, and fina
 
 ## Install an official release
 
-Download **[Pocket 1.0.0](https://github.com/AIF31/Financial-App/releases/download/v1.0.0/Pocket-v1.0.0.apk)** directly, or choose another version from [GitHub Releases](https://github.com/AIF31/Financial-App/releases).
+Download **[Pocket 1.0.5](https://github.com/AIF31/Financial-App/releases/download/v1.0.5/Pocket-v1.0.5.apk)** directly, or choose another version from [GitHub Releases](https://github.com/AIF31/Financial-App/releases).
 
 Before installing:
 
@@ -12,8 +12,8 @@ Before installing:
 - If Pocket is already installed, export and verify a `.pocketbackup` before changing between a debug build and an official release.
 - Download APKs only from `github.com/AIF31/Financial-App`.
 
-1. Open the Pocket 1.0.0 link on the Android device and download `Pocket-v1.0.0.apk`. If the browser warns that APK files can be harmful, continue only after confirming the address is this repository.
-2. Tap the completed-download notification. If it is gone, open the device's **Files** app, select **Downloads**, and tap `Pocket-v1.0.0.apk`.
+1. Open the Pocket 1.0.5 link on the Android device and download `Pocket-v1.0.5.apk`. If the browser warns that APK files can be harmful, continue only after confirming the address is this repository.
+2. Tap the completed-download notification. If it is gone, open the device's **Files** app, select **Downloads**, and tap `Pocket-v1.0.5.apk`.
 3. If Android blocks the install, tap **Settings** on the prompt and enable **Allow from this source** for the browser or Files app that opened the APK.
 4. Return to Android's package installer and tap **Install**.
 5. Tap **Open**, or launch **Pocket** from the app drawer.
@@ -25,7 +25,7 @@ Google Play Protect may scan the sideloaded APK before installation. Cancel if t
 
 ## Confirm the installation
 
-Open **Settings > Apps > Pocket > App details** and confirm the installed version is `1.0.0`. Pocket should open to its Spanish setup flow and should not require an account.
+Open **Settings > Apps > Pocket > App details** and confirm the installed version is `1.0.5`. Pocket should open to its Spanish setup flow and should not require an account.
 
 ## Troubleshooting
 

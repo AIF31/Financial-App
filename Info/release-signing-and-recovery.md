@@ -93,7 +93,7 @@ Restore can replace a non-empty ledger after preview and explicit confirmation. 
 
 - The packaged manifest limits network use to HTTPS exchange-rate lookup after explicit user consent; cleartext traffic is disabled.
 - `android:allowBackup="false"`; the explicit document flow is the supported backup path.
-- MainActivity is the only app-owned exported component.
+- MainActivity is the only app-owned exported activity. The notification listener service is exported only to the system through `BIND_NOTIFICATION_LISTENER_SERVICE`; the "Nuevo gasto" shortcut target is non-exported.
 - WorkManager/ProfileInstaller exported components are protected by system permissions.
 - Internal providers, services, and receivers are non-exported.
 - Reminder navigation uses an explicit immutable `PendingIntent` with private lock-screen visibility.

@@ -4,6 +4,13 @@ Notable repository changes are recorded here for future maintainers.
 
 ## 2026-09-29
 
+### Release 1.0.5
+
+- `README.md` and `Info/installing-pocket.md` now link to `Pocket-v1.0.5.apk` in the `v1.0.5` GitHub release, replacing 1.0.0. The release is built from `main` at `49032e3` (`versionName` 1.0.5, `versionCode` 6), which includes everything merged through PR #36. 1.0.5 updates 1.0.0 in place; database schema 6 migrates to 7.
+- The release docs had said `MainActivity` was the only app-owned exported component. They now also name the notification listener service, which is exported only to the system through `BIND_NOTIFICATION_LISTENER_SERVICE`. An android-intent-security review before the build found nothing to fix: no nested intents are forwarded, `onCreate` and `onNewIntent` read only explicit actions and no extras, both PendingIntents are explicit and `FLAG_IMMUTABLE`, and the FileProvider and shortcut target are non-exported.
+- Verification: `49032e3` passed Android CI. Locally, `:app:testDebugUnitTest` passed 274 host tests with no failures, errors or skips, and `:app:lintRelease` passed. `scripts/build-signed-release.ps1` produced the APK. `apksigner` verified it with APK Signature Scheme v2 and one signer, `CN=Pocket, O=AIF31`. `aapt2` reported `com.aif31.pocket` 1.0.5, code 6. APK SHA-256: `dc2689ca54559ba213e70e59f8f9d244da78098757c3ab2c215be7e886409eba`.
+- Not verified: the signer's certificate was not compared with the fingerprint in the secret store; reading it from the keystore needs its password. Managed-device and physical-device instrumentation were not rerun for this build, and 1.0.5 was not installed over 1.0.0 on a device.
+
 ### Test reliability
 
 - `PocketAppHostFlowTest.movement_search_survives_saved_state_restoration` no longer fails intermittently with `CalledFromWrongThreadException`. `createComposeRule()` runs composition coroutines on an unconfined test dispatcher. The ledger state collector therefore resumed on Room's `arch_disk_io` transaction thread and applied UI state there. The test now delivers ledger state on the main thread, as production's `AndroidUiDispatcher` already does. The app code is unchanged.
