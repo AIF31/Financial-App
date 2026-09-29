@@ -289,6 +289,34 @@ class NotificationSuggestionLedgerTest {
         assertTrue(database.financeDao().observeMovementSuggestions().first().isEmpty())
     }
 
+    @Test fun restored_auto_recorded_movement_blocks_direct_ingest_without_auto_recording() = runTest {
+        val ledger = RoomPocketLedger(database, fixedClock)
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.Initialize(100_000)))
+        val store = NotificationSuggestionStore(database, fixedClock)
+        val payment = ParsedPayment(1_200, SupportedCurrency.SAR, "Shop")
+        val original = store.ingest("example.payments", "restored", instant.toEpochMilli(), payment)
+        val pocketId = ledger.state.first().pockets.first().pocket.id
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ConfirmSuggestion(
+            suggestionId = original.suggestionId,
+            movement = LedgerCommand.AddMovement(
+                pocketId = pocketId,
+                type = MovementType.EXPENSE,
+                accountingAmountMinor = payment.amountMinor,
+                occurredAtUtcMillis = instant.toEpochMilli(),
+                localDate = LocalDate.of(2026, 9, 5),
+                merchant = payment.merchant,
+            ),
+            submissionId = autoRecordedMovementId(original.suggestionId),
+            automatic = true,
+        )))
+        assertEquals(LedgerResult.Success, ledger.restoreBackup(ledger.exportBackup()))
+
+        assertEquals(IngestOutcome.IGNORED, store.ingest("example.payments", "restored", instant.toEpochMilli(), payment).outcome)
+        assertTrue(store.contains("example.payments", "restored"))
+        assertTrue(ledger.state.first().movementSuggestions.isEmpty())
+        assertEquals(1, ledger.state.first().movements.count { it.id == autoRecordedMovementId(original.suggestionId) })
+    }
+
     @Test fun failed_confirmation_preserves_the_pending_suggestion_and_creates_no_movement() = runTest {
         val ledger = RoomPocketLedger(database, fixedClock)
         ledger.execute(LedgerCommand.Initialize(100_000))

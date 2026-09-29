@@ -4,6 +4,12 @@ Notable repository changes are recorded here for future maintainers.
 
 ## 2026-09-29
 
+### Notification replay after backup restore
+
+- A restored auto-recorded Movement now blocks the same notification identity at the suggestion store, including conversation reposts after its Pocket is archived and direct capture when auto-recording is off. No new pending suggestion or detection alert is produced. The development version advances to `1.0.6` (`versionCode` 7); no APK was published.
+- Verification: both new regressions failed on the prior code and passed after the fix. Four notification host test classes passed; the full host suite passed 276 tests with no failures or skips. `:app:lintDebug`, `:app:assembleDebug`, `:app:assembleRelease`, `:app:assembleDebugAndroidTest`, and the Pixel 6 API 35 managed-device suite passed; the latter executed 30 tests. See the [dated review](../docs/audits/2026-09-29-notification-restore-review.md).
+- Limits: pre-existing pending replays are not cleaned up by this store guard. Backups still omit suggestion tombstones, so a Movement deleted before backup has no retained identity after restore. No physical-device test was run.
+
 ### Release 1.0.5
 
 - `README.md` and `Info/installing-pocket.md` now link to `Pocket-v1.0.5.apk` in the `v1.0.5` GitHub release, replacing 1.0.0. The release is built from `main` at `49032e3` (`versionName` 1.0.5, `versionCode` 6), which includes everything merged through PR #36. 1.0.5 updates 1.0.0 in place; database schema 6 migrates to 7.

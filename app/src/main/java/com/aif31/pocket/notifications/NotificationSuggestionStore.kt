@@ -27,6 +27,8 @@ internal class NotificationSuggestionStore(
         val nowUtcMillis = clock.millis()
         val outcome = database.withTransaction {
             dao.deleteExpiredMovementSuggestions(nowUtcMillis)
+            // ponytail: blocks new replays; reconcile old pending rows separately if migration cleanup is needed.
+            if (dao.movement(autoRecordedMovementId(identityHash)) != null) return@withTransaction IngestOutcome.IGNORED
             val existing = dao.movementSuggestion(identityHash)
             if (existing != null && existing.status != "PENDING") return@withTransaction IngestOutcome.IGNORED
             if (existing?.effectiveAtUtcMillis?.let { it > postedAtUtcMillis } == true) return@withTransaction IngestOutcome.IGNORED
@@ -45,10 +47,13 @@ internal class NotificationSuggestionStore(
         return IngestResult(identityHash, outcome)
     }
 
-    /** True once a message was stored, including confirmed or discarded tombstones that have not expired. */
-    suspend fun contains(sourcePackage: String, notificationIdentity: String): Boolean =
-        database.financeDao().movementSuggestion(identityHash(sourcePackage, notificationIdentity))
-            ?.let { it.expiresAtUtcMillis > clock.millis() } == true
+    /** True for a surviving auto-recorded Movement or an unexpired suggestion or tombstone. */
+    suspend fun contains(sourcePackage: String, notificationIdentity: String): Boolean {
+        val identityHash = identityHash(sourcePackage, notificationIdentity)
+        val dao = database.financeDao()
+        return dao.movement(autoRecordedMovementId(identityHash)) != null ||
+            dao.movementSuggestion(identityHash)?.let { it.expiresAtUtcMillis > clock.millis() } == true
+    }
 
     private fun identityHash(sourcePackage: String, notificationIdentity: String) =
         hash("$sourcePackage\u0000$notificationIdentity")

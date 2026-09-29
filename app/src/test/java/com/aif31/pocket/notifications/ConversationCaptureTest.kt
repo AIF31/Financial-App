@@ -4,14 +4,18 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.aif31.pocket.data.FinanceDatabase
 import com.aif31.pocket.data.LedgerCommand
+import com.aif31.pocket.data.LedgerResult
+import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.RoomPocketLedger
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneOffset
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -74,6 +78,31 @@ class ConversationCaptureTest {
 
         assertEquals(2, metrics.snapshot().parserAttempts)
         assertEquals(2, metrics.snapshot().parserSuccesses)
+    }
+
+    @Test fun restored_auto_recorded_message_is_ignored_after_its_pocket_is_archived() = runTest {
+        val pocket = ledger.state.first().pockets.first().pocket
+        val captured = post(coffee).single()
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ConfirmSuggestion(
+            suggestionId = captured.suggestionId,
+            movement = LedgerCommand.AddMovement(
+                pocketId = pocket.id,
+                type = MovementType.EXPENSE,
+                accountingAmountMinor = captured.payment.amountMinor,
+                occurredAtUtcMillis = coffee.postedAtUtcMillis,
+                localDate = LocalDate.of(2026, 9, 5),
+                merchant = captured.payment.merchant,
+            ),
+            submissionId = autoRecordedMovementId(captured.suggestionId),
+            automatic = true,
+        )))
+        assertEquals(LedgerResult.Success, ledger.restoreBackup(ledger.exportBackup()))
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePocket(pocket.id)))
+
+        assertTrue(post(coffee).isEmpty())
+        val state = ledger.state.first()
+        assertTrue(state.movementSuggestions.isEmpty())
+        assertEquals(1, state.movements.count { it.id == autoRecordedMovementId(captured.suggestionId) })
     }
 
     private class CountingMetrics : NotificationBetaMetrics {
