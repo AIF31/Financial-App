@@ -20,6 +20,7 @@ Fixes from `docs/audits/2026-09-28-pr34-review.md`. Behavior that was new rather
 - Root navigation labels shrink to fit on one line instead of ending in an ellipsis, so "Movimientos" is shown in full at large font scales.
 - Comparing periods in different accounting currencies with no frozen boundary rate between them now shows the compared period's daily average in its own currency, with no difference computed. The summary table gains a "Gasto diario promedio" row.
 - The Movement form's Pocket choices show availability for the period that contains the entered date, in that period's currency, and name that period when it is not the current one. They previously showed the current period's availability for past dates.
+- Future-dated Movements no longer inflate the pace of the current period. The daily average counts spending through today, and the projection extrapolates that pace and adds later-dated spending once instead of scaling it up. Period totals, availability, and budget used still include it. The implementation reference also now describes the shortcut trampoline Activity.
 - Follow-up review: the "Gasto guardado" confirmation after saving over an edit now appears on that edit; the Movement form hosts the app's snackbar instead of leaving it queued until the form closes. Inicio's "Ver detalles" shows the previous period's daily average in its own currency when no frozen rate links the currencies, instead of only a warning.
 
 ### Time format and notification setup

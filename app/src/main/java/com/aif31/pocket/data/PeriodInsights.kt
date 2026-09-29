@@ -33,9 +33,11 @@ data class PeriodInsights(
     val availabilityMinor: Long,
     val expenseCount: Int,
     val largestExpense: Movement?,
+    /** Net spend dated through today over the elapsed days; later-dated Movements are not averaged in. */
     val averageDailySpendMinor: Long?,
     /** Availability spread over the remaining days including today; only while in progress and positive. */
     val safeDailySpendMinor: Long?,
+    /** Pace through today extrapolated to the whole period, plus later-dated Movements counted once. */
     val projectedSpendMinor: Long?,
     /** Net spend as a share of Pocket budgets plus rollover, the same base availability is measured from. */
     val budgetUsedPercent: Int?,
@@ -72,12 +74,19 @@ data class PeriodInsights(
             // Rollover is spendable money too, so a period funded only by rollover still has a plan.
             val periodFunds = Math.addExact(period.newFundsMinor, rollover)
             val remainingDays = if (inProgress) totalDays - elapsedDays else 0
-            val projected = if (inProgress) PocketMath.project(netSpend, elapsedDays, totalDays).amountMinor else null
             // Match the ledger's net spend, which only counts Pockets present in this period's snapshot.
             val snapshotPocketIds = pockets.mapTo(HashSet()) { it.pocket.id }
             val periodMovements = state.movements.filter { it.periodId == period.id && it.pocketId in snapshotPocketIds }
             val expenses = periodMovements.filter { it.type == MovementType.EXPENSE }
             val netSpendAfterToday = if (inProgress) periodMovements.filter { it.localDate > today }.netSpendMinor() else 0L
+            // Pace is what has been spent through today. Movements dated later are already-committed spending: they
+            // count once in the projection and in period totals, but are not extrapolated or averaged over past days.
+            val netSpendThroughToday = Math.subtractExact(netSpend, netSpendAfterToday)
+            val projected = if (inProgress) {
+                Math.addExact(PocketMath.project(netSpendThroughToday, elapsedDays, totalDays).amountMinor, netSpendAfterToday)
+            } else {
+                null
+            }
             return PeriodInsights(
                 period = period,
                 inProgress = inProgress,
@@ -94,7 +103,7 @@ data class PeriodInsights(
                 availabilityMinor = availability,
                 expenseCount = expenses.size,
                 largestExpense = expenses.maxByOrNull { it.accountingAmountMinor },
-                averageDailySpendMinor = elapsedDays.takeIf { it > 0 }?.let { netSpend / it },
+                averageDailySpendMinor = elapsedDays.takeIf { it > 0 }?.let { netSpendThroughToday / it },
                 safeDailySpendMinor = if (inProgress && availability > 0) availability / (remainingDays + 1) else null,
                 projectedSpendMinor = projected,
                 budgetUsedPercent = availableBudget.takeIf { it > 0 }?.let { (netSpend * 100 / it).toInt() },

@@ -129,6 +129,27 @@ class PeriodInsightsTest {
     }
 
     @Test
+    fun a_future_dated_expense_counts_once_in_the_projection_but_not_in_todays_pace() {
+        // Day 9 of March's 28 days: SAR 9.00 spent so far, plus SAR 30.00 of rent recorded for 20 March.
+        val state = state(
+            today = LocalDate.of(2026, 3, 5),
+            elapsedDays = 9,
+            summaries = mapOf(march.id to listOf(summary(market, budget = 30_000, expense = 3_900))),
+            movements = listOf(
+                movement("groceries", march, LocalDate.of(2026, 3, 1), 900),
+                movement("rent", march, LocalDate.of(2026, 3, 20), 3_000),
+            ),
+        )
+
+        val insights = PeriodInsights.of(state, march.id)!!
+
+        assertEquals(100L, insights.averageDailySpendMinor) // 900 / 9, the pace so far
+        assertEquals(5_800L, insights.projectedSpendMinor) // 900 * 28 / 9 = 2,800, plus the rent once
+        assertEquals(3_900L, insights.netSpendMinor) // Period totals still include the rent.
+        assertEquals(26_100L, insights.availabilityMinor)
+    }
+
+    @Test
     fun closed_period_uses_every_day_and_has_no_forward_looking_metrics() {
         val state = state(
             today = LocalDate.of(2026, 3, 5),
