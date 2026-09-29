@@ -617,6 +617,75 @@ class PocketAppHostFlowTest {
         compose.waitUntil(5_000) { completionMessage?.startsWith("Backup restaurado:") == true }
     }
 
+    /** A one-period backup with one Movement, exported from a separate database. */
+    private fun singlePeriodBackupWithOneMovement(clock: Clock, zone: ZoneId): Pair<ByteArray, Int> {
+        val sourceDatabase = FinanceDatabase.inMemory(ApplicationProvider.getApplicationContext<Context>())
+        return try {
+            val source = RoomPocketLedger(sourceDatabase, clock, zone)
+            runBlocking {
+                source.execute(LedgerCommand.Initialize(75_000))
+                val pocket = source.state.first { !it.needsOnboarding }.pockets.first().pocket
+                source.execute(
+                    LedgerCommand.AddMovement(
+                        pocketId = pocket.id, type = MovementType.EXPENSE, accountingAmountMinor = 1_000,
+                        occurredAtUtcMillis = clock.millis(), localDate = LocalDate.of(2026, 2, 26),
+                    ),
+                )
+                val backup = source.exportBackup()
+                backup to source.previewBackup(backup).pockets
+            }
+        } finally {
+            sourceDatabase.close()
+        }
+    }
+
+    @Test
+    fun restore_preview_and_result_use_singular_counts() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val clock = Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone)
+        val (backup, pockets) = singlePeriodBackupWithOneMovement(clock, zone)
+        val target = RoomPocketLedger(database, clock, zone)
+        runBlocking { target.execute(LedgerCommand.Initialize(10_000)) }
+        // Capture already has a source app, so the result carries no capture reminder.
+        val preferences = FakePreferences(AppPreferences(notificationSourcePackages = setOf("com.example.bank")))
+        var completion: String? = null
+        compose.setContent {
+            PocketApp(ledger = target, preferences = preferences, restoreCandidate = backup, onRestoreCompleted = { completion = it })
+        }
+
+        compose.waitUntilExactlyOneExists(hasText("Versión 5: 1 periodo, $pockets Pockets y 1 movimiento."), 5_000)
+        compose.onNodeWithText("Continuar sin backup").performClick()
+        compose.onNodeWithText("Restaurar y reemplazar").performClick()
+        compose.waitUntil(5_000) { completion != null }
+        assertEquals("Backup restaurado: 1 periodo, $pockets Pockets y 1 movimiento.", completion)
+    }
+
+    @Test
+    fun restore_result_says_capture_needs_its_source_apps_chosen_again_when_none_are_selected() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val clock = Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone)
+        val (backup, _) = singlePeriodBackupWithOneMovement(clock, zone)
+        // A fresh install restoring through onboarding: the backup does not carry the device's source apps.
+        val target = RoomPocketLedger(database, clock, zone)
+        var completion: String? = null
+        compose.setContent {
+            PocketApp(ledger = target, preferences = FakePreferences(), restoreCandidate = backup, onRestoreCompleted = { completion = it })
+        }
+
+        compose.waitUntilExactlyOneExists(hasText("Restaurar"), 5_000)
+        compose.onNodeWithText("Restaurar").performClick()
+        compose.waitUntil(5_000) { completion != null }
+        val message = completion.orEmpty()
+        assertTrue(message, message.startsWith("Backup restaurado:"))
+        assertTrue(
+            message,
+            message.endsWith(
+                " Si usabas la captura desde notificaciones, vuelve a elegir tus apps en " +
+                    "Ajustes > Captura desde notificaciones; el backup no las incluye.",
+            ),
+        )
+    }
+
     @Test
     fun restore_confirmation_disables_duplicate_submissions_until_the_result_arrives() {
         val zone = ZoneId.of("Asia/Riyadh")
@@ -1384,8 +1453,8 @@ class PocketAppHostFlowTest {
         compose.onAllNodesWithText("Nuevo gasto").assertCountEquals(0)
     }
 
-    private class FakePreferences : PreferencesStore {
-        private val values = MutableStateFlow(AppPreferences())
+    private class FakePreferences(initial: AppPreferences = AppPreferences()) : PreferencesStore {
+        private val values = MutableStateFlow(initial)
         override val state = values
         val current: AppPreferences get() = values.value
         override suspend fun setFuturePeriodStartDay(day: Int) { values.value = values.value.copy(futurePeriodStartDay = day) }
@@ -1394,6 +1463,9 @@ class PocketAppHostFlowTest {
         override suspend fun setOnlineFxEnabled(enabled: Boolean) { values.value = values.value.copy(onlineFxEnabled = enabled) }
         override suspend fun setDefaultExpenseCurrency(currency: com.aif31.pocket.domain.SupportedCurrency) {
             values.value = values.value.copy(defaultExpenseCurrency = currency)
+        }
+        override suspend fun setNotificationSourcePackages(packages: Set<String>) {
+            values.value = values.value.copy(notificationSourcePackages = packages)
         }
     }
 

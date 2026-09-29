@@ -62,6 +62,10 @@ internal fun formatPeriodRange(start: LocalDate, endExclusive: LocalDate): Strin
     return "$startText – ${end.format(shortDateWithYear)}"
 }
 
+/** "1 movimiento", "2 movimientos": a count with its noun in the matching number. */
+internal fun counted(count: Int, singular: String, plural: String): String =
+    "$count ${if (count == 1) singular else plural}"
+
 internal fun daysLeftText(days: Int): String = when (days) {
     0 -> "Último día del periodo"
     1 -> "Queda 1 día"
@@ -149,7 +153,7 @@ internal fun SpendPaceMetrics(
         MetricRow(
             label = "Gasto diario promedio",
             value = insights.averageDailySpendMinor?.let(::money) ?: "—",
-            supporting = "${insights.elapsedDays} de ${insights.totalDays} días",
+            supporting = "${insights.elapsedDays} de ${counted(insights.totalDays, "día", "días")}",
             color = color,
             supportingColor = supportingColor,
         )
@@ -225,7 +229,7 @@ internal fun CumulativeSpendChart(
     val minValue = minOf(0L, current.minOrNull() ?: 0L, baseline?.minOrNull() ?: 0L)
     val summary = buildString {
         append("Gráfica de gasto acumulado. ")
-        current.lastOrNull()?.let { append("$currentLabel: ${MoneyText.format(it, currency)} en ${current.size} días. ") }
+        current.lastOrNull()?.let { append("$currentLabel: ${MoneyText.format(it, currency)} en ${counted(current.size, "día", "días")}. ") }
         baseline?.let { curve ->
             val sameDay = curve.getOrNull(current.size - 1)
             if (sameDay != null && current.isNotEmpty()) {

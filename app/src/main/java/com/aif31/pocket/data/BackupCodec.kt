@@ -9,6 +9,7 @@ import java.time.ZoneId
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNames
 
@@ -103,7 +104,7 @@ internal object BackupCodec {
             portableSettings = payload.portableSettings?.toModel() ?: PortableSettings(payload.periods.maxBy { it.start }.startDay),
         )
     } catch (error: Exception) {
-        BackupPreview(0, 0, 0, 0, valid = false, message = error.message ?: "Backup inválido")
+        BackupPreview(0, 0, 0, 0, valid = false, message = rejectionMessage(error))
     }
 
     suspend fun restore(database: FinanceDatabase, bytes: ByteArray, today: LocalDate, zoneId: ZoneId): LedgerResult {
@@ -111,7 +112,7 @@ internal object BackupCodec {
             decodeValidateAndPlan(bytes, today, zoneId)
         } catch (error: Exception) {
             if (error is CancellationException) throw error
-            return LedgerResult.Rejected(error.message ?: "Backup inválido")
+            return LedgerResult.Rejected(rejectionMessage(error))
         }
         return try {
             database.withTransaction {
@@ -148,7 +149,8 @@ internal object BackupCodec {
         } catch (error: Exception) {
             if (error is CancellationException) throw error
             LedgerResult.Rejected(
-                error.message ?: "No se pudo restaurar el backup",
+                // The transaction rolled back; database errors are technical English and stay out of the UI.
+                "No se pudo restaurar el backup. No se modificaron los datos.",
                 RejectionKind.PERSISTENCE,
             )
         }
@@ -212,12 +214,12 @@ internal object BackupCodec {
     }
 
     private fun decodeAndValidate(bytes: ByteArray, today: LocalDate): BackupPayload {
-        require(bytes.isNotEmpty() && bytes.size <= 10 * 1024 * 1024) { "Tamaño de backup inválido" }
+        validBackup(bytes.isNotEmpty() && bytes.size <= 10 * 1024 * 1024) { "Tamaño de backup inválido" }
         val decoded = json.decodeFromString(BackupPayload.serializer(), bytes.toString(StandardCharsets.UTF_8))
-        require(decoded.version in 1..VERSION) { "Versión de backup incompatible" }
-        require(decoded.version < 5 || decoded.portableSettings != null) { "Faltan ajustes del backup" }
+        validBackup(decoded.version in 1..VERSION) { "Versión de backup incompatible" }
+        validBackup(decoded.version < 5 || decoded.portableSettings != null) { "Faltan ajustes del backup" }
         decoded.portableSettings?.let {
-            require(it.futurePeriodStartDay in 1..31 && it.reminderHour in 0..23 && it.reminderMinute in 0..59) {
+            validBackup(it.futurePeriodStartDay in 1..31 && it.reminderHour in 0..23 && it.reminderMinute in 0..59) {
                 "Ajustes del backup inválidos"
             }
         }
@@ -232,37 +234,37 @@ internal object BackupCodec {
         } else {
             decoded
         }
-        require(payload.periods.isNotEmpty()) { "El backup no contiene ningún periodo" }
-        require(payload.periods.map { it.id }.distinct().size == payload.periods.size) { "Periodos duplicados" }
-        require(payload.pockets.map { it.id }.distinct().size == payload.pockets.size) { "Pockets duplicados" }
-        require(payload.paymentMethods.map { it.id }.distinct().size == payload.paymentMethods.size) { "Métodos duplicados" }
-        require(payload.movements.map { it.id }.distinct().size == payload.movements.size) { "Movimientos duplicados" }
-        require(payload.templates.map { it.id }.distinct().size == payload.templates.size) { "Plantillas duplicadas" }
+        validBackup(payload.periods.isNotEmpty()) { "El backup no contiene ningún periodo" }
+        validBackup(payload.periods.map { it.id }.distinct().size == payload.periods.size) { "Periodos duplicados" }
+        validBackup(payload.pockets.map { it.id }.distinct().size == payload.pockets.size) { "Pockets duplicados" }
+        validBackup(payload.paymentMethods.map { it.id }.distinct().size == payload.paymentMethods.size) { "Métodos duplicados" }
+        validBackup(payload.movements.map { it.id }.distinct().size == payload.movements.size) { "Movimientos duplicados" }
+        validBackup(payload.templates.map { it.id }.distinct().size == payload.templates.size) { "Plantillas duplicadas" }
         val periodIds = payload.periods.mapTo(mutableSetOf()) { it.id }
         val pocketIds = payload.pockets.mapTo(mutableSetOf()) { it.id }
         val methodIds = payload.paymentMethods.mapTo(mutableSetOf()) { it.id }
-        require(payload.periods.all { it.start < it.endExclusive && it.newFundsMinor >= 0 && it.startDay in 1..31 }) { "Periodo inválido" }
-        require(payload.periods.all {
+        validBackup(payload.periods.all { it.start < it.endExclusive && it.newFundsMinor >= 0 && it.startDay in 1..31 }) { "Periodo inválido" }
+        validBackup(payload.periods.all {
             it.start in LocalDate.MIN.toEpochDay()..LocalDate.MAX.toEpochDay() &&
                 it.endExclusive in LocalDate.MIN.toEpochDay()..LocalDate.MAX.toEpochDay()
         }) { "Fecha de periodo inválida" }
         val orderedPeriods = payload.periods.sortedBy { it.start }
-        require(orderedPeriods.first().start <= today.toEpochDay()) {
+        validBackup(orderedPeriods.first().start <= today.toEpochDay()) {
             "El backup empieza después de la fecha actual"
         }
-        require(orderedPeriods.all { runCatching { SupportedCurrency.fromCode(it.accountingCurrencyCode) }.isSuccess }) {
+        validBackup(orderedPeriods.all { runCatching { SupportedCurrency.fromCode(it.accountingCurrencyCode) }.isSuccess }) {
             "Moneda de periodo inválida"
         }
-        require(orderedPeriods.map { it.start }.distinct().size == orderedPeriods.size) { "Inicios de periodo duplicados" }
-        require(orderedPeriods.zipWithNext().all { (current, next) -> current.endExclusive == next.start }) {
+        validBackup(orderedPeriods.map { it.start }.distinct().size == orderedPeriods.size) { "Inicios de periodo duplicados" }
+        validBackup(orderedPeriods.zipWithNext().all { (current, next) -> current.endExclusive == next.start }) {
             "Los periodos deben ser contiguos y no solaparse"
         }
-        require(orderedPeriods.first().let {
+        validBackup(orderedPeriods.first().let {
             it.priorBoundaryRate == null && it.priorBoundaryFromCurrencyCode == null &&
                 it.priorBoundaryEffectiveEpochDay == null && it.priorBoundarySource == null &&
                 it.priorBoundaryQuoteEffectiveEpochDay == null
         }) { "El primer periodo no puede tener conversión previa" }
-        require(orderedPeriods.zipWithNext().all { (current, next) ->
+        validBackup(orderedPeriods.zipWithNext().all { (current, next) ->
             val currentCurrency = SupportedCurrency.fromCode(current.accountingCurrencyCode)
             val nextCurrency = SupportedCurrency.fromCode(next.accountingCurrencyCode)
             if (currentCurrency == nextCurrency) {
@@ -279,51 +281,51 @@ internal object BackupCodec {
                     } == true
             }
         }) { "Conversión entre periodos inválida" }
-        require(payload.pockets.all { it.name.isNotBlank() }) { "Pocket inválido" }
-        require(payload.pockets.all { it.iconKey == null || PocketIconKey.entries.any { key -> key.name == it.iconKey } }) { "Icono de Pocket inválido" }
-        require(payload.pockets.map { it.name.trim().lowercase(Locale.ROOT) }.distinct().size == payload.pockets.size) {
+        validBackup(payload.pockets.all { it.name.isNotBlank() }) { "Pocket inválido" }
+        validBackup(payload.pockets.all { it.iconKey == null || PocketIconKey.entries.any { key -> key.name == it.iconKey } }) { "Icono de Pocket inválido" }
+        validBackup(payload.pockets.map { it.name.trim().lowercase(Locale.ROOT) }.distinct().size == payload.pockets.size) {
             "Nombres de Pocket duplicados"
         }
-        require(payload.paymentMethods.all { it.name.isNotBlank() }) { "Método de pago inválido" }
-        require(payload.paymentMethods.map { it.name.trim().lowercase(Locale.ROOT) }.distinct().size == payload.paymentMethods.size) {
+        validBackup(payload.paymentMethods.all { it.name.isNotBlank() }) { "Método de pago inválido" }
+        validBackup(payload.paymentMethods.map { it.name.trim().lowercase(Locale.ROOT) }.distinct().size == payload.paymentMethods.size) {
             "Nombres de método duplicados"
         }
-        require(payload.allocations.map { it.periodId to it.pocketId }.distinct().size == payload.allocations.size) {
+        validBackup(payload.allocations.map { it.periodId to it.pocketId }.distinct().size == payload.allocations.size) {
             "Presupuestos duplicados"
         }
-        require(payload.periodPockets.map { it.periodId to it.pocketId }.distinct().size == payload.periodPockets.size) {
+        validBackup(payload.periodPockets.map { it.periodId to it.pocketId }.distinct().size == payload.periodPockets.size) {
             "Estados de Pocket por periodo duplicados"
         }
-        require(payload.rolloverReleases.map { it.periodId to it.pocketId }.distinct().size == payload.rolloverReleases.size) {
+        validBackup(payload.rolloverReleases.map { it.periodId to it.pocketId }.distinct().size == payload.rolloverReleases.size) {
             "Liberaciones de rollover duplicadas"
         }
-        require(payload.periodPockets.all { it.periodId in periodIds && it.pocketId in pocketIds }) {
+        validBackup(payload.periodPockets.all { it.periodId in periodIds && it.pocketId in pocketIds }) {
             "Relación de Pocket por periodo inválida"
         }
         val periodPocketKeys = payload.periodPockets.map { it.periodId to it.pocketId }.toSet()
-        require(payload.version < 3 || payload.allocations.all { (it.periodId to it.pocketId) in periodPocketKeys }) {
+        validBackup(payload.version < 3 || payload.allocations.all { (it.periodId to it.pocketId) in periodPocketKeys }) {
             "Presupuesto sin estado de Pocket por periodo"
         }
-        require(payload.version < 3 || payload.movements.all { (it.periodId to it.pocketId) in periodPocketKeys }) {
+        validBackup(payload.version < 3 || payload.movements.all { (it.periodId to it.pocketId) in periodPocketKeys }) {
             "Movimiento sin estado de Pocket por periodo"
         }
-        require(payload.rolloverReleases.all {
+        validBackup(payload.rolloverReleases.all {
             it.periodId in periodIds && it.pocketId in pocketIds && it.amountMinor >= 0
         }) {
             "Liberación de rollover inválida"
         }
         val periodPocketsByKey = payload.periodPockets.associateBy { it.periodId to it.pocketId }
-        require(payload.version < 3 || payload.rolloverReleases.all {
+        validBackup(payload.version < 3 || payload.rolloverReleases.all {
             periodPocketsByKey[it.periodId to it.pocketId]?.retired == true
         }) {
             "Liberación de rollover sin Pocket retirado"
         }
-        require(payload.allocations.all { it.periodId in periodIds && it.pocketId in pocketIds && it.budgetMinor >= 0 && it.rolloverMinor >= 0 }) { "Relación de presupuesto inválida" }
+        validBackup(payload.allocations.all { it.periodId in periodIds && it.pocketId in pocketIds && it.budgetMinor >= 0 && it.rolloverMinor >= 0 }) { "Relación de presupuesto inválida" }
         val periodsById = payload.periods.associateBy { it.id }
-        require(payload.allocations.groupBy { it.periodId }.all { (periodId, values) ->
+        validBackup(payload.allocations.groupBy { it.periodId }.all { (periodId, values) ->
             values.fold(0L) { total, allocation -> Math.addExact(total, allocation.budgetMinor) } <= periodsById.getValue(periodId).newFundsMinor
         }) { "Los presupuestos superan los fondos del periodo" }
-        require(payload.movements.all { movement ->
+        validBackup(payload.movements.all { movement ->
             movement.periodId in periodIds && movement.pocketId in pocketIds &&
                 (movement.paymentMethodId == null || movement.paymentMethodId in methodIds) &&
                 movement.accountingAmountMinor > 0 && movement.type in MovementType.entries.map { type -> type.name } &&
@@ -364,7 +366,7 @@ internal object BackupCodec {
             releaseEntities,
             today,
         )
-        require(payload.templates.all {
+        validBackup(payload.templates.all {
             it.name.isNotBlank() && it.amountMinor > 0 && it.pocketId in pocketIds &&
                 (it.paymentMethodId == null || it.paymentMethodId in methodIds) &&
                 runCatching { SupportedCurrency.fromCode(it.inputCurrencyCode) }.isSuccess
@@ -372,14 +374,14 @@ internal object BackupCodec {
             "Relación de plantilla inválida"
         }
         val activeMethodIds = payload.paymentMethods.filterNot { it.archived }.mapTo(mutableSetOf()) { it.id }
-        require(payload.ledgerPreferences?.defaultPaymentMethodId.let { it == null || it in activeMethodIds }) {
+        validBackup(payload.ledgerPreferences?.defaultPaymentMethodId.let { it == null || it in activeMethodIds }) {
             "Método predeterminado inválido"
         }
         payload.pendingCurrencyChange?.let { pending ->
             val latest = orderedPeriods.last()
             val from = SupportedCurrency.fromCode(pending.fromCurrencyCode)
             val target = SupportedCurrency.fromCode(pending.targetCurrencyCode)
-            require(
+            validBackup(
                 from.name == latest.accountingCurrencyCode && from != target &&
                     pending.effectiveEpochDay == latest.endExclusive && pending.source.isNotBlank() &&
                     validQuoteObservation(pending.quoteEffectiveEpochDay, pending.effectiveEpochDay) &&
@@ -387,6 +389,22 @@ internal object BackupCodec {
             ) { "Cambio de moneda pendiente inválido" }
         }
         return payload
+    }
+
+    /**
+     * The person-facing reason a file cannot be restored. Only this codec's own checks explain themselves; parser and
+     * runtime failures carry English, technical details, and file contents, so they get a fixed Spanish sentence.
+     */
+    private fun rejectionMessage(error: Exception): String = when (error) {
+        is InvalidBackup -> error.message
+        is SerializationException -> "Este archivo no es un backup de Pocket o está dañado."
+        else -> "El backup contiene datos que Pocket no puede restaurar."
+    }
+
+    private class InvalidBackup(override val message: String) : IllegalArgumentException(message)
+
+    private inline fun validBackup(condition: Boolean, message: () -> String) {
+        if (!condition) throw InvalidBackup(message())
     }
 
     private fun validQuoteObservation(epochDay: Long?, activationEpochDay: Long): Boolean =

@@ -402,7 +402,7 @@ private fun PeriodDetailsSection(
                 MetricRow(
                     "Gasto neto",
                     money(insights.netSpendMinor),
-                    supporting = "${insights.expenseCount} gastos · ${money(insights.refundMinor)} en devoluciones",
+                    supporting = "${counted(insights.expenseCount, "gasto", "gastos")} · ${money(insights.refundMinor)} en devoluciones",
                 )
                 SpendPaceMetrics(insights)
                 insights.largestExpense?.let { movement ->
