@@ -63,10 +63,13 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -485,7 +488,7 @@ class PocketAppHostFlowTest {
             )
         }
         val restoration = StateRestorationTester(compose)
-        restoration.setContent { PocketApp(ledger) }
+        restoration.setContent { PocketApp(ledger.deliveringStateOnMain()) }
         compose.waitUntilExactlyOneExists(hasText("Movimientos"), 5_000)
         compose.onNodeWithText("Movimientos").performClick()
         compose.onNodeWithTag("history_search").performTextInput("fruta")
@@ -1724,6 +1727,18 @@ class PocketAppHostFlowTest {
         assertEquals("3.75", saved.rate)
         assertEquals(LocalDate.of(2026, 2, 25), saved.conversionEffectiveDate)
         assertEquals("SAMA_PARITY", saved.conversionSource)
+    }
+
+    /**
+     * createComposeRule() runs composition coroutines on an UnconfinedTestDispatcher, so the state collector resumes
+     * on Room's arch_disk_io transaction thread and applies snapshot changes there, racing the main thread's layout.
+     * Production composes on AndroidUiDispatcher, which already resumes on main; this restores that for the test.
+     */
+    private fun PocketLedger.deliveringStateOnMain(): PocketLedger {
+        val source = this
+        return object : PocketLedger by source {
+            override val state = source.state.onEach { withContext(Dispatchers.Main.immediate) {} }
+        }
     }
 
     private class FakeReminderScheduler : ReminderScheduler {
