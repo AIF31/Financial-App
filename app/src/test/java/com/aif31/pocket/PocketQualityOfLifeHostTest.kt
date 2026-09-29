@@ -42,6 +42,7 @@ import com.aif31.pocket.data.FinanceDatabase
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.RoomPocketLedger
+import com.aif31.pocket.notifications.autoRecordedMovementId
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -179,6 +180,28 @@ class PocketQualityOfLifeHostTest {
         compose.waitUntilDoesNotExist(hasText("Deslizable"), 5_000)
         compose.onNodeWithText("Deshacer").performClick()
         compose.waitUntilExactlyOneExists(hasText("Deslizable"), 5_000)
+    }
+
+    @Test
+    fun an_auto_recorded_expense_is_labelled_detectado_in_movements() {
+        val ledger = ledgerWithPreviousPeriod()
+        runBlocking {
+            val state = ledger.state.first { it.currentPeriod?.start == LocalDate.of(2026, 2, 25) }
+            ledger.execute(
+                LedgerCommand.AddMovement(
+                    id = autoRecordedMovementId("suggestion-1"), pocketId = state.pockets.first().pocket.id,
+                    type = MovementType.EXPENSE, accountingAmountMinor = 1_500,
+                    occurredAtUtcMillis = Instant.parse("2026-02-26T08:00:00Z").toEpochMilli(),
+                    localDate = LocalDate.of(2026, 2, 26), merchant = "Café detectado",
+                ),
+            )
+        }
+        compose.setContent { PocketApp(ledger) }
+        compose.waitUntilExactlyOneExists(hasText("Movimientos"), 10_000)
+        compose.onNodeWithText("Movimientos").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Café detectado"), 5_000)
+
+        compose.onNodeWithText("Detectado").assertIsDisplayed()
     }
 
     @Test
