@@ -2,6 +2,12 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-09-29
+
+### Test reliability
+
+- `PocketAppHostFlowTest.movement_search_survives_saved_state_restoration` no longer fails intermittently with `CalledFromWrongThreadException`. `createComposeRule()` runs composition coroutines on an unconfined test dispatcher. The ledger state collector therefore resumed on Room's `arch_disk_io` transaction thread and applied UI state there. The test now delivers ledger state on the main thread, as production's `AndroidUiDispatcher` already does. The app code is unchanged.
+
 ## 2026-09-28
 
 ### PR #34 physical-device test
