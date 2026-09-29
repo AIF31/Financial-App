@@ -61,6 +61,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -532,35 +534,36 @@ private fun MovementCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    isRefund -> Surface(
-                        shape = MaterialTheme.shapes.small,
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            val detected = !isRefund && isAutoRecordedMovement(movement.id)
-                            Icon(
-                                if (detected) Icons.Default.NotificationsActive else Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Text(
-                                when {
-                                    isRefund -> "Devolución"
-                                    detected -> "Detectado"
-                                    else -> "Confirmado"
-                                },
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                        }
-                    }
+                    isRefund -> MovementStatusBadge(
+                        "Devolución",
+                        Icons.Default.CheckCircle,
+                        MaterialTheme.colorScheme.primaryContainer,
+                        MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                    // Manual expenses need no badge; one recorded from a notification says so.
+                    isAutoRecordedMovement(movement.id) -> MovementStatusBadge(
+                        "Detectado",
+                        Icons.Default.NotificationsActive,
+                        MaterialTheme.colorScheme.secondaryContainer,
+                        MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
                 }
                 Text(time, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
+        }
+    }
+}
+
+@Composable
+private fun MovementStatusBadge(label: String, icon: ImageVector, color: Color, contentColor: Color) {
+    Surface(shape = MaterialTheme.shapes.small, color = color, contentColor = contentColor) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+            Text(label, style = MaterialTheme.typography.labelMedium)
         }
     }
 }
