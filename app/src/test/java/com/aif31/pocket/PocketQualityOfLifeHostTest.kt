@@ -6,6 +6,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.FontScale
+import androidx.compose.ui.test.WindowInsets
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
@@ -19,6 +20,12 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.core.graphics.Insets
+import androidx.core.view.WindowInsetsCompat
+import com.aif31.pocket.domain.SupportedCurrency
+import com.aif31.pocket.ui.MoneyText
+import org.junit.Assert.assertTrue
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -26,6 +33,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
@@ -317,6 +325,10 @@ class PocketQualityOfLifeHostTest {
 
     private fun Char.isAmountChar() = isDigit() || this == '.' || this == ','
 
+    private val isPocketCard = SemanticsMatcher("is a Pocket card") {
+        it.config.getOrElseNullable(SemanticsProperties.TestTag) { null }?.startsWith("pocket_") == true
+    }
+
     @Test
     fun screen_readers_hear_each_comparison_summary_row_once() {
         val ledger = ledgerWithPreviousPeriod()
@@ -423,6 +435,42 @@ class PocketQualityOfLifeHostTest {
     }
 
     @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE) // Real text measurement; legacy mode fakes glyph widths.
+    @Config(qualifiers = "w384dp-h823dp") // The Galaxy S23 width where "SAR 4,200.00" wrapped.
+    fun dashboard_metric_amounts_stay_on_one_line_at_a_large_font_size() {
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(420_000)) }
+        val unallocated = MoneyText.format(runBlocking { ledger.state.first { !it.needsOnboarding } }.unallocatedMinor, SupportedCurrency.SAR)
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.5f)) { PocketApp(ledger) }
+        }
+        compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasText("Sin asignar", substring = true))
+
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNode(hasText(unallocated), useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertEquals("\"$unallocated\" wraps", 1, layouts.single().lineCount)
+    }
+
+    @Test
+    fun onboarding_content_starts_below_the_status_bar() {
+        val statusBarPx = 94 // The Galaxy S23 status bar height from the 1.0.6 hardware test.
+        val insets = WindowInsetsCompat.Builder()
+            .setInsets(WindowInsetsCompat.Type.statusBars(), Insets.of(0, statusBarPx, 0, 0))
+            .build()
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.WindowInsets(insets)) {
+                PocketApp(RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone))
+            }
+        }
+        compose.waitUntilExactlyOneExists(hasText("Configura tu primer periodo"), 10_000)
+
+        val titleTopPx = with(compose.density) { compose.onNodeWithText("Pocket").getBoundsInRoot().top.toPx() }
+        assertTrue("The title starts at ${titleTopPx}px, under the ${statusBarPx}px status bar", titleTopPx >= statusBarPx)
+    }
+
+    @Test
     fun editing_a_movement_from_an_earlier_period_shows_that_periods_pocket_availability() {
         compose.setContent { PocketApp(ledgerWithPreviousPeriod()) }
         compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
@@ -483,5 +531,26 @@ class PocketQualityOfLifeHostTest {
 
         compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("No hay un periodo anterior para comparar."))
         compose.onNodeWithTag("pockets_list").performScrollToNode(hasText("Comparar periodos"))
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE) // Real text measurement; legacy mode fakes glyph widths.
+    @Config(qualifiers = "w384dp-h823dp") // The Galaxy S23 geometry where "Registrar gasto" covered "Ver todos".
+    fun every_dashboard_item_can_scroll_clear_of_the_extended_fab_at_a_large_font_size() {
+        val ledger = ledgerWithPreviousPeriod(newFundsMinor = 420_000)
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1.5f)) { PocketApp(ledger) }
+        }
+        compose.waitUntilExactlyOneExists(hasTestTag("dashboard_list"), 10_000)
+        val list = compose.onNodeWithTag("dashboard_list")
+        val rows = list.fetchSemanticsNode().config[SemanticsProperties.CollectionInfo].rowCount
+        list.performScrollToIndex(rows - 1)
+        compose.waitForIdle()
+
+        val fabTop = compose.onNodeWithTag("contextual_add").getBoundsInRoot().top
+        val lastBottom = with(compose.density) {
+            compose.onAllNodes(isPocketCard).fetchSemanticsNodes().maxOf { it.boundsInRoot.bottom }.toDp()
+        }
+        assertTrue("The last Pocket ends at $lastBottom, under the button starting at $fabTop", lastBottom <= fabTop)
     }
 }

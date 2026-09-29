@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -57,6 +58,9 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.R
 import com.aif31.pocket.data.ComparisonMode
@@ -168,21 +172,10 @@ internal fun ActionableDashboardContent(
             )
         }
         item {
-            Row(
+            CompactMetrics(
+                metrics = listOf("Sin asignar" to money(state.unallocatedMinor), "Gastado" to money(state.netSpendMinor)),
                 modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                CompactMetric(
-                    label = "Sin asignar",
-                    value = money(state.unallocatedMinor),
-                    modifier = Modifier.weight(1f),
-                )
-                CompactMetric(
-                    label = "Gastado",
-                    value = money(state.netSpendMinor),
-                    modifier = Modifier.weight(1f),
-                )
-            }
+            )
         }
         item {
             // The whole header opens Pockets. A separate "Ver todos" button at the row's end would sit in the
@@ -365,16 +358,47 @@ private fun HeroDetails(
     }
 }
 
+/**
+ * Metric tiles side by side. When an amount such as "SAR 4,200.00" cannot fit on one line in a half-width tile, as
+ * with large fonts, the tiles stack at full width so the currency and the number stay together.
+ */
 @Composable
-private fun CompactMetric(label: String, value: String, modifier: Modifier = Modifier) {
+private fun CompactMetrics(metrics: List<Pair<String, String>>, modifier: Modifier = Modifier) {
+    val valueStyle = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace)
+    val measurer = rememberTextMeasurer()
+    BoxWithConstraints(modifier) {
+        val spacing = 12.dp
+        val sideBySideTextWidth = with(LocalDensity.current) {
+            ((maxWidth - spacing * (metrics.size - 1)) / metrics.size - COMPACT_METRIC_PADDING * 2).roundToPx()
+        }
+        val widestValue = metrics.maxOf { (_, value) -> measurer.measure(value, valueStyle, softWrap = false).size.width }
+        if (widestValue > sideBySideTextWidth) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(spacing)) {
+                metrics.forEach { (label, value) -> CompactMetric(label, value, valueStyle, Modifier.fillMaxWidth()) }
+            }
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(spacing)) {
+                metrics.forEach { (label, value) -> CompactMetric(label, value, valueStyle, Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+private val COMPACT_METRIC_PADDING = 16.dp
+
+@Composable
+private fun CompactMetric(label: String, value: String, valueStyle: TextStyle, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
         color = MaterialTheme.colorScheme.surfaceContainer,
         shape = MaterialTheme.shapes.large,
     ) {
-        Column(Modifier.padding(16.dp).semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(
+            Modifier.padding(COMPACT_METRIC_PADDING).semantics(mergeDescendants = true) {},
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
             Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Monospace)
+            Text(value, style = valueStyle)
         }
     }
 }

@@ -7,6 +7,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.add
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -85,6 +90,7 @@ import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
 import com.aif31.pocket.ui.ActionableDashboardContent
 import com.aif31.pocket.ui.SettingsSection
+import com.aif31.pocket.ui.counted
 import java.util.UUID
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -254,7 +260,7 @@ fun PocketApp(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(
-                        restoreError ?: if (preview.valid) "Versión ${preview.version}: ${preview.periods} periodos, ${preview.pockets} Pockets y ${preview.movements} movimientos."
+                        restoreError ?: if (preview.valid) "Versión ${preview.version}: ${preview.contentSummary()}."
                         else preview.message ?: "No se puede leer el archivo.",
                     )
                     if (restoreError == null && preview.valid && observedState?.needsOnboarding == false) {
@@ -298,11 +304,22 @@ fun PocketApp(
                                     } catch (_: Exception) {
                                         " No se pudieron aplicar todos los ajustes restaurados; revísalos en Ajustes."
                                     }
+                                    // Source apps are package names on this device, so backups leave them out (see
+                                    // Info/verification/2026-09-29-1.0.6-hardware-test.md, finding 5). Without one,
+                                    // capture stays off after restoring onto a new install until they are chosen again.
+                                    val noCaptureSources = runCatching {
+                                        preferences?.state?.first()?.notificationSourcePackages?.isEmpty() == true
+                                    }.getOrDefault(false)
+                                    val captureReminder = if (noCaptureSources) {
+                                        " Si usabas la captura desde notificaciones, vuelve a elegir tus apps en " +
+                                            "Ajustes > Captura desde notificaciones; el backup no las incluye."
+                                    } else {
+                                        null
+                                    }
                                     runCatching { onSuccessfulRestore() }
                                     onRestoreCompleted(
-                                        "Backup restaurado: ${preview.periods} periodos, " +
-                                            "${preview.pockets} Pockets y ${preview.movements} movimientos." +
-                                            preferenceWarning.orEmpty(),
+                                        "Backup restaurado: ${preview.contentSummary()}." +
+                                            preferenceWarning.orEmpty() + captureReminder.orEmpty(),
                                     )
                                     onRestoreCandidateHandled()
                                     backupPreview = null
@@ -562,10 +579,15 @@ fun PocketApp(
     }
 }
 
+/** "1 periodo, 10 Pockets y 1 movimiento" */
+private fun com.aif31.pocket.data.BackupPreview.contentSummary(): String =
+    "${counted(periods, "periodo", "periodos")}, ${counted(pockets, "Pocket", "Pockets")} y " +
+        counted(movements, "movimiento", "movimientos")
+
 @Composable
 private fun CenteredProgress(label: String) {
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().safeDrawingPadding(),
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -589,9 +611,10 @@ private fun OnboardingScreen(
     var accountingCurrency by rememberSaveable { mutableStateOf(SupportedCurrency.SAR) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    // Drawn edge to edge outside the app scaffold, so the list keeps clear of the system bars, cutout, and keyboard.
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(24.dp),
+        contentPadding = WindowInsets.safeDrawing.add(WindowInsets(24.dp, 24.dp, 24.dp, 24.dp)).asPaddingValues(),
         verticalArrangement = Arrangement.spacedBy(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

@@ -2,7 +2,24 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-09-30
+
+### 1.0.6 hardware findings fixed
+
+Fixes for the five findings in `Info/verification/2026-09-29-1.0.6-hardware-test.md`. The [dated audit](../docs/audits/2026-09-30-1.0.6-hardware-findings-fixes.md) lists each fix, its test, and the decisions. The branch builds on PR #38. The development version advances to `1.0.7` (`versionCode` 8).
+
+- Onboarding and the loading screen keep clear of the status bar, display cutout, and keyboard. Onboarding's title had been drawn under the status bar.
+- Restoring a file that is not a Pocket backup says "Este archivo no es un backup de Pocket o está dañado." instead of the English parser message, which also quoted the file. Other unexpected failures, including database errors during restore, get fixed Spanish sentences. The backup's own validation messages are unchanged.
+- The restore preview and result use singular nouns for a count of one ("1 periodo", "1 Pocket", "1 movimiento"). The same applies to "1 gasto" in the Pockets period details and "1 día" in the spend pace and the chart's spoken summary.
+- On Inicio, the "Sin asignar" and "Gastado" tiles stack at full width when an amount cannot fit on one line in a half-width tile, as at font scale 1.5. "SAR 4,200.00" no longer wraps between the currency and the number. The "Registrar gasto" button still overlaps "Ver todos" at rest at that scale; this is expected button behavior. Every item can scroll clear of it, and a new test guards that.
+- After a restore, when no notification source app is selected, the result message says to choose the apps again in Ajustes > Captura desde notificaciones. Backups do not include capture settings, and the format stays at version 5, because source apps are package names from one device.
+- Verification: each of the five new host tests failed before its fix and passed after it. `:app:testDebugUnitTest` passed 282 tests with no failures, errors, or skips. `:app:lintDebug`, `:app:assembleDebug`, and `:app:assembleDebugAndroidTest` passed. The Pixel 6 API 35 managed-device suite passed 31 tests. No physical-device test was run.
+
 ## 2026-09-29
+
+### 1.0.6 physical-device test
+
+- Recorded in `Info/verification/2026-09-29-1.0.6-hardware-test.md`. The release-signed `1.0.3` upgraded in place to `1.0.6` with a byte-identical backup before and after. All 31 device tests passed, and the manual journeys passed, including the launcher shortcut over an unsaved edit and the dark-theme onboarding heading. Five non-blocking UI findings are listed there. The phone was left on a release-signed `1.0.6` with the user's backup restored.
 
 ### Notification replay after backup restore
 

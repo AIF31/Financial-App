@@ -120,6 +120,29 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
+    fun a_file_that_is_not_a_pocket_backup_is_rejected_in_spanish_without_parser_details() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(50_000))
+        val backup = ledger.exportBackup().decodeToString()
+        val notABackup = "Este archivo no es un backup de Pocket o está dañado."
+        listOf(
+            ledger.exportCsv(), // The 1.0.6 hardware test picked a CSV export: "Unexpected JSON token at offset 0: …".
+            "{}".encodeToByteArray(),
+            backup.replaceFirst("\"newFundsMinor\": 50000", "\"newFundsMinor\": \"mucho\"").encodeToByteArray(),
+        ).forEach { bytes ->
+            val preview = ledger.previewBackup(bytes)
+            assertFalse(preview.valid)
+            assertEquals(notABackup, preview.message)
+            assertEquals(notABackup, (ledger.restoreBackup(bytes) as LedgerResult.Rejected).message)
+        }
+        // A readable backup that fails a check keeps its specific explanation.
+        assertEquals(
+            "Versión de backup incompatible",
+            ledger.previewBackup(backup.withBackupVersion(99).encodeToByteArray()).message,
+        )
+    }
+
+    @Test
     fun overflowing_expense_aggregate_is_rejected_without_mutating_the_ledger() = runTest {
         val lastDayClock = Clock.fixed(Instant.parse("2026-03-24T09:00:00Z"), zone)
         val ledger = RoomPocketLedger(database, lastDayClock, zone)
@@ -520,6 +543,8 @@ class PocketLedgerHostBehaviorTest {
         val result = target.restoreBackup(backup) as LedgerResult.Rejected
 
         assertEquals(RejectionKind.PERSISTENCE, result.kind)
+        // SQLite's own text ("forced restore failure", error codes) is not shown to the person.
+        assertEquals("No se pudo restaurar el backup. No se modificaron los datos.", result.message)
         assertEquals(before.decodeToString(), target.exportBackup().decodeToString())
         assertEquals(10_000L, target.state.first().newFundsMinor)
     }
