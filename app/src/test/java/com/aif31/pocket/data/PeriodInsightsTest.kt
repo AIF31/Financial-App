@@ -285,6 +285,55 @@ class PeriodInsightsTest {
     }
 
     @Test
+    fun pocket_comparison_averages_only_spending_dated_through_today() {
+        // Day 9 of March: SAR 9.00 spent so far, plus SAR 30.00 of rent recorded for 20 March.
+        val state = state(
+            today = LocalDate.of(2026, 3, 5),
+            elapsedDays = 9,
+            summaries = mapOf(
+                march.id to listOf(summary(market, budget = 30_000, expense = 3_900)),
+                february.id to listOf(summary(market, budget = 30_000, expense = 6_200)),
+            ),
+            movements = listOf(
+                movement("groceries", march, LocalDate.of(2026, 3, 1), 900),
+                movement("rent", march, LocalDate.of(2026, 3, 20), 3_000),
+            ),
+        )
+
+        val row = PeriodComparison.of(state, march.id, february.id)!!.pockets.single()
+
+        assertEquals(3_900L, row.currentNetSpendMinor) // The period total still includes the rent.
+        assertEquals(100L, row.currentAverageDailyMinor) // 900 / 9, like the headline pace
+        assertEquals(200L, row.baselineAverageDailyMinor) // 6,200 / 31
+        assertEquals(-50, row.averageDailyDeltaPercent)
+    }
+
+    @Test
+    fun an_in_progress_baseline_averages_only_spending_dated_through_today() {
+        // February compared against March, which is on day 9 with SAR 30.00 of rent recorded for 20 March.
+        val state = state(
+            today = LocalDate.of(2026, 3, 5),
+            elapsedDays = 9,
+            summaries = mapOf(
+                march.id to listOf(summary(market, budget = 30_000, expense = 3_900)),
+                february.id to listOf(summary(market, budget = 30_000, expense = 6_200)),
+            ),
+            movements = listOf(
+                movement("groceries", march, LocalDate.of(2026, 3, 1), 900),
+                movement("rent", march, LocalDate.of(2026, 3, 20), 3_000),
+            ),
+        )
+
+        val comparison = PeriodComparison.of(state, february.id, march.id)!!
+        val baseline = comparison.convertedBaseline!!
+
+        assertEquals(3_900L, baseline.netSpendMinor) // The period total still includes the rent.
+        assertEquals(100L, baseline.averageDailySpendMinor) // 900 / 9
+        assertEquals(100, baseline.averageDailyDeltaPercent) // February's 200 a day against 100
+        assertEquals(100L, comparison.pockets.single().baselineAverageDailyMinor)
+    }
+
+    @Test
     fun comparison_percentages_stay_exact_for_amounts_whose_hundredfold_exceeds_a_long() {
         // 2 × 10¹⁷ a day over 9 days against 10¹⁶ a day over February's 31: a 1,900% rise.
         val state = state(

@@ -47,12 +47,23 @@ data class PeriodInsights(
     val cumulativeNetSpendByDayMinor: List<Long>,
     /** Net spend of Movements dated after today: counted in [netSpendMinor] but not yet on the daily curve. */
     val netSpendAfterTodayMinor: Long,
+    /** [netSpendAfterTodayMinor] by Pocket ID; Pockets with nothing dated after today are absent. */
+    val netSpendAfterTodayByPocketMinor: Map<String, Long>,
     val pockets: List<PocketPeriodSummary>,
 ) {
     val accountingCurrency: SupportedCurrency get() = period.accountingCurrency
 
     /** Pocket budgets plus received rollover: what the period's Pocket availability is measured from. */
     val availableBudgetMinor: Long get() = Math.addExact(budgetedMinor, rolloverMinor)
+
+    /** Net spend dated through today: what [averageDailySpendMinor] is measured from. */
+    val netSpendThroughTodayMinor: Long get() = Math.subtractExact(netSpendMinor, netSpendAfterTodayMinor)
+
+    /** A Pocket's net spend dated through today: what its daily average is measured from. */
+    fun pocketNetSpendThroughTodayMinor(pocketId: String): Long {
+        val netSpend = pockets.firstOrNull { it.pocket.id == pocketId }?.netSpendMinor ?: 0
+        return Math.subtractExact(netSpend, netSpendAfterTodayByPocketMinor[pocketId] ?: 0)
+    }
 
     companion object {
         fun of(state: LedgerState, periodId: String): PeriodInsights? {
@@ -78,7 +89,12 @@ data class PeriodInsights(
             val snapshotPocketIds = pockets.mapTo(HashSet()) { it.pocket.id }
             val periodMovements = state.movements.filter { it.periodId == period.id && it.pocketId in snapshotPocketIds }
             val expenses = periodMovements.filter { it.type == MovementType.EXPENSE }
-            val netSpendAfterToday = if (inProgress) periodMovements.filter { it.localDate > today }.netSpendMinor() else 0L
+            val netSpendAfterTodayByPocket = if (inProgress) {
+                periodMovements.filter { it.localDate > today }.groupBy { it.pocketId }.mapValues { it.value.netSpendMinor() }
+            } else {
+                emptyMap()
+            }
+            val netSpendAfterToday = netSpendAfterTodayByPocket.values.sumMoneyExact()
             // Pace is what has been spent through today. Movements dated later are already-committed spending: they
             // count once in the projection and in period totals, but are not extrapolated or averaged over past days.
             val netSpendThroughToday = Math.subtractExact(netSpend, netSpendAfterToday)
@@ -116,6 +132,7 @@ data class PeriodInsights(
                 },
                 cumulativeNetSpendByDayMinor = cumulativeByDay(period, elapsedDays, periodMovements),
                 netSpendAfterTodayMinor = netSpendAfterToday,
+                netSpendAfterTodayByPocketMinor = netSpendAfterTodayByPocket,
                 pockets = pockets,
             )
         }
@@ -173,7 +190,7 @@ data class PeriodComparison(
             val convert = conversion(state, current.period, baseline.period)
             val converted = convert?.let {
                 val net = it(baseline.netSpendMinor)
-                val average = averageOf(net, baseline.elapsedDays)
+                val average = averageOf(it(baseline.netSpendThroughTodayMinor), baseline.elapsedDays)
                 val delta = difference(current.averageDailySpendMinor, average)
                 ConvertedBaseline(
                     netSpendMinor = net,
@@ -190,8 +207,8 @@ data class PeriodComparison(
                 .map { pocket ->
                     val currentNet = currentByPocket[pocket.id]?.netSpendMinor ?: 0
                     val baselineNet = convert?.invoke(baselineByPocket[pocket.id]?.netSpendMinor ?: 0)
-                    val currentAverage = averageOf(currentNet, current.elapsedDays)
-                    val baselineAverage = baselineNet?.let { averageOf(it, baseline.elapsedDays) }
+                    val currentAverage = averageOf(current.pocketNetSpendThroughTodayMinor(pocket.id), current.elapsedDays)
+                    val baselineAverage = convert?.let { averageOf(it(baseline.pocketNetSpendThroughTodayMinor(pocket.id)), baseline.elapsedDays) }
                     val delta = difference(currentAverage, baselineAverage)
                     PocketComparisonRow(
                         pocket = pocket,
