@@ -189,7 +189,7 @@ object PocketMath {
         val percent = BigInteger.valueOf(partMinor)
             .multiply(BigInteger.valueOf(100))
             .divide(BigInteger.valueOf(wholeMinor))
-        return runCatching { percent.intValueExact() }.getOrNull()
+        return percent.takeIf { it in BigInteger.valueOf(Int.MIN_VALUE.toLong())..BigInteger.valueOf(Int.MAX_VALUE.toLong()) }?.toInt()
     }
 
     fun rollover(allocatedMinor: Long, netSpendMinor: Long, enabled: Boolean): Long =
