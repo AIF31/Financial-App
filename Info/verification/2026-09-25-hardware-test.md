@@ -39,4 +39,10 @@ The signed release build was restored first, and the verified phone backup was a
 
 ## Release decision
 
-The phone now runs the latest published release, `1.0.0` / code `1`, with the backup restored. The project development version was subsequently advanced to `1.0.1` / code `2`; no newer release has been published or installed on the phone. The initial full physical suite was not a clean single-run pass, and lock-screen reminder privacy and full TalkBack interaction remain unverified, so this run does not establish a new-release acceptance gate.
+The phone was restored to the latest published release, `1.0.0` / code `1`, with the backup applied. The initial full physical suite was not a clean single-run pass, and lock-screen reminder privacy and full TalkBack interaction remain unverified, so this run does not establish a new-release acceptance gate.
+
+## Latest merged main build installed afterward
+
+The published `v1.0.0` APK did not contain the latest merged fixes. Remote `main` was confirmed at `a92b353bf17340f6736e9ffb0cbc092bcc267d7e`, five commits after this checkout. An isolated Windows worktree at `.worktrees/phone-latest/` was created from that commit, with only `versionCode = 2` and `versionName = "1.0.1"` changed for the signed local build. The Gradle wrapper completed `:app:assembleRelease` and `:app:testDebugUnitTest`; the latter reported 205 tests with no failures, errors, or skips. The signing certificate matched the published release.
+
+The APK was installed in place over the restored `1.0.0` app. Android reported a successful install; Pocket launched past onboarding with its four main tabs present. The installed APK SHA-256 exactly matched the signed build: `fcb0445148441acefdfafa48c9927da934bffce2050a4c5440d834b50feed157`. The phone reported `1.0.1` / code `2`, and remote `main` still matched the build commit at final verification. The original phone backup was unchanged before the upgrade. This is a locally signed build of the newest merged source; `v1.0.0` remains the latest *published* release. Physical instrumentation was not rerun on `1.0.1`.
