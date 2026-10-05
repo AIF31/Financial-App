@@ -2,6 +2,19 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-10-05
+
+### Reliability and performance pass
+
+A whole-app review of the ledger math, loading time, and test suite. The [dated audit](../docs/audits/2026-10-05-reliability-performance-review.md) lists each finding, its fix, and the measurements. The development version advances to `1.0.8` (`versionCode` 9).
+
+- Archiving a Pocket now moves its whole incoming rollover to unassigned funds, like its budget. Before, it moved only the part not yet spent, so spending past the Pocket's own budget made funds disappear from the totals until a later historical edit recalculated the release.
+- Archiving a Pocket that still has Movements in a pre-created later period is rejected with "Mueve o elimina primero los movimientos de este Pocket en periodos posteriores". Before, those Movements stopped counting in that period, and the next exported backup could not be restored. Undoing a delete is likewise rejected if the Movement's Pocket is no longer in its period.
+- Saving, deleting, or editing a Movement computes rollover once instead of twice and writes only the allocations that changed. Ledger state is built on a background thread instead of the main thread, and a launch with nothing to catch up no longer reads the whole ledger or rebuilds state twice. On a synthetic five-year ledger, saving an expense dated in the oldest period dropped from about 230 ms to 76 ms in host tests.
+- The app reports when its first real screen is fully drawn. Release builds remove unused resources (2.66 MB to 2.45 MB). An app baseline profile was measured and not kept, because it made no measurable difference.
+- Tests: seeded random command sequences now check the accounting rules after every command. The device class `PocketLedgerBehaviorTest`, whose tests duplicated host tests, is removed after moving its one unique test to the host suite. Host tests run in up to four JVMs.
+- Verification: each new regression test failed before its fix. The host suite, lint, debug and release assembly, and the Pixel 6 API 35 managed-device suite passed; the audit records the counts. A release-like build was smoke-tested on an emulator with a seeded five-year ledger. No physical-device test was run.
+
 ## 2026-09-30
 
 ### 1.0.6 hardware findings fixed
