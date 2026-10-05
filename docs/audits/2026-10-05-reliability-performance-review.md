@@ -78,3 +78,65 @@ The cold-start gain is small on this host, but the slow tail is shorter. The lar
 - The work was done in a native Linux worktree, not the Windows checkout named in `AGENTS.md`, because no Windows checkout is available on this machine.
 - No physical-device test was run. Emulator timings depend on the host and indicate relative change only.
 - Graphify is not installed here, so `graphify update .` was not run.
+
+## Independent PR review (2026-10-05)
+
+The preceding sections are the implementation report committed with the change. The review below preserves that evidence and records a separate assessment of [PR #41 — Fix archive accounting and speed up the ledger (1.0.8)](https://github.com/AIF31/Financial-App/pull/41), requested for general improvements and reliability.
+
+Reviewed base: `352e2edc310f533b2c6d62cfa48b90ef944d96a8` (`main`, 1.0.7). Reviewed head: `4d81f15a3d209ea29bf368f97aa3bb4fd2d9cf0c` (1.0.8). Local `HEAD` matched the GitHub PR head, and the comparison contained seven commits across 17 files.
+
+```bash
+git diff 352e2edc310f533b2c6d62cfa48b90ef944d96a8...HEAD
+git log 352e2edc310f533b2c6d62cfa48b90ef944d96a8..HEAD --oneline
+```
+
+The Standards and Spec axes were reviewed independently in parallel, then checked against the changed source and tests. Standards sources were `AGENTS.md`, `README.md`, `CONTEXT.md`, `Info/implementation-reference.md`, `Info/UI-UX-Design-Philosophy.md`, `docs/testing/FUTURE_TEST_STRATEGY.md`, the accepted ADRs, and the installed Gradle workflow instructions. The Fowler smell baseline was also applied as a set of heuristics, with repository rules taking precedence.
+
+No originating issue is linked in the PR or referenced by its commits. The Spec axis therefore used the PR's stated behavior and the user's reliability/improvement scope as the change contract, supported by [Issue #1](https://github.com/AIF31/Financial-App/issues/1), `CONTEXT.md`, the accepted ADRs, and the financial-period integrity plan.
+
+## Standards
+
+**S1 — P3: Recorded development workflow departed from repository requirements.** The [implementation report hunk](https://github.com/AIF31/Financial-App/blob/4d81f15a3d209ea29bf368f97aa3bb4fd2d9cf0c/docs/audits/2026-10-05-reliability-performance-review.md#L76-L78) states that intermediate runs called `./gradlew` directly and that development used a native Linux worktree.
+
+[AGENTS.md](../../AGENTS.md) requires builds, tests, and source edits in the canonical Windows checkout. The [Gradle skill](../../.agents/skills/gradle-run/SKILL.md) requires every agent-initiated Gradle command to use its compact wrapper. The PR record does not identify an explicit exception; Windows being unavailable does not itself supply one. This is a process finding, not evidence of an application defect. Final wrapper verification and successful GitHub checks limit its practical impact. Record any explicit authorization from the implementation session; otherwise reproduce the required validation in Windows through the wrapper and follow that workflow in subsequent development.
+
+No other documented-standard violations or actionable Fowler smell findings were established. Shared successor construction and spending aggregation reduce duplication. Room transactions, integer financial amounts, and Compose cache keys follow the documented architecture. The removed device ledger class retains corresponding host behavior coverage, while device migration, UI, and accessibility coverage remain.
+
+## Spec
+
+**No actionable introduced Spec findings.**
+
+The diff implements the promised archive accounting correction, later-period Movement guard, and undo snapshot validation. Commands apply their validated rollover projection inside the same Room transaction. Grouped Movement totals preserve exact arithmetic checks; shared successor construction preserves contiguous periods, frozen currency conversion, rounding rules, and review flags. Background state construction retains transactional snapshots and date invalidation. The UI memoization keys cover their captured inputs.
+
+No missing requirement, unintended scope expansion, or incorrectly implemented requirement was validated. Existing stored archive releases remaining unchanged until historical recalculation is explicitly disclosed in the PR and is not a newly hidden behavior.
+
+This conclusion comes from inspecting source and tests, including the focused archive/undo regressions, seeded accounting invariants, overflow rejection coverage, snapshot consistency tests, and active date-refresh collection test. It does not independently reproduce their outcomes.
+
+## Independent verification and limits
+
+- Used GitHub CLI to identify the latest PR, fetch its description, exact revisions, commits, changed files, linked-issue metadata, existing inline review comments, and check results; also fetched Issue #1. No existing inline review comments were returned.
+- Rechecked the PR head before writing this review: it still matched `4d81f15`. All six reported checks completed successfully, including [Android checks](https://github.com/AIF31/Financial-App/actions/runs/37285827856/job/111684357711), [Pixel 6 API 35 device tests](https://github.com/AIF31/Financial-App/actions/runs/37285827856/job/111684357860), and the CodeQL checks. These are GitHub-reported results, not local reruns.
+- The required Windows checkout and PowerShell are unavailable in this environment. No Gradle, emulator, or physical-device tests were run during this independent review. The earlier test counts, performance measurements, APK sizes, and smoke-test results remain implementation-author evidence.
+- App source was reviewed read-only. This review adds documentation to the requested shared-worktree artifact and its changelog; it does not fix S1 or independently verify device behavior. Graphify is unavailable, and no generated graph exists here.
+
+Standards: **1 finding**, worst **P3 workflow deviation**; Spec: **0 findings**, no validated introduced behavior defect.
+
+## Ubuntu compatibility follow-up (2026-10-05)
+
+The user subsequently requested Ubuntu support, authorizing development and testing in this Ubuntu checkout. `AGENTS.md` now supports Windows and Ubuntu, including Ubuntu on WSL, using each host's native JDK and SDK. The [Ubuntu guide](../../Info/ubuntu-development.md) documents prerequisites, the compact Gradle wrapper, host validation, and the managed-device acceleration check. This supersedes the earlier Windows-availability restriction for subsequent work; the original review remains a record of the policy and evidence available when it was written.
+
+No app, test, Gradle configuration, or project script changes were necessary. The existing Ubuntu CI configuration and cross-platform wrapper already support native Linux builds. The implementation's historical direct Gradle invocations remain recorded in S1; the compact-wrapper requirement applies on both hosts.
+
+Independent local verification used native Ubuntu 26.04.1 x86_64, Temurin JDK 17.0.20.1, Android SDK Platform 36, and Build-Tools 36.0.0. All Gradle commands ran through `.agents/skills/gradle-run/scripts/gradle_run.py` with one diagnostic owner and workflow `41a5b663e777507d076f34056b5fe127`.
+
+| Verification question | Answer and evidence |
+| --- | --- |
+| Do the Ubuntu host-test, lint, and APK build checks pass? | Yes. `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest --no-daemon` completed successfully. Most outputs were up-to-date: 142 actionable tasks, 3 executed, 1 from cache, and 138 up-to-date. |
+| Do all host tests execute afresh and pass when only the host-test task is forced to rerun? | Yes. `:app:testDebugUnitTest --rerun --no-daemon` executed 286 tests across 33 suites, with zero failures, errors, or skips. Fresh XML results were written during this session. |
+| Is local managed-device acceleration available? | No. `emulator -accel-check` returned exit 8 and reported that `/dev/kvm` is missing. Device tests were not started. |
+
+The debug lint report contains zero errors and 26 advisory warnings: `OldTargetApi` (1), `AndroidGradlePluginVersion` (2), `GradleDependency` (15), `NewerVersionAvailable` (5), and `UseKtx` (3). The wrapper emitted no Gradle warning fingerprints; that does not mean the lint report is warning-free. A sandbox restriction on the existing Gradle cache lock was resolved with authorized escalation before the successful gate.
+
+Retained artifacts are `app/build/test-results/testDebugUnitTest/`, `app/build/reports/tests/testDebugUnitTest/`, `app/build/reports/lint-results-debug.xml`, and the debug, unsigned release, and instrumentation APKs under `app/build/outputs/apk/`. The wrapper workflow finished successfully, removing only its owned logs and preserving these artifacts.
+
+Ubuntu host tests and build checks are now independently verified. Local managed-device execution remains an infrastructure limit; no physical-device tests, performance measurements, or permanently signed release were performed. The original Spec review remains at zero validated introduced behavior defects.

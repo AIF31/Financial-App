@@ -57,6 +57,8 @@ $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 
 macOS or Linux:
 
+For Ubuntu, first follow the [development setup guide](ubuntu-development.md) to configure the Linux JDK and Android SDK.
+
 ```bash
 ./gradlew :app:installDebug
 ```

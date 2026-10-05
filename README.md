@@ -21,7 +21,7 @@ See the [complete installation guide](Info/installing-pocket.md) for device-spec
 
 ## Project information
 
-Operational documentation is maintained outside the Android module under [`Info/`](Info/README.md). Start there for implementation decisions, Windows/Android Studio setup, physical-device testing, release signing, recovery, and retained verification evidence.
+Operational documentation is maintained outside the Android module under [`Info/`](Info/README.md). Start there for implementation decisions, Windows and Ubuntu setup, physical-device testing, release signing, recovery, and retained verification evidence.
 
 ## Contributor and agent workflow
 
@@ -33,7 +33,9 @@ Pull requests that change app, test, build, or project script files must increas
 
 ## Build and run
 
-The project requires JDK 17 and an Android SDK with API 36. Configure `JAVA_HOME` and `ANDROID_HOME` for your environment, then run:
+Windows and Ubuntu are supported development hosts. The project requires JDK 17 and an Android SDK with API 36. Follow the [Ubuntu setup and verification guide](Info/ubuntu-development.md) or the [Windows guide](Info/windows-android-studio-device-testing.md), then configure `JAVA_HOME` and `ANDROID_HOME` for your environment. Host tests and APK builds run without an emulator.
+
+To install a debug build on a disposable test device:
 
 ```bash
 ./gradlew :app:installDebug
