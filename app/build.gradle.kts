@@ -62,6 +62,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (releaseSigningConfigured) {
                 signingConfig = signingConfigs.getByName("release")
@@ -103,6 +104,11 @@ android {
 }
 
 kotlin { jvmToolchain(17) }
+
+// Robolectric test classes are independent; up to four JVMs share them without starving CI's four-core runners.
+tasks.withType<Test>().configureEach {
+    maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4)
+}
 
 room { schemaDirectory("$projectDir/schemas") }
 

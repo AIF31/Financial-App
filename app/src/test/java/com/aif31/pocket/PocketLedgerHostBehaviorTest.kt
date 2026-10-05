@@ -14,6 +14,7 @@ import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.MovementEntity
 import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.data.PortableSettings
+import com.aif31.pocket.data.PeriodInsights
 import com.aif31.pocket.data.PeriodPocketEntity
 import com.aif31.pocket.data.RolloverReleaseEntity
 import com.aif31.pocket.data.RecurringTemplateEntity
@@ -1958,7 +1959,8 @@ class PocketLedgerHostBehaviorTest {
         assertEquals(LocalDate.of(2026, 2, 27), after.currentLocalDate)
         assertEquals(2, before.elapsedDays)
         assertEquals(3, after.elapsedDays)
-        assertTrue(after.projectionMinor < before.projectionMinor)
+        val projected = { state: LedgerState -> PeriodInsights.of(state, state.currentPeriod!!.id)!!.projectedSpendMinor!! }
+        assertTrue(projected(after) < projected(before))
         assertTrue(backupBefore.contentEquals(ledger.exportBackup()))
     }
 

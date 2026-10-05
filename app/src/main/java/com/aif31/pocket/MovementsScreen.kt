@@ -131,19 +131,22 @@ internal fun MovementsScreen(
     val pocketIndex = pocketOptions.indexOf(selectedPocketId).coerceAtLeast(0)
     val currencyOptions = listOf<String?>(null) + state.movements.map { it.originalCurrencyCode }.distinct()
     val methodOptions = listOf<String?>(null) + state.paymentMethods.map { it.id }
-    val filtered = state.movements.filter { movement ->
-        val text = listOfNotNull(movement.merchant, movement.note).joinToString(" ")
-        (query.isBlank() || text.contains(query, ignoreCase = true)) &&
-            (periodOptions.getOrNull(periodIndex) == null || movement.periodId == periodOptions[periodIndex]) &&
-            (selectedPocketId == null || movement.pocketId == selectedPocketId) &&
-            (currencyOptions.getOrNull(currencyIndex) == null || movement.originalCurrencyCode == currencyOptions[currencyIndex]) &&
-            (methodOptions.getOrNull(methodIndex) == null || movement.paymentMethodId == methodOptions[methodIndex])
+    // Filtering every Movement on each recomposition (each swipe frame or keystroke) is avoided for unchanged inputs.
+    val filtered = remember(state.movements, state.periods, state.paymentMethods, query, periodIndex, selectedPocketId, currencyIndex, methodIndex) {
+        state.movements.filter { movement ->
+            val text = listOfNotNull(movement.merchant, movement.note).joinToString(" ")
+            (query.isBlank() || text.contains(query, ignoreCase = true)) &&
+                (periodOptions.getOrNull(periodIndex) == null || movement.periodId == periodOptions[periodIndex]) &&
+                (selectedPocketId == null || movement.pocketId == selectedPocketId) &&
+                (currencyOptions.getOrNull(currencyIndex) == null || movement.originalCurrencyCode == currencyOptions[currencyIndex]) &&
+                (methodOptions.getOrNull(methodIndex) == null || movement.paymentMethodId == methodOptions[methodIndex])
+        }
     }
     val periodLabels = listOf("Todos los periodos") + state.periods.map { formatPeriodRange(it.start, it.endExclusive) }
     val pocketLabels = listOf("Todos los Pockets") + state.pocketCatalog.map { it.name }
     val currencyLabels = listOf("Todas las monedas") + currencyOptions.drop(1).map { it.orEmpty() }
     val methodLabels = listOf("Todos los métodos") + state.paymentMethods.map { it.name }
-    val groupedMovements = filtered.groupBy { it.localDate }.entries.sortedByDescending { it.key }
+    val groupedMovements = remember(filtered) { filtered.groupBy { it.localDate }.entries.sortedByDescending { it.key } }
     val filtersActive = query.isNotBlank() || periodIndex != 0 || selectedPocketId != null ||
         currencyIndex != 0 || methodIndex != 0
 
