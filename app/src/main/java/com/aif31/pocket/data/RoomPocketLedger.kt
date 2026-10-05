@@ -15,9 +15,11 @@ import java.util.UUID
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -26,14 +28,16 @@ class RoomPocketLedger(
     private val database: FinanceDatabase,
     private val clock: Clock = Clock.systemUTC(),
     private val zoneId: ZoneId = ZoneId.of("Asia/Riyadh"),
-    private val codecDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    /** Builds ledger state and encodes backups, keeping that CPU work off collectors' threads (often main). */
+    private val computeDispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val recordNotificationConfirmation: (amountCorrected: Boolean, currencyCorrected: Boolean) -> Unit = { _, _ -> },
 ) : PocketLedger {
     private val dao = database.financeDao()
     private val restoreMutex = Mutex()
-    private val dateRefreshes = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    /** The budget-zone date that state was last requested for; a new date rebuilds state without a ledger change. */
+    private val observedDate = MutableStateFlow(today())
 
-    override val state: Flow<LedgerState> = merge(
+    override val state: Flow<LedgerState> = combine(
         database.invalidationTracker.createFlow(
             "periods",
             "pockets",
@@ -47,9 +51,9 @@ class RoomPocketLedger(
             "ledger_preferences",
             "movement_suggestions",
             emitInitialState = true,
-        ).map { Unit },
-        dateRefreshes,
-    ).map {
+        ),
+        observedDate,
+    ) { _, _ -> }.conflate().map {
         val snapshot = database.withTransaction {
             LedgerSnapshot(
                 periods = dao.periods(),
@@ -78,7 +82,7 @@ class RoomPocketLedger(
             ledgerPreferencesEntity = snapshot.ledgerPreferences,
             suggestionEntities = snapshot.suggestions,
         )
-    }
+    }.flowOn(computeDispatcher).conflate()
 
     override fun movementDefaults(): MovementDefaults {
         val instant = clock.instant()
@@ -530,7 +534,7 @@ class RoomPocketLedger(
                 else dao.putPendingCurrencyChange(plan.pendingCurrencyChange)
             }
         }
-        dateRefreshes.emit(Unit)
+        observedDate.value = today()
         return LedgerResult.Success
     }
 
@@ -831,14 +835,14 @@ class RoomPocketLedger(
 
     private fun today(): LocalDate = clock.instant().atZone(zoneId).toLocalDate()
 
-    override suspend fun exportBackup(settings: PortableSettings): ByteArray = withContext(codecDispatcher) { BackupCodec.encode(database, settings) }
-    override suspend fun previewBackup(bytes: ByteArray): BackupPreview = withContext(codecDispatcher) {
+    override suspend fun exportBackup(settings: PortableSettings): ByteArray = withContext(computeDispatcher) { BackupCodec.encode(database, settings) }
+    override suspend fun previewBackup(bytes: ByteArray): BackupPreview = withContext(computeDispatcher) {
         BackupCodec.preview(bytes, today(), zoneId)
     }
     override suspend fun restoreBackup(bytes: ByteArray): LedgerResult = restoreMutex.withLock {
-        withContext(codecDispatcher) { BackupCodec.restore(database, bytes, today(), zoneId) }
+        withContext(computeDispatcher) { BackupCodec.restore(database, bytes, today(), zoneId) }
     }
-    override suspend fun exportCsv(): ByteArray = withContext(codecDispatcher) { BackupCodec.csv(database) }
+    override suspend fun exportCsv(): ByteArray = withContext(computeDispatcher) { BackupCodec.csv(database) }
 
     private companion object {
         val INITIAL_POCKETS = listOf(
