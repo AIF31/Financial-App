@@ -112,7 +112,7 @@ class NotificationSuggestionLedgerTest {
             "example.payments", "rejected", instant.toEpochMilli() + 1, ParsedPayment(2_500, SupportedCurrency.USD, "Second")
         )
 
-        assertTrue(database.financeDao().observeMovementSuggestions().first().isEmpty())
+        assertTrue(database.financeDao().pendingMovementSuggestions().isEmpty())
         val tombstone = database.financeDao().movementSuggestion(id)!!
         assertEquals("REJECTED", tombstone.status)
         assertNull(tombstone.amountMinor)
@@ -135,14 +135,14 @@ class NotificationSuggestionLedgerTest {
         )
 
         capture(1_200, "First", instant.toEpochMilli())
-        val first = database.financeDao().observeMovementSuggestions().first().single()
+        val first = database.financeDao().pendingMovementSuggestions().single()
         val ledger = RoomPocketLedger(database, fixedClock)
         assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.RejectSuggestion(first.identityHash)))
 
         identities.onRemoved("example.payments", "reused-key")
         capture(2_500, "Second", instant.toEpochMilli())
 
-        val second = database.financeDao().observeMovementSuggestions().first().single()
+        val second = database.financeDao().pendingMovementSuggestions().single()
         assertTrue(first.identityHash != second.identityHash)
         assertEquals(2_500L, second.amountMinor)
         assertEquals("Second", second.merchant)
@@ -183,7 +183,7 @@ class NotificationSuggestionLedgerTest {
             "example.payments", "second", instant.toEpochMilli(), ParsedPayment(1_200, SupportedCurrency.SAR, "Second")
         )
 
-        val suggestions = database.financeDao().observeMovementSuggestions().first()
+        val suggestions = database.financeDao().pendingMovementSuggestions()
         assertEquals(2, suggestions.size)
         assertEquals(2, suggestions.map { it.identityHash }.toSet().size)
         assertEquals(setOf("First", "Second"), suggestions.map { it.merchant }.toSet())
@@ -206,7 +206,7 @@ class NotificationSuggestionLedgerTest {
         )
 
         assertNull(captured)
-        assertTrue(database.financeDao().observeMovementSuggestions().first().isEmpty())
+        assertTrue(database.financeDao().pendingMovementSuggestions().isEmpty())
     }
 
     @Test fun expired_suggestions_cannot_be_confirmed_or_rejected() = runTest {
@@ -241,13 +241,13 @@ class NotificationSuggestionLedgerTest {
         store.ingest(
             "example.payments", "expires-on-catch-up", clock.millis(), ParsedPayment(1_200, SupportedCurrency.SAR, null)
         )
-        val id = database.financeDao().observeMovementSuggestions().first().single().identityHash
+        val id = database.financeDao().pendingMovementSuggestions().single().identityHash
 
         clock.advance(Duration.ofDays(30))
         assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay = 25)))
 
         assertNull(database.financeDao().movementSuggestion(id))
-        assertTrue(database.financeDao().observeMovementSuggestions().first().isEmpty())
+        assertTrue(database.financeDao().pendingMovementSuggestions().isEmpty())
     }
 
     @Test fun notification_updates_do_not_extend_the_original_expiry() = runTest {
@@ -256,7 +256,7 @@ class NotificationSuggestionLedgerTest {
         store.ingest(
             "example.payments", "updated", clock.millis(), ParsedPayment(1_200, SupportedCurrency.SAR, null)
         )
-        val id = database.financeDao().observeMovementSuggestions().first().single().identityHash
+        val id = database.financeDao().pendingMovementSuggestions().single().identityHash
         val originalExpiry = database.financeDao().movementSuggestion(id)!!.expiresAtUtcMillis
 
         clock.advance(Duration.ofDays(29))
@@ -286,7 +286,7 @@ class NotificationSuggestionLedgerTest {
         assertFalse(backupText.contains("Private Merchant"))
         assertFalse(backupText.contains(suggestionId))
         assertEquals(LedgerResult.Success, ledger.restoreBackup(backup))
-        assertTrue(database.financeDao().observeMovementSuggestions().first().isEmpty())
+        assertTrue(database.financeDao().pendingMovementSuggestions().isEmpty())
     }
 
     @Test fun restored_auto_recorded_movement_blocks_direct_ingest_without_auto_recording() = runTest {

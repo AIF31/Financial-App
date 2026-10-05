@@ -16,7 +16,6 @@ import androidx.room.Upsert
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.aif31.pocket.domain.SupportedCurrency
-import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "periods", indices = [Index(value = ["start_epoch_day"], unique = true)])
 data class PeriodEntity(
@@ -208,17 +207,6 @@ data class MovementSuggestionEntity(
 
 @Dao
 interface FinanceDao {
-    @Query("SELECT * FROM periods ORDER BY start_epoch_day") fun observePeriods(): Flow<List<PeriodEntity>>
-    @Query("SELECT * FROM pockets ORDER BY sort_order, name") fun observePockets(): Flow<List<PocketEntity>>
-    @Query("SELECT * FROM allocations") fun observeAllocations(): Flow<List<AllocationEntity>>
-    @Query("SELECT * FROM period_pockets") fun observePeriodPockets(): Flow<List<PeriodPocketEntity>>
-    @Query("SELECT * FROM rollover_releases") fun observeRolloverReleases(): Flow<List<RolloverReleaseEntity>>
-    @Query("SELECT * FROM payment_methods ORDER BY name") fun observePaymentMethods(): Flow<List<PaymentMethodEntity>>
-    @Query("SELECT * FROM movements ORDER BY occurred_at_utc_millis DESC") fun observeMovements(): Flow<List<MovementEntity>>
-    @Query("SELECT * FROM recurring_templates ORDER BY name") fun observeTemplates(): Flow<List<RecurringTemplateEntity>>
-    @Query("SELECT * FROM pending_currency_change WHERE id = 1") fun observePendingCurrencyChange(): Flow<PendingCurrencyChangeEntity?>
-    @Query("SELECT * FROM ledger_preferences WHERE id = 1") fun observeLedgerPreferences(): Flow<LedgerPreferencesEntity?>
-    @Query("SELECT * FROM movement_suggestions WHERE status = 'PENDING' ORDER BY effective_at_utc_millis DESC") fun observeMovementSuggestions(): Flow<List<MovementSuggestionEntity>>
 
     @Query("SELECT * FROM periods ORDER BY start_epoch_day") suspend fun periods(): List<PeriodEntity>
     @Query("SELECT * FROM pockets ORDER BY sort_order, name") suspend fun pockets(): List<PocketEntity>
@@ -237,7 +225,6 @@ interface FinanceDao {
     @Query("SELECT * FROM periods WHERE id = :id") suspend fun period(id: String): PeriodEntity?
     @Query("SELECT * FROM movements WHERE id = :id") suspend fun movement(id: String): MovementEntity?
     @Query("SELECT * FROM allocations WHERE period_id = :periodId AND pocket_id = :pocketId") suspend fun allocation(periodId: String, pocketId: String): AllocationEntity?
-    @Query("SELECT COALESCE(SUM(budget_minor), 0) FROM allocations WHERE period_id = :periodId") suspend fun allocated(periodId: String): Long
     @Query(
         "SELECT * FROM fx_rate_cache WHERE base_currency_code = :baseCurrencyCode " +
             "AND quote_currency_code = :quoteCurrencyCode AND effective_epoch_day BETWEEN :minimumEpochDay AND :requestedEpochDay " +

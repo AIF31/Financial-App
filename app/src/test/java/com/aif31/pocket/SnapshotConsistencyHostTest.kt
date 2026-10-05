@@ -19,9 +19,11 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
@@ -95,23 +97,19 @@ class SnapshotConsistencyHostTest {
 
     @Test
     fun repeated_invalidation_never_emits_a_mixed_snapshot() = runTest {
-        val ledger = RoomPocketLedger(database, clock, zone)
+        // State is built on this single thread; blocking it holds the next rebuild until the second write is in flight.
+        val computeExecutor = Executors.newSingleThreadExecutor()
+        val ledger = RoomPocketLedger(database, clock, zone, computeDispatcher = computeExecutor.asCoroutineDispatcher())
         val (periodId, pocketId) = seedVersion(database, ledger, 10_000, "Before")
         ledger.state.first { !it.needsOnboarding }
         val states = Channel<LedgerState>(Channel.UNLIMITED)
         val continueAfterInitial = CountDownLatch(1)
         val collector = backgroundScope.launch(Dispatchers.IO) {
-            var first = true
-            ledger.state.collect { state ->
-                states.send(state)
-                if (first) {
-                    first = false
-                    check(continueAfterInitial.await(10, TimeUnit.SECONDS))
-                }
-            }
+            ledger.state.collect { state -> states.send(state) }
         }
         val initial = withContext(Dispatchers.IO) { withTimeout(10_000) { states.receive() } }
         assertCompleteVersion(initial, pocketId, 10_000 to "Before")
+        computeExecutor.execute { check(continueAfterInitial.await(10, TimeUnit.SECONDS)) }
 
         database.withTransaction {
             val dao = database.financeDao()
@@ -128,6 +126,7 @@ class SnapshotConsistencyHostTest {
         }
 
         collector.cancelAndJoin()
+        computeExecutor.shutdown()
         assertCompleteVersion(stateAfterRepeatedInvalidation, pocketId, 30_000 to "After")
     }
 

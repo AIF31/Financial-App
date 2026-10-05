@@ -2,6 +2,30 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-10-05
+
+### Ubuntu development support
+
+- Windows and Ubuntu, including Ubuntu on WSL, are now supported development hosts in `AGENTS.md`. Added an [Ubuntu setup and verification guide](ubuntu-development.md) and linked it from the project and installation documentation. Gradle already supports this host; no app or build configuration change was needed.
+- Verification on native Ubuntu 26.04.1 x86_64 with JDK 17: the compact Gradle wrapper passed host tests, debug lint, and debug, unsigned release, and instrumentation APK assembly. Host tests were then explicitly rerun: 286 tests across 33 suites, with zero failures, errors, or skips. Build and lint outputs were up-to-date where applicable; lint reports 26 advisory warnings and zero errors. The workflow finished and removed only its owned logs, preserving build/test reports.
+- Limits: managed-device tests were not locally executed because the emulator acceleration check reports missing `/dev/kvm`. No physical-device tests, performance measurements, or permanent release signing were performed. The [audit follow-up](../docs/audits/2026-10-05-reliability-performance-review.md#ubuntu-compatibility-follow-up-2026-10-05) supersedes the earlier Windows-availability limit for host validation.
+
+### Independent review of PR #41
+
+- Appended separate Standards and Spec reviews to the [dated reliability audit](../docs/audits/2026-10-05-reliability-performance-review.md), preserving the implementation report. Reviewed `352e2ed...4d81f15`: one P3 finding records development workflow departures; no introduced behavior defect was validated.
+- Verification: GitHub CLI confirmed the reviewed PR head and all six successful checks. Source and tests were inspected read-only; builds, tests, performance measurements, and device behavior were not independently reproduced because the required Windows checkout is unavailable. Any implementation-session authorization for the workflow departures remains to be recorded, or the required Windows validation reproduced through the compact Gradle wrapper.
+
+### Reliability and performance pass
+
+A whole-app review of the ledger math, loading time, and test suite. The [dated audit](../docs/audits/2026-10-05-reliability-performance-review.md) lists each finding, its fix, and the measurements. The development version advances to `1.0.8` (`versionCode` 9).
+
+- Archiving a Pocket now moves its whole incoming rollover to unassigned funds, like its budget. Before, it moved only the part not yet spent, so spending past the Pocket's own budget made funds disappear from the totals until a later historical edit recalculated the release.
+- Archiving a Pocket that still has Movements in a pre-created later period is rejected with "Mueve o elimina primero los movimientos de este Pocket en periodos posteriores". Before, those Movements stopped counting in that period, and the next exported backup could not be restored. Undoing a delete is likewise rejected if the Movement's Pocket is no longer in its period.
+- Saving, deleting, or editing a Movement computes rollover once instead of twice and writes only the allocations that changed. Ledger state is built on a background thread instead of the main thread, and a launch with nothing to catch up no longer reads the whole ledger or rebuilds state twice. On a synthetic five-year ledger, saving an expense dated in the oldest period dropped from about 230 ms to 76 ms in host tests.
+- The app reports when its first real screen is fully drawn. Release builds remove unused resources (2.66 MB to 2.45 MB). An app baseline profile was measured and not kept, because it made no measurable difference.
+- Tests: seeded random command sequences now check the accounting rules after every command. The device class `PocketLedgerBehaviorTest`, whose tests duplicated host tests, is removed after moving its one unique test to the host suite. Host tests run in up to four JVMs.
+- Verification: each new regression test failed before its fix. The host suite, lint, debug and release assembly, and the Pixel 6 API 35 managed-device suite passed; the audit records the counts. A release-like build was smoke-tested on an emulator with a seeded five-year ledger. No physical-device test was run.
+
 ## 2026-09-30
 
 ### 1.0.6 hardware findings fixed
