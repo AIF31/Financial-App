@@ -788,6 +788,44 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
+    fun archiving_is_blocked_while_the_pocket_has_movements_in_a_later_period() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(30_000))
+        val pocket = ledger.state.first().pockets.first { it.pocket.name == "Viajes" }.pocket
+        ledger.execute(LedgerCommand.CreateNextPeriod())
+        val next = ledger.state.first { it.periods.size == 2 }.periods.maxBy { it.start }
+        assertEquals(
+            LedgerResult.Success,
+            ledger.execute(LedgerCommand.AddMovement("future", pocket.id, MovementType.EXPENSE, 1_000, clock.millis(), next.start)),
+        )
+
+        assertValidationRejection(ledger.execute(LedgerCommand.ArchivePocket(pocket.id)))
+
+        val state = ledger.state.first()
+        assertFalse(state.pocketCatalog.single { it.id == pocket.id }.archived)
+        assertEquals(1_000L, state.pocketSummariesByPeriod.getValue(next.id).single { it.pocket.id == pocket.id }.netSpendMinor)
+        ledger.execute(LedgerCommand.DeleteMovement("future"))
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePocket(pocket.id)))
+    }
+
+    @Test
+    fun undoing_a_delete_is_rejected_once_the_pocket_is_gone_from_that_period() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(30_000))
+        val pocket = ledger.state.first().pockets.first { it.pocket.name == "Viajes" }.pocket
+        ledger.execute(LedgerCommand.CreateNextPeriod())
+        val next = ledger.state.first { it.periods.size == 2 }.periods.maxBy { it.start }
+        ledger.execute(LedgerCommand.AddMovement("future", pocket.id, MovementType.EXPENSE, 1_000, clock.millis(), next.start))
+        val deleted = ledger.execute(LedgerCommand.DeleteMovement("future")) as LedgerResult.Deleted
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePocket(pocket.id)))
+
+        assertValidationRejection(ledger.execute(LedgerCommand.RestoreMovement(deleted.movement)))
+
+        assertTrue(ledger.state.first().movements.none { it.id == "future" })
+        assertTrue(ledger.previewBackup(ledger.exportBackup()).valid)
+    }
+
+    @Test
     fun historical_edits_recalculate_a_later_retired_Pockets_rollover_release() = runTest {
         val firstLedger = RoomPocketLedger(database, clock, zone)
         firstLedger.execute(LedgerCommand.Initialize(30_000))

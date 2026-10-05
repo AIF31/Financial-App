@@ -308,26 +308,18 @@ class RoomPocketLedger(
         val allocations = dao.allocations()
         val allocation = allocations.firstOrNull { it.periodId == currentPeriod.id && it.pocketId == pocket.id }
         val movements = dao.movements()
-        val pocketMovements = movements.filter {
-            it.periodId == currentPeriod.id && it.pocketId == pocket.id
-        }
-        val expenses = pocketMovements.filter { it.type == MovementType.EXPENSE.name }
-            .map { it.accountingAmountMinor }.sumMoneyExact()
-        val refunds = pocketMovements.filter { it.type == MovementType.REFUND.name }
-            .map { it.accountingAmountMinor }.sumMoneyExact()
-        val availability = PocketMath.summary(
-            budgetMinor = allocation?.budgetMinor ?: 0,
-            rolloverMinor = allocation?.rolloverMinor ?: 0,
-            expensesMinor = expenses,
-            refundsMinor = refunds,
-        ).availabilityMinor
-        val releasedRollover = minOf(allocation?.rolloverMinor ?: 0, availability.coerceAtLeast(0))
-        val releases = dao.rolloverReleases()
-        val release = RolloverReleaseEntity(currentPeriod.id, pocket.id, releasedRollover)
-        val currentAllocation = AllocationEntity(currentPeriod.id, pocket.id, budgetMinor = 0, rolloverMinor = 0)
         val futurePeriodIds = periods
             .filter { it.startEpochDay > currentPeriod.startEpochDay }
             .mapTo(mutableSetOf()) { it.id }
+        // Later periods lose this Pocket, so Movements there would no longer be counted anywhere.
+        require(movements.none { it.pocketId == pocket.id && it.periodId in futurePeriodIds }) {
+            "Mueve o elimina primero los movimientos de este Pocket en periodos posteriores"
+        }
+        // The whole incoming rollover moves to unassigned funds, like the budget, so archiving conserves funds.
+        val releasedRollover = allocation?.rolloverMinor ?: 0
+        val releases = dao.rolloverReleases()
+        val release = RolloverReleaseEntity(currentPeriod.id, pocket.id, releasedRollover)
+        val currentAllocation = AllocationEntity(currentPeriod.id, pocket.id, budgetMinor = 0, rolloverMinor = 0)
         val prospectiveAllocations = allocations.filterNot {
             it.pocketId == pocket.id && (it.periodId == currentPeriod.id || it.periodId in futurePeriodIds)
         } + currentAllocation
@@ -483,6 +475,10 @@ class RoomPocketLedger(
     private suspend fun restoreMovement(command: LedgerCommand.RestoreMovement): LedgerResult = database.withTransaction {
         val entity = command.movement.toEntity()
         requireNotNull(dao.period(entity.periodId)) { "Periodo inexistente" }
+        // A retired Pocket still counts its own Movements; one removed from the period would not.
+        require(dao.periodPockets().any { it.periodId == entity.periodId && it.pocketId == entity.pocketId }) {
+            "El Pocket no está activo en este periodo"
+        }
         val prospectiveMovements = dao.movements().filterNot { it.id == entity.id } + entity
         rolloverProjection(
             entity.periodId,
