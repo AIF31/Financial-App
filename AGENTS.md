@@ -1,5 +1,18 @@
 ## Agent skills
 
+### Development environment
+
+Windows and Ubuntu, including Ubuntu on WSL, are supported development hosts.
+Run source edits, builds, and host tests in the current checkout using that
+host's JDK and Android SDK. The Windows Android Studio checkout is at
+`$env:USERPROFILE\StudioProjects\Financial-App`.
+
+Before Ubuntu setup, builds, or tests, read `Info/ubuntu-development.md`.
+Run agent-initiated Gradle commands on either host through
+`.agents/skills/gradle-run/scripts/gradle_run.py`. Check emulator acceleration
+separately before managed-device tests; missing acceleration does not block
+host tests or APK assembly.
+
 ### Physical-device testing
 
 Before any test or install on a physical Android device, read

@@ -206,30 +206,3 @@ object PocketMath {
         return SpendProjection(projected.toLong())
     }
 }
-
-data class ManualFx(
-    val originalMinor: Long,
-    val accountingMinor: Long,
-    val confirmed: Boolean,
-    val rate: String?,
-) {
-    fun confirm(accountingMinor: Long): ManualFx {
-        require(accountingMinor >= 0)
-        return copy(accountingMinor = accountingMinor, confirmed = true)
-    }
-
-    companion object {
-        fun estimate(originalMinor: Long, originalFractionDigits: Int, accountingPerOriginal: String): ManualFx {
-            require(originalMinor >= 0)
-            val rate = BigDecimal(accountingPerOriginal)
-            require(rate > BigDecimal.ZERO)
-            val accountingMinor = BigDecimal.valueOf(originalMinor)
-                .movePointLeft(originalFractionDigits)
-                .multiply(rate)
-                .movePointRight(2)
-                .setScale(0, RoundingMode.HALF_UP)
-                .longValueExact()
-            return ManualFx(originalMinor, accountingMinor, confirmed = false, rate = rate.stripTrailingZeros().toPlainString())
-        }
-    }
-}

@@ -14,6 +14,7 @@ import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.MovementEntity
 import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.data.PortableSettings
+import com.aif31.pocket.data.PeriodInsights
 import com.aif31.pocket.data.PeriodPocketEntity
 import com.aif31.pocket.data.RolloverReleaseEntity
 import com.aif31.pocket.data.RecurringTemplateEntity
@@ -788,6 +789,44 @@ class PocketLedgerHostBehaviorTest {
     }
 
     @Test
+    fun archiving_is_blocked_while_the_pocket_has_movements_in_a_later_period() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(30_000))
+        val pocket = ledger.state.first().pockets.first { it.pocket.name == "Viajes" }.pocket
+        ledger.execute(LedgerCommand.CreateNextPeriod())
+        val next = ledger.state.first { it.periods.size == 2 }.periods.maxBy { it.start }
+        assertEquals(
+            LedgerResult.Success,
+            ledger.execute(LedgerCommand.AddMovement("future", pocket.id, MovementType.EXPENSE, 1_000, clock.millis(), next.start)),
+        )
+
+        assertValidationRejection(ledger.execute(LedgerCommand.ArchivePocket(pocket.id)))
+
+        val state = ledger.state.first()
+        assertFalse(state.pocketCatalog.single { it.id == pocket.id }.archived)
+        assertEquals(1_000L, state.pocketSummariesByPeriod.getValue(next.id).single { it.pocket.id == pocket.id }.netSpendMinor)
+        ledger.execute(LedgerCommand.DeleteMovement("future"))
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePocket(pocket.id)))
+    }
+
+    @Test
+    fun undoing_a_delete_is_rejected_once_the_pocket_is_gone_from_that_period() = runTest {
+        val ledger = RoomPocketLedger(database, clock, zone)
+        ledger.execute(LedgerCommand.Initialize(30_000))
+        val pocket = ledger.state.first().pockets.first { it.pocket.name == "Viajes" }.pocket
+        ledger.execute(LedgerCommand.CreateNextPeriod())
+        val next = ledger.state.first { it.periods.size == 2 }.periods.maxBy { it.start }
+        ledger.execute(LedgerCommand.AddMovement("future", pocket.id, MovementType.EXPENSE, 1_000, clock.millis(), next.start))
+        val deleted = ledger.execute(LedgerCommand.DeleteMovement("future")) as LedgerResult.Deleted
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ArchivePocket(pocket.id)))
+
+        assertValidationRejection(ledger.execute(LedgerCommand.RestoreMovement(deleted.movement)))
+
+        assertTrue(ledger.state.first().movements.none { it.id == "future" })
+        assertTrue(ledger.previewBackup(ledger.exportBackup()).valid)
+    }
+
+    @Test
     fun historical_edits_recalculate_a_later_retired_Pockets_rollover_release() = runTest {
         val firstLedger = RoomPocketLedger(database, clock, zone)
         firstLedger.execute(LedgerCommand.Initialize(30_000))
@@ -895,6 +934,46 @@ class PocketLedgerHostBehaviorTest {
         assertEquals(30_000L, nextCurrent.unallocatedMinor)
         assertTrue(nextCurrent.pocketCatalog.single { it.id == pocket.id }.archived)
         assertTrue(ledger.state.first().pocketCatalog.single { it.id == pocket.id }.archived)
+    }
+
+    @Test
+    fun restoring_pocket_reinstates_all_precreated_future_periods_without_changing_history() = runTest {
+        val firstLedger = RoomPocketLedger(database, clock, zone)
+        assertEquals(LedgerResult.Success, firstLedger.execute(LedgerCommand.Initialize(20_000)))
+        val first = firstLedger.state.first { !it.needsOnboarding }
+        val pocketId = first.pockets.first().pocket.id
+        val firstPeriodId = first.currentPeriod!!.id
+        assertEquals(LedgerResult.Success, firstLedger.execute(LedgerCommand.SetAllocation(firstPeriodId, pocketId, 5_000)))
+        assertEquals(LedgerResult.Success, firstLedger.execute(LedgerCommand.AddMovement(
+            id = "historical", pocketId = pocketId, type = MovementType.EXPENSE,
+            accountingAmountMinor = 1_000, occurredAtUtcMillis = clock.millis(),
+            localDate = java.time.LocalDate.of(2026, 2, 26),
+        )))
+        assertEquals(LedgerResult.Success, firstLedger.execute(LedgerCommand.CreateNextPeriod()))
+        assertEquals(LedgerResult.Success, firstLedger.execute(LedgerCommand.CreateNextPeriod()))
+        val periods = firstLedger.state.first { it.periods.size == 3 }.periods.sortedBy { it.start }
+        assertEquals(LedgerResult.Success, firstLedger.execute(LedgerCommand.ArchivePocket(pocketId)))
+        val archivedHistory = firstLedger.state.first { it.pocketCatalog.first { pocket -> pocket.id == pocketId }.archived }
+            .pocketSummariesByPeriod.getValue(firstPeriodId).first { it.pocket.id == pocketId }
+
+        val secondLedger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone), zone)
+        assertEquals(LedgerResult.Success, secondLedger.execute(LedgerCommand.ArchivePocket(pocketId, archived = false)))
+        val restored = secondLedger.state.first { !it.pocketCatalog.first { pocket -> pocket.id == pocketId }.archived }
+        val restoredHistory = restored.pocketSummariesByPeriod.getValue(firstPeriodId).first { it.pocket.id == pocketId }
+        assertEquals(archivedHistory.budgetMinor, restoredHistory.budgetMinor)
+        assertEquals(archivedHistory.availabilityMinor, restoredHistory.availabilityMinor)
+        assertEquals(archivedHistory.retiredThisPeriod, restoredHistory.retiredThisPeriod)
+        assertEquals(1_000L, restored.movements.single { it.id == "historical" }.accountingAmountMinor)
+        assertTrue(restored.pocketSummariesByPeriod.getValue(periods[1].id).any { it.pocket.id == pocketId })
+
+        val thirdLedger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-04-26T09:00:00Z"), zone), zone)
+        val third = thirdLedger.state.first { it.currentPeriod?.id == periods[2].id }
+        assertTrue(third.pockets.any { it.pocket.id == pocketId })
+        assertTrue(third.pocketSummariesByPeriod.getValue(periods[2].id).any { it.pocket.id == pocketId })
+        val thirdHistory = third.pocketSummariesByPeriod.getValue(firstPeriodId).first { it.pocket.id == pocketId }
+        assertEquals(restoredHistory.budgetMinor, thirdHistory.budgetMinor)
+        assertEquals(restoredHistory.availabilityMinor, thirdHistory.availabilityMinor)
+        assertEquals(restoredHistory.retiredThisPeriod, thirdHistory.retiredThisPeriod)
     }
 
     @Test
@@ -1920,7 +1999,8 @@ class PocketLedgerHostBehaviorTest {
         assertEquals(LocalDate.of(2026, 2, 27), after.currentLocalDate)
         assertEquals(2, before.elapsedDays)
         assertEquals(3, after.elapsedDays)
-        assertTrue(after.projectionMinor < before.projectionMinor)
+        val projected = { state: LedgerState -> PeriodInsights.of(state, state.currentPeriod!!.id)!!.projectedSpendMinor!! }
+        assertTrue(projected(after) < projected(before))
         assertTrue(backupBefore.contentEquals(ledger.exportBackup()))
     }
 

@@ -8,6 +8,7 @@ This directory is the human-oriented operational knowledge base for Pocket. It s
 - [Install Pocket on an Android device](installing-pocket.md): official downloads, sideloading, source builds, updates, and data-safety notes.
 - [Implementation reference](implementation-reference.md): product boundaries, architecture, durable decisions, and repository history.
 - [Windows, Android Studio, and Pixel 10 Pro testing](windows-android-studio-device-testing.md): working environment, build commands, ADB workflow, and physical-device precautions.
+- [Ubuntu development and verification](ubuntu-development.md): native Linux and WSL setup, host checks, and managed-device acceleration requirements.
 - [Release signing and recovery](release-signing-and-recovery.md): permanent key handling, signed builds, verification, backup, uninstall, and restore.
 - [Release verification](verification/release-verification.md): retained test evidence and known coverage gaps.
 - [License](../LICENSE.md): PolyForm Noncommercial License 1.0.0 terms for Pocket.

@@ -1,6 +1,7 @@
 package com.aif31.pocket
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.ReportDrawnWhen
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -174,6 +175,8 @@ fun PocketApp(
     undoWindowMillis: Long = 5_000,
 ) {
     val observedState by ledger.state.collectAsStateWithLifecycle(initialValue = null)
+    // Startup ends when the first real screen can show: onboarding or a ledger with its current period.
+    ReportDrawnWhen { observedState?.let { it.needsOnboarding || it.currentPeriod != null } == true }
     val preferencesFlow = remember(preferences) { preferences?.state ?: flowOf(AppPreferences()) }
     val preferenceState by preferencesFlow.collectAsStateWithLifecycle(initialValue = AppPreferences())
     val backupScope = rememberCoroutineScope()

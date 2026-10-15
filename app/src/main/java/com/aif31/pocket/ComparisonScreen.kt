@@ -66,8 +66,8 @@ internal fun ComparisonScreen(
     onPeriodsChange: (periodId: String, baselinePeriodId: String?) -> Unit,
     onBack: () -> Unit,
 ) {
-    val comparison = baselinePeriodId?.let { PeriodComparison.of(state, periodId, it) }
-    val insights = comparison?.current ?: PeriodInsights.of(state, periodId)
+    val comparison = remember(state, periodId, baselinePeriodId) { baselinePeriodId?.let { PeriodComparison.of(state, periodId, it) } }
+    val insights = remember(state, periodId, comparison) { comparison?.current ?: PeriodInsights.of(state, periodId) }
     Scaffold(
         topBar = {
             PocketTopAppBar(title = "Comparar periodos", onNavigateBack = onBack)
