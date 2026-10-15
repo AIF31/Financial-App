@@ -1,12 +1,5 @@
 ## Agent skills
 
-### Development environment
-
-The canonical development checkout is the Windows project at
-`$env:USERPROFILE\StudioProjects\Financial-App`. Run builds, tests, and
-source edits there. Treat WSL copies as reference-only unless the user explicitly
-requests WSL development.
-
 ### Physical-device testing
 
 Before any test or install on a physical Android device, read
