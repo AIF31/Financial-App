@@ -18,6 +18,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.PortableSettings
+import com.aif31.pocket.expense.EstimatedConversionReconciler
 import com.aif31.pocket.ui.PocketTheme
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -100,6 +101,7 @@ class MainActivity : ComponentActivity() {
         ) { catchUpPeriods() }
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch { confirmEstimatedConversions() }
                 while (true) {
                     delay(dateCoordinator.refresh())
                 }
@@ -163,6 +165,17 @@ class MainActivity : ComponentActivity() {
         val application = application as PocketApplication
         val preferredStartDay = application.preferences.state.first().futurePeriodStartDay
         return application.ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay)) == LedgerResult.Success
+    }
+
+    /** Each return to the foreground retries estimates whose transaction-date FIX may now be final. */
+    private suspend fun confirmEstimatedConversions() {
+        val application = application as PocketApplication
+        try {
+            if (!application.preferences.state.first().onlineFxEnabled) return
+            EstimatedConversionReconciler(application.ledger, application.exchangeRates).reconcile()
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+        }
     }
 
     internal fun launchDocumentOperation(operation: DocumentOperation) {

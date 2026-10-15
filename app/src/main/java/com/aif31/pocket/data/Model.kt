@@ -198,6 +198,17 @@ sealed interface LedgerCommand {
         val accountingCurrency: SupportedCurrency? = null,
         val createOnly: Boolean = false,
     ) : LedgerCommand
+    /**
+     * Replaces a provider estimate with the final rate of the Movement's own date. It does nothing when [estimate]
+     * no longer matches the stored Movement, so a later edit or deletion wins.
+     */
+    data class ConfirmConversion(
+        val estimate: Movement,
+        val accountingAmountMinor: Long,
+        val rate: String,
+        val effectiveDate: LocalDate,
+        val source: String,
+    ) : LedgerCommand
     data class ConfirmSuggestion(
         val suggestionId: String,
         val movement: AddMovement,

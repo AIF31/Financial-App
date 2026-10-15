@@ -45,8 +45,8 @@ Optional descriptive metadata on a movement, such as cash or card. It does not r
 _Avoid_: Account, wallet
 
 **Conversion status**:
-Whether a foreign-currency movement's manually entered accounting amount is estimated or confirmed. The accounting amount is frozen until the user edits it.
-_Avoid_: Live exchange rate, automatic conversion
+Whether a foreign-currency movement's accounting amount is estimated or confirmed. A provider rate is confirmed only when it is the final Banxico FIX for the movement's own date; an earlier observation, used before that day's FIX is published or from the cache, is an estimate that Pocket replaces once the final rate is available. Confirmed and manually entered amounts are frozen until the user edits them.
+_Avoid_: Live exchange rate, period rate
 
 **Automatic period catch-up**:
 The transactional, idempotent creation of every missing budget period in sequence when the app launches or resumes. Only the current period requires review.

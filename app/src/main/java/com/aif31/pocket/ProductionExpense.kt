@@ -92,6 +92,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.aif31.pocket.data.ConversionStatus
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.LedgerState
@@ -415,6 +416,9 @@ internal fun ProductionMovementScreen(
                     is QuoteUiState.Ready -> if (inputCurrency != accountingCurrency && accountingAmountMinor != null) {
                         Text(MoneyText.format(accountingAmountMinor, accountingCurrency), style = MaterialTheme.typography.titleLarge)
                         Text("Efectiva: ${currentQuote.conversion.effectiveDate ?: "No registrada"}")
+                        if (currentQuote.conversion.status == ConversionStatus.ESTIMATED && currentQuote.conversion.source != null) {
+                            Text("Estimado: se actualizará con el FIX del $parsedDateForQuote cuando Banxico lo publique")
+                        }
                         Text("Fuente: ${currentQuote.conversion.source ?: "Conversión manual histórica"}")
                     }
                 }

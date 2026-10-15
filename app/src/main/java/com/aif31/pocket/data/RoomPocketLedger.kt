@@ -99,6 +99,7 @@ class RoomPocketLedger(
             is LedgerCommand.ArchivePocket -> archivePocket(command)
             is LedgerCommand.MovePocket -> movePocket(command)
             is LedgerCommand.AddMovement -> addMovement(command)
+            is LedgerCommand.ConfirmConversion -> confirmConversion(command)
             is LedgerCommand.ConfirmSuggestion -> confirmSuggestion(command)
             is LedgerCommand.RejectSuggestion -> rejectSuggestion(command.suggestionId)
             is LedgerCommand.DeleteMovement -> deleteMovement(command)
@@ -424,6 +425,38 @@ class RoomPocketLedger(
         dao.putMovement(updated)
         recalculateRolloverFrom(sourcePeriodId)
         LedgerResult.Success
+    }
+
+    private suspend fun confirmConversion(command: LedgerCommand.ConfirmConversion): LedgerResult = database.withTransaction {
+        val estimate = command.estimate
+        val stored = dao.movement(estimate.id)
+        val unchanged = stored != null && stored.conversionStatus == ConversionStatus.ESTIMATED.name &&
+            stored.conversionSource != null && stored.rate == estimate.rate &&
+            stored.conversionEffectiveEpochDay == estimate.conversionEffectiveDate?.toEpochDay() &&
+            stored.localEpochDay == estimate.localDate.toEpochDay() && stored.periodId == estimate.periodId &&
+            stored.originalAmountMinor == estimate.originalAmountMinor &&
+            stored.originalCurrencyCode == estimate.originalCurrencyCode &&
+            stored.accountingAmountMinor == estimate.accountingAmountMinor
+        if (stored == null || !unchanged) return@withTransaction LedgerResult.Success
+        addMovement(
+            LedgerCommand.AddMovement(
+                id = stored.id,
+                pocketId = stored.pocketId,
+                type = MovementType.valueOf(stored.type),
+                accountingAmountMinor = command.accountingAmountMinor,
+                occurredAtUtcMillis = stored.occurredAtUtcMillis,
+                localDate = LocalDate.ofEpochDay(stored.localEpochDay),
+                merchant = stored.merchant,
+                note = stored.note,
+                paymentMethodId = stored.paymentMethodId,
+                originalAmountMinor = stored.originalAmountMinor,
+                originalCurrencyCode = stored.originalCurrencyCode,
+                conversionStatus = ConversionStatus.CONFIRMED,
+                rate = command.rate,
+                conversionEffectiveDate = command.effectiveDate,
+                conversionSource = command.source,
+            )
+        )
     }
 
     private suspend fun confirmSuggestion(command: LedgerCommand.ConfirmSuggestion): LedgerResult {
