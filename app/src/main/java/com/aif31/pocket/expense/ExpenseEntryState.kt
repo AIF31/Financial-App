@@ -60,6 +60,8 @@ internal class ExpenseEntryStateHolder(
             throw QuoteFailure.Unavailable()
         }
         if (converted <= 0) throw QuoteFailure.Unavailable()
-        return ExpenseConversion(converted, quote.rate, quote.effectiveDate, quote.source)
+        // A rate dated before the Movement while that day's FIX can still appear stays an estimate until reconciled.
+        val status = if (quote.isFinal) ConversionStatus.CONFIRMED else ConversionStatus.ESTIMATED
+        return ExpenseConversion(converted, quote.rate, quote.effectiveDate, quote.source, status)
     }
 }

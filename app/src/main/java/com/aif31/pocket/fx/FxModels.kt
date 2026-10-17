@@ -12,6 +12,8 @@ data class FxQuote(
     val quote: SupportedCurrency,
     val rate: String,
     val source: String,
+    /** False while Banxico could still publish a FIX dated later than [effectiveDate] but not after [requestedDate]. */
+    val isFinal: Boolean = true,
 ) {
     private val decimalRate = runCatching { BigDecimal(rate) }
         .getOrElse { throw IllegalArgumentException("Tipo de cambio no válido") }

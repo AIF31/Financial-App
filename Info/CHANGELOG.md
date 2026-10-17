@@ -2,6 +2,20 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-10-15
+
+### Foreign expenses confirmed at their own date's FIX
+
+A foreign-currency expense could be saved as confirmed at another day's rate. Banxico publishes the FIX around 12:00 Mexico City time, about 21:00 in Riyadh. An expense entered earlier on its own date therefore got the previous business day's FIX. A failed Banxico request could also fall back to a cached rate up to seven days older. In both cases the rate was frozen as confirmed. The development version advances to `1.0.9` (`versionCode` 10).
+
+- `DefaultExchangeRateRepository` now marks each quote final or provisional (`FxQuote.isFinal`). A quote is final if it has an observation on the requested date. It is also final if the provider answered after that Mexico City day ended, so weekends and holidays correctly use the prior FIX. A cached older observation is never final.
+- The expense form saves a provisional quote as **Estimado** and says it will update with that date's FIX once Banxico publishes it.
+- On every return to the foreground with online FX enabled, `EstimatedConversionReconciler` re-quotes provider estimates. Once the rate is final, the new `LedgerCommand.ConfirmConversion` replaces the amount, rate, effective date and source, and marks the expense confirmed. Rollover is recalculated. If the movement was edited or deleted after the estimate was read, the command does nothing. Legacy manual estimates without a provider source are never changed. No schema or backup-format change.
+- `CONTEXT.md` (Conversion status) and `Info/implementation-reference.md` describe the rule. Merged with `main`, whose `AGENTS.md` already supports Ubuntu development.
+- Verification, run on Linux with Android Studio's bundled JDK: `TransactionDateRateTest` failed on the prior code for the same-day and cached-fallback cases, stamping a 2026-10-14 purchase confirmed at the 2026-10-13 and 2026-10-12 FIX. It passes after the fix, alongside new final, cached-final and weekend cases. `EstimatedConversionReconcilerTest` covers confirmation, provisional and failed quotes, legacy estimates and a concurrent edit against Room. `:app:testDebugUnitTest` passed 291 tests with no failures, errors or skips. `:app:lintDebug`, `:app:assembleDebug` and `:app:assembleDebugAndroidTest` passed. The debug APK was installed on a fresh API 37 emulator. Onboarding, enabling online FX and returning from the background ran without a crash. The Pixel 6 API 35 managed-device suite passed 31 tests. After merging `main` (PR #41), the gradle-run wrapper's CI-equivalent gate passed: 295 host tests, `:app:lintDebug`, and the debug, release and test APK builds.
+- Live check against Banxico on 2026-10-15 at 10:30 Mexico City time, using a debug build with a local token on the API 37 emulator. A 100 MXN expense dated 2026-10-14 was saved `CONFIRMED` at that day's FIX (18.4888, SAR 20.28). One dated 2026-10-15, before that day's FIX was published, showed the Estimado notice and was saved `ESTIMATED` at the 2026-10-14 FIX. For the reconciliation check, the 2026-10-14 row was set in the emulator database to the bug's prior result: `ESTIMATED` at the 2026-10-13 FIX (18.3528, SAR 20.43). Relaunching the app confirmed it at the 2026-10-14 FIX (SAR 20.28). The 2026-10-15 row stayed estimated.
+- Limits: no physical-device test was run. Finality relies on the device clock: a date counts as final once its Mexico City day has ended, even if Banxico has not yet published that day's FIX. A movement's date still defaults to the Asia/Riyadh day, so a late-evening purchase in Mexico defaults to the next day unless the date is changed.
+
 ## 2026-10-05
 
 ### Ubuntu development support

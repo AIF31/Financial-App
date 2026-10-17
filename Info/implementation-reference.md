@@ -14,7 +14,8 @@ The authoritative requirements are in GitHub Issue [AIF31/Financial-App#1](https
 - State flows toward Compose; user actions flow through the ledger/application interface.
 - Money is stored in integer minor units; `Float` and `Double` are not used for financial amounts.
 - Budget-period assignment uses `Asia/Riyadh`, with day 25 as the default future-period start.
-- SAR is the reporting currency. USD and MXN movements retain their original amount and a manually entered SAR equivalent with estimated or confirmed status.
+- SAR is the reporting currency. USD and MXN movements retain their original amount and a SAR equivalent with estimated or confirmed status.
+- Online conversion uses the Banxico FIX (`SF43718`) of the movement's own date. FIX is published around 12:00 Mexico City time, about 21:00 in Riyadh. A movement quoted before its date's FIX is final is saved as estimated at the latest earlier FIX. A quote that falls back to an older cached rate is also saved as estimated. Each time the app returns to the foreground with online FX enabled, `EstimatedConversionReconciler` re-quotes provider estimates. It confirms them through `LedgerCommand.ConfirmConversion` once the date's rate is final, unless the movement changed in the meantime. A date's rate is final when Banxico has a FIX for that date, or when the Mexico City day has ended without one, as on weekends and holidays. Manual estimates without a provider source are never changed automatically.
 - The app has no backend, login, third-party analytics, or advertising SDK. Its Internet permission supports opt-in HTTPS exchange-rate lookup.
 
 ## Canonical language

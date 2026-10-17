@@ -38,6 +38,7 @@ class PocketApplication : Application() {
             banxico = HttpsBanxicoClient(BuildConfig.POCKET_BANXICO_TOKEN),
             cache = RoomFxQuoteCache(database.financeDao()),
             onlineFxEnabled = { preferences.state.first().onlineFxEnabled },
+            clock = clock,
         )
     }
     val reminderScheduler: ReminderScheduler by lazy { WorkReminderScheduler(this) }
