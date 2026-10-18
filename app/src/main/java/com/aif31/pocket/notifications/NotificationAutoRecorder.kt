@@ -2,15 +2,20 @@ package com.aif31.pocket.notifications
 
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
+import com.aif31.pocket.data.Movement
+import com.aif31.pocket.data.MovementSuggestion
 import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.Period
 import com.aif31.pocket.data.PocketLedger
 import java.time.Instant
 import java.time.ZoneId
+import kotlin.math.abs
 import kotlinx.coroutines.flow.first
 
 /** Why a detected payment stayed in the review inbox instead of becoming a Movement. */
-internal enum class ReviewReason { NO_MERCHANT, NEW_MERCHANT, POCKET_ARCHIVED, FOREIGN_CURRENCY, NO_PERIOD, REJECTED, UNAVAILABLE }
+internal enum class ReviewReason {
+    NO_MERCHANT, NEW_MERCHANT, POCKET_ARCHIVED, FOREIGN_CURRENCY, POSSIBLE_DUPLICATE, NO_PERIOD, REJECTED, UNAVAILABLE,
+}
 
 internal sealed interface AutoRecordOutcome {
     data class Recorded(val movementId: String, val pocketName: String) : AutoRecordOutcome
@@ -42,6 +47,9 @@ internal class NotificationAutoRecorder(
             return AutoRecordOutcome.NeedsReview(ReviewReason.FOREIGN_CURRENCY)
         }
         val key = merchantKey(suggestion.merchant) ?: return AutoRecordOutcome.NeedsReview(ReviewReason.NO_MERCHANT)
+        if (suggestion.likelyDuplicateIn(state.movements) != null) {
+            return AutoRecordOutcome.NeedsReview(ReviewReason.POSSIBLE_DUPLICATE)
+        }
         val latest = state.movements
             .filter { it.type == MovementType.EXPENSE && merchantKey(it.merchant) == key }
             .maxByOrNull { it.occurredAtUtcMillis }
@@ -78,6 +86,25 @@ internal class NotificationAutoRecorder(
 }
 
 private const val AUTO_RECORDED_PREFIX = "ntf-"
+
+/** How far apart a recorded expense and a detected payment can be and still describe the same purchase. */
+private const val DUPLICATE_WINDOW_MILLIS = 12 * 60 * 60 * 1000L
+
+/**
+ * The expense that already records this payment, if any: same merchant, same amount in the payment's currency,
+ * and dated within [DUPLICATE_WINDOW_MILLIS]. It catches a purchase typed in by hand before its bank alert arrives,
+ * or alerted by two apps. Amount alone is never enough, so a payment without a merchant has no duplicate.
+ */
+internal fun MovementSuggestion.likelyDuplicateIn(movements: List<Movement>): Movement? {
+    val key = merchantKey(merchant) ?: return null
+    return movements.firstOrNull { movement ->
+        movement.type == MovementType.EXPENSE &&
+            movement.originalCurrencyCode == currency.name &&
+            (movement.originalAmountMinor ?: movement.accountingAmountMinor) == amountMinor &&
+            abs(movement.occurredAtUtcMillis - effectiveAtUtcMillis) <= DUPLICATE_WINDOW_MILLIS &&
+            merchantKey(movement.merchant) == key
+    }
+}
 
 /** Auto-recorded Movements get a derived ID so the UI can label them and retries stay idempotent. */
 internal fun autoRecordedMovementId(suggestionId: String) = AUTO_RECORDED_PREFIX + suggestionId

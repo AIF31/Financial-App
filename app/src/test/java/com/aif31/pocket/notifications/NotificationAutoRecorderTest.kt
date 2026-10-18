@@ -44,16 +44,17 @@ class NotificationAutoRecorderTest {
 
     @After fun tearDown() = database.close()
 
-    private suspend fun recordManually(pocketId: String, merchant: String, minutesAgo: Long = 1) {
+    private suspend fun recordManually(pocketId: String, merchant: String, minutesAgo: Long = 1, amountMinor: Long = 500) {
+        val occurredAt = instant.minusSeconds(minutesAgo * 60)
         assertEquals(
             LedgerResult.Success,
             ledger.execute(
                 LedgerCommand.AddMovement(
                     pocketId = pocketId,
                     type = MovementType.EXPENSE,
-                    accountingAmountMinor = 500,
-                    occurredAtUtcMillis = instant.toEpochMilli() - minutesAgo * 60_000,
-                    localDate = LocalDate.of(2026, 9, 5),
+                    accountingAmountMinor = amountMinor,
+                    occurredAtUtcMillis = occurredAt.toEpochMilli(),
+                    localDate = occurredAt.atZone(zone).toLocalDate(),
                     merchant = merchant,
                 )
             ),
@@ -178,6 +179,54 @@ class NotificationAutoRecorderTest {
 
         assertEquals(
             AutoRecordOutcome.NeedsReview(ReviewReason.POCKET_ARCHIVED),
+            NotificationAutoRecorder(ledger, zone).record(suggestionId),
+        )
+    }
+
+    @Test fun a_payment_already_entered_by_hand_stays_in_review_as_a_possible_duplicate() = runTest {
+        val pocket = ledger.state.first().pockets.first().pocket
+        recordManually(pocket.id, "Starbucks", minutesAgo = 3, amountMinor = 2_500)
+        val suggestionId = detect("dup", ParsedPayment(2_500, SupportedCurrency.SAR, "STARBUCKS"))
+
+        val outcome = NotificationAutoRecorder(ledger, zone).record(suggestionId)
+
+        assertEquals(AutoRecordOutcome.NeedsReview(ReviewReason.POSSIBLE_DUPLICATE), outcome)
+        val state = ledger.state.first()
+        assertEquals(listOf(suggestionId), state.movementSuggestions.map { it.id })
+        assertTrue(state.movements.none { isAutoRecordedMovement(it.id) })
+    }
+
+    @Test fun a_hand_entry_dated_shortly_after_the_alert_also_marks_a_possible_duplicate() = runTest {
+        val pocket = ledger.state.first().pockets.first().pocket
+        recordManually(pocket.id, "Starbucks", minutesAgo = -45, amountMinor = 2_500)
+        val suggestionId = detect("dup-later", ParsedPayment(2_500, SupportedCurrency.SAR, "Starbucks"))
+
+        assertEquals(
+            AutoRecordOutcome.NeedsReview(ReviewReason.POSSIBLE_DUPLICATE),
+            NotificationAutoRecorder(ledger, zone).record(suggestionId),
+        )
+    }
+
+    @Test fun the_same_purchase_alerted_by_a_second_app_is_not_recorded_twice() = runTest {
+        val pocket = ledger.state.first().pockets.first().pocket
+        recordManually(pocket.id, "Corner Shop", minutesAgo = 60 * 24 * 3)
+        val recorder = NotificationAutoRecorder(ledger, zone)
+        val first = detect("sms", ParsedPayment(1_000, SupportedCurrency.SAR, "Corner Shop"))
+        val second = store.ingest("bank.other", "push", instant.toEpochMilli() + 30_000, ParsedPayment(1_000, SupportedCurrency.SAR, "Corner Shop"))
+            .suggestionId
+
+        assertEquals(AutoRecordOutcome.Recorded(autoRecordedMovementId(first), pocket.name), recorder.record(first))
+        assertEquals(AutoRecordOutcome.NeedsReview(ReviewReason.POSSIBLE_DUPLICATE), recorder.record(second))
+        assertEquals(1, ledger.state.first().movements.count { isAutoRecordedMovement(it.id) })
+    }
+
+    @Test fun the_same_amount_at_the_same_merchant_on_another_day_is_still_recorded() = runTest {
+        val pocket = ledger.state.first().pockets.first().pocket
+        recordManually(pocket.id, "Starbucks", minutesAgo = 60 * 24, amountMinor = 2_500)
+        val suggestionId = detect("daily-coffee", ParsedPayment(2_500, SupportedCurrency.SAR, "Starbucks"))
+
+        assertEquals(
+            AutoRecordOutcome.Recorded(autoRecordedMovementId(suggestionId), pocket.name),
             NotificationAutoRecorder(ledger, zone).record(suggestionId),
         )
     }

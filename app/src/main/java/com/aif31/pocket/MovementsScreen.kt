@@ -86,6 +86,7 @@ import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.notifications.ReviewReason
 import com.aif31.pocket.notifications.appLabel
 import com.aif31.pocket.notifications.isAutoRecordedMovement
+import com.aif31.pocket.notifications.likelyDuplicateIn
 import com.aif31.pocket.notifications.reviewHint
 import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.data.PocketLedger
@@ -204,6 +205,7 @@ internal fun MovementsScreen(
                         .atZone(BUDGET_ZONE).toLocalDate()
                         .let { date -> state.periods.firstOrNull { !date.isBefore(it.start) && date.isBefore(it.endExclusive) } }
                         ?.accountingCurrency ?: state.currentPeriod?.accountingCurrency,
+                    possibleDuplicate = suggestion.likelyDuplicateIn(state.movements) != null,
                     today = state.currentLocalDate,
                     onReview = { onReviewSuggestion(suggestion.id) },
                     onDiscard = {
@@ -407,6 +409,7 @@ private fun SwipeToDeleteMovement(
 private fun SuggestionCard(
     suggestion: MovementSuggestion,
     accountingCurrency: SupportedCurrency?,
+    possibleDuplicate: Boolean,
     today: LocalDate,
     onReview: () -> Unit,
     onDiscard: () -> Unit,
@@ -414,10 +417,10 @@ private fun SuggestionCard(
     val context = LocalContext.current
     val source = remember(suggestion.sourcePackage) { appLabel(context, suggestion.sourcePackage) }
     val detectedAt = Instant.ofEpochMilli(suggestion.effectiveAtUtcMillis).atZone(BUDGET_ZONE)
-    val hint = if (accountingCurrency != null && suggestion.currency != accountingCurrency) {
-        reviewHint(ReviewReason.FOREIGN_CURRENCY)
-    } else {
-        reviewHint(ReviewReason.NEW_MERCHANT)
+    val hint = when {
+        accountingCurrency != null && suggestion.currency != accountingCurrency -> reviewHint(ReviewReason.FOREIGN_CURRENCY)
+        possibleDuplicate -> reviewHint(ReviewReason.POSSIBLE_DUPLICATE)
+        else -> reviewHint(ReviewReason.NEW_MERCHANT)
     }
     Card(
         modifier = Modifier.fillMaxWidth().testTag("movement_suggestion").clickable(onClick = onReview),
