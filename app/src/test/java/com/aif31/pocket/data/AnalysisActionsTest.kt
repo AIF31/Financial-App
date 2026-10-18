@@ -106,6 +106,28 @@ class AnalysisActionsTest {
     }
 
     @Test
+    fun scaling_keeps_full_precision_until_the_single_round_up() {
+        // SAR 3.33 over 31 days is SAR 3.0077 over 28: that rounds up to SAR 4.00, not SAR 3.00.
+        val state = state(
+            periods = listOf(february, march),
+            summaries = mapOf(
+                february.id to listOf(summary(market, budget = 1_000, expense = 333)),
+                march.id to listOf(summary(market, budget = 0, expense = 0)),
+            ),
+        )
+
+        assertEquals(400L, BudgetSuggestions.of(state, march.id).getValue(market.id).suggestedMinor)
+    }
+
+    @Test
+    fun a_weekday_drill_knows_how_many_of_that_weekday_have_passed() {
+        // 25 Feb – 5 Mar 2026: two Wednesdays and one Sunday so far; no Wednesday at all in a period yet to start.
+        assertEquals(2, MovementDrill.weekday(march.id, DayOfWeek.WEDNESDAY).weekdaysElapsed(state()))
+        assertEquals(1, MovementDrill.weekday(march.id, DayOfWeek.SUNDAY).weekdaysElapsed(state()))
+        assertEquals(null, MovementDrill.merchant(march.id, "tamimi").weekdaysElapsed(state()))
+    }
+
+    @Test
     fun the_fit_flags_pockets_consistently_over_or_well_under_their_budget() {
         val state = state(
             summaries = mapOf(

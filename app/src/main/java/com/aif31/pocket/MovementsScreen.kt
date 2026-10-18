@@ -178,8 +178,13 @@ internal fun MovementsScreen(
         if (drill != null) {
             item {
                 val currency = state.periods.firstOrNull { it.id == drill.periodId }?.accountingCurrency ?: SupportedCurrency.SAR
+                val net = filtered.netSpendMinor()
+                // A weekday list comes from an average, so it shows how the total divides into it.
+                val weekdayAverage = drill.weekdaysElapsed(state)?.takeIf { it > 0 }?.let { days ->
+                    " · ${counted(days, "día", "días")}, media ${MoneyText.format(net / days, currency)} por día"
+                }.orEmpty()
                 Text(
-                    "${counted(filtered.size, "movimiento", "movimientos")} · Neto ${MoneyText.format(filtered.netSpendMinor(), currency)}",
+                    "${counted(filtered.size, "movimiento", "movimientos")} · Neto ${MoneyText.format(net, currency)}$weekdayAverage",
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.testTag("drill_summary"),

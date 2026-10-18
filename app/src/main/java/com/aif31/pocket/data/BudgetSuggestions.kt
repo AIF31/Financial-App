@@ -41,13 +41,15 @@ object BudgetSuggestions {
                 state.pocketSummariesByPeriod[period.id].orEmpty().firstOrNull { it.pocket.id == current.pocket.id }?.let { period to it }
             }
             if (history.isEmpty()) return@mapNotNull null
+            // A period whose refunds exceeded its spending needed no budget, not a negative one, so it counts as zero
+            // rather than pulling the median below what the other periods actually needed.
             val scaled = history.map { (period, summary) -> scale(summary.netSpendMinor.coerceAtLeast(0), targetDays, days(period)) }.sorted()
             val median = if (scaled.size % 2 == 1) {
                 scaled[scaled.size / 2]
             } else {
-                Math.addExact(scaled[scaled.size / 2 - 1], scaled[scaled.size / 2]) / 2
+                scaled[scaled.size / 2 - 1].add(scaled[scaled.size / 2]).divide(TWO)
             }
-            if (median <= 0) return@mapNotNull null
+            if (median.signum() <= 0) return@mapNotNull null
             BudgetSuggestion(
                 pocketId = current.pocket.id,
                 suggestedMinor = roundUpToUnit(median),
@@ -59,13 +61,15 @@ object BudgetSuggestions {
 
     private fun days(period: Period) = period.endExclusive.toEpochDay() - period.start.toEpochDay()
 
-    private fun scale(amountMinor: Long, toDays: Long, fromDays: Long): Long =
-        // BigDecimal rather than BigInteger: BigInteger.longValueExact needs API 31.
-        BigDecimal.valueOf(amountMinor).multiply(BigDecimal.valueOf(toDays))
-            .divide(BigDecimal.valueOf(fromDays), 0, RoundingMode.DOWN)
-            .longValueExact()
+    private val TWO = BigDecimal.valueOf(2)
 
-    private fun roundUpToUnit(minor: Long): Long = Math.multiplyExact(Math.floorDiv(Math.addExact(minor, 99), 100), 100)
+    /** Kept exact (to well below a minor unit) so the only rounding is [roundUpToUnit]'s single ceiling. */
+    private fun scale(amountMinor: Long, toDays: Long, fromDays: Long): BigDecimal =
+        BigDecimal.valueOf(amountMinor).multiply(BigDecimal.valueOf(toDays)).divide(BigDecimal.valueOf(fromDays), 12, RoundingMode.CEILING)
+
+    // BigDecimal rather than BigInteger: BigInteger.longValueExact needs API 31.
+    private fun roundUpToUnit(minor: BigDecimal): Long =
+        minor.divide(BigDecimal.valueOf(100), 0, RoundingMode.CEILING).multiply(BigDecimal.valueOf(100)).longValueExact()
 
     private fun fit(history: List<PocketPeriodSummary>): BudgetFit? {
         if (history.size < 2) return null

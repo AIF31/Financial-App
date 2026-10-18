@@ -45,6 +45,14 @@ class PaceAlertsTest {
     }
 
     @Test
+    fun a_pocket_funded_only_by_rollover_alerts_when_it_will_run_out() {
+        // SAR 100.00 of rollover and no budget of its own; SAR 60.00 spent over two days.
+        val rolloverOnly = summary(gifts, budget = 10_000, expense = 6_000).copy(budgetMinor = 0, rolloverMinor = 10_000)
+
+        assertEquals(mapOf(gifts.id to PaceAlertLevel.RUN_OUT), PaceAlerts.levels(insights(rolloverOnly, movements = runOutMovements(gifts))))
+    }
+
+    @Test
     fun alerts_are_due_once_per_level_and_again_only_when_a_pocket_gets_worse() {
         val runOut = insights(summary(gifts, budget = 10_000, expense = 6_000), movements = runOutMovements(gifts))
         val atRisk = insights(summary(gifts, budget = 10_000, expense = 8_500).copy(atRisk = true), movements = runOutMovements(gifts))

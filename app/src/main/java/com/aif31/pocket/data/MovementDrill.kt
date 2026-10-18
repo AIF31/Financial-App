@@ -26,6 +26,16 @@ data class MovementDrill(val periodId: String, val kind: Kind, val value: String
         }
     }
 
+    /**
+     * For a weekday drill, how many of that weekday the period has had through today: the divisor of the weekday
+     * average the list was opened from. Null for other drills.
+     */
+    fun weekdaysElapsed(state: LedgerState): Int? {
+        if (kind != Kind.WEEKDAY) return null
+        val insights = PeriodInsights.of(state, periodId) ?: return null
+        return (0 until insights.elapsedDays).count { insights.period.start.plusDays(it.toLong()).dayOfWeek.value.toString() == value }
+    }
+
     companion object {
         fun merchant(periodId: String, key: String) = MovementDrill(periodId, Kind.MERCHANT, key)
         fun weekday(periodId: String, day: DayOfWeek) = MovementDrill(periodId, Kind.WEEKDAY, day.value.toString())

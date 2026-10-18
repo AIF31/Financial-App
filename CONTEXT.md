@@ -77,7 +77,7 @@ A proposed Pocket budget: the median net spend of up to three recent ended perio
 _Avoid_: Automatic budget, forecast
 
 **Pace alert**:
-A notification that a Pocket is forecast to run out before the period ends, has reached 80% of its budget, or has no availability left. Each level alerts once per Pocket and period, only for changes made outside the app, such as auto-recording; levels reached while the app is in view count as seen.
+A notification that a Pocket is forecast to run out before the period ends, has reached 80% of its budget, or has no availability left. Each level alerts once per Pocket and period, and only after auto-recording; levels reached through changes made in the app count as seen. When a payment is auto-recorded while the app is open, the alert may or may not post, depending on which check runs first.
 _Avoid_: Budget warning, reminder
 
 **Experimental notification parser**:
