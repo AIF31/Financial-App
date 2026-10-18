@@ -1,5 +1,6 @@
 package com.aif31.pocket.notifications
 
+import com.aif31.pocket.data.merchantKey
 import com.aif31.pocket.domain.SupportedCurrency
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

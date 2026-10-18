@@ -402,6 +402,81 @@ class PeriodInsightsTest {
         assertEquals(PocketBudgetStatus.ON_TRACK, summary(market, budget = 1_000, expense = 100).budgetStatus)
     }
 
+    @Test
+    fun an_on_track_pocket_forecast_to_run_out_reads_as_a_fast_pace_but_ledger_flags_still_win() {
+        val fast = summary(market, budget = 10_000, expense = 6_000)
+        val state = state(
+            today = LocalDate.of(2026, 3, 5),
+            elapsedDays = 9,
+            summaries = mapOf(march.id to listOf(fast)),
+            movements = listOf(movement("a", march, LocalDate.of(2026, 2, 26), 3_000), movement("b", march, LocalDate.of(2026, 3, 3), 3_000)),
+        )
+        val insights = PeriodInsights.of(state, march.id)
+
+        assertEquals(PocketBudgetStatus.FAST_PACE, fast.budgetStatusAt(insights))
+        assertEquals(PocketBudgetStatus.AT_RISK, fast.copy(atRisk = true).budgetStatusAt(insights))
+        assertEquals(PocketBudgetStatus.ON_TRACK, fast.budgetStatusAt(null))
+    }
+
+    @Test
+    fun a_pocket_spent_on_several_days_reports_when_it_runs_out_at_the_current_pace() {
+        // Day 9 of March: SAR 60.00 of SAR 100.00 spent on two days, about SAR 6.66 a day; SAR 40.00 lasts 6 more days.
+        val state = state(
+            today = LocalDate.of(2026, 3, 5),
+            elapsedDays = 9,
+            summaries = mapOf(march.id to listOf(summary(market, budget = 10_000, expense = 6_000), summary(travel, budget = 30_000, expense = 900))),
+            movements = listOf(
+                movement("a", march, LocalDate.of(2026, 2, 26), 3_000),
+                movement("b", march, LocalDate.of(2026, 3, 3), 3_000),
+                movement("c", march, LocalDate.of(2026, 2, 27), 450, pocket = travel),
+                movement("d", march, LocalDate.of(2026, 3, 4), 450, pocket = travel),
+            ),
+        )
+
+        val insights = PeriodInsights.of(state, march.id)!!
+
+        assertEquals(mapOf(market.id to LocalDate.of(2026, 3, 12)), insights.runOutDateByPocket)
+    }
+
+    @Test
+    fun a_single_large_expense_or_a_closed_period_has_no_run_out_date() {
+        val rentOnly = state(
+            today = LocalDate.of(2026, 3, 5),
+            elapsedDays = 9,
+            summaries = mapOf(march.id to listOf(summary(market, budget = 10_000, expense = 9_000))),
+            movements = listOf(movement("rent", march, LocalDate.of(2026, 2, 25), 9_000)),
+        )
+        val closed = state(
+            today = LocalDate.of(2026, 3, 5),
+            elapsedDays = 9,
+            summaries = mapOf(february.id to listOf(summary(market, budget = 10_000, expense = 6_000))),
+            movements = listOf(
+                movement("a", february, LocalDate.of(2026, 1, 26), 3_000),
+                movement("b", february, LocalDate.of(2026, 1, 27), 3_000),
+            ),
+        )
+
+        assertTrue(PeriodInsights.of(rentOnly, march.id)!!.runOutDateByPocket.isEmpty())
+        assertTrue(PeriodInsights.of(closed, february.id)!!.runOutDateByPocket.isEmpty())
+    }
+
+    @Test
+    fun spending_dated_after_today_reduces_what_is_left_but_not_the_pace() {
+        // SAR 20.00 over two days through day 9, plus SAR 70.00 booked for 20 March: SAR 10.00 left at SAR 2.22 a day.
+        val state = state(
+            today = LocalDate.of(2026, 3, 5),
+            elapsedDays = 9,
+            summaries = mapOf(march.id to listOf(summary(market, budget = 10_000, expense = 9_000))),
+            movements = listOf(
+                movement("a", march, LocalDate.of(2026, 2, 26), 1_000),
+                movement("b", march, LocalDate.of(2026, 3, 3), 1_000),
+                movement("later", march, LocalDate.of(2026, 3, 20), 7_000),
+            ),
+        )
+
+        assertEquals(LocalDate.of(2026, 3, 10), PeriodInsights.of(state, march.id)!!.runOutDateByPocket[market.id])
+    }
+
     private fun state(
         today: LocalDate,
         elapsedDays: Int,

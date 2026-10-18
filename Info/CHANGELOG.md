@@ -2,6 +2,26 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-10-18
+
+### Possible duplicates stay in review, and a new period analysis
+
+The development version advances to `1.0.10` (`versionCode` 11). No schema or backup-format change.
+
+- **Duplicate guard.** Typing in a purchase by hand gave its merchant a known Pocket, so the bank alert that followed was auto-recorded a second time. A detected payment now stays in **Por revisar** when an expense for the same normalized merchant, with the same amount in the payment's currency, is dated within 12 hours of it. That covers manual entries and one purchase alerted by two apps. The alert and the inbox card say `Posible duplicado de un gasto ya registrado`. A payment without a merchant is never matched on amount alone. `merchantKey` moved from the notification parser to `data/Model.kt` so reports and merchant memory share it. `CONTEXT.md` (Auto-recording), [ADR 0002](../docs/adr/0002-auto-record-notification-payments-for-known-merchants.md) (dated amendment) and the [notification beta doc](../docs/product/NOTIFICATION_ASSISTANCE_BETA.md) describe the rule.
+- **Run-out dates.** `PeriodInsights.runOutDateByPocket` gives the day a Pocket's availability runs out at its pace through today, when that falls before the period ends. Only Pockets spent on at least two days are forecast, so a single large expense such as rent is not extrapolated. Spending dated after today reduces what is left but not the pace. Dashboard Pocket cards show `Al ritmo actual, se agota el 12 mar`, and an on-track Pocket with a run-out date shows the new **Ritmo alto** badge (`PocketBudgetStatus.FAST_PACE`) on the dashboard and Pockets screen instead of **En buen ritmo**. The ledger's 80%/100% flags still take precedence.
+- **Análisis del periodo.** A new screen opened from the dashboard, backed by the pure `data/SpendingAnalysis.kt`, which uses the same Movements as the period's totals. It shows:
+  - average daily spending for up to 12 periods as bars (tap one to open that period), with a period table and a sparkline per Pocket; the trend stops at a change of accounting currency and says so;
+  - top merchants, with purchase count, average purchase, and change against the previous period when it uses the same currency;
+  - average spending by weekday and a calendar heatmap through today;
+  - payment-method shares;
+  - foreign-currency spending, with original and accounting amounts and pending estimates;
+  - rollover received per period and what would carry forward.
+
+  Every chart uses one hue, has a spoken summary, and comes with the figures as text.
+- Verification on Ubuntu with JDK 17, through the gradle-run wrapper. The three new auto-recorder duplicate tests failed before the guard and pass after it; a same-amount purchase on another day still auto-records. New `SpendingAnalysisTest`, run-out and status tests in `PeriodInsightsTest`, `AnalysisScreenTest`, and a dashboard test cover the features. `:app:testDebugUnitTest` passed 313 tests in 37 suites with no failures, errors or skips. `:app:lintDebug` reported the existing 26 advisory warnings, none in changed files. `:app:assembleDebug`, `:app:assembleRelease` and `:app:assembleDebugAndroidTest` passed. The Pixel 6 API 35 managed-device suite (excluding `LargeTest`) passed 25 tests. The analysis screen (light and dark) and the dashboard were rendered with a throwaway Robolectric capture and checked by eye. That pass fixed a wrapped Pocket name, an orphaned ▲ arrow, and an **En buen ritmo** badge shown beside a run-out date.
+- Limits: not checked on a physical device or with TalkBack. How far estimated conversions moved once confirmed is not shown, because the replaced estimate is not stored. Two genuine identical purchases at one merchant within 12 hours now need one confirmation.
+
 ## 2026-10-15
 
 ### Foreign expenses confirmed at their own date's FIX

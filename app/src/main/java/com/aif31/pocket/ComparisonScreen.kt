@@ -306,7 +306,7 @@ private fun RowScope.TableValues(label: String, current: String, baseline: Strin
 }
 
 @Composable
-private fun PeriodPicker(
+internal fun PeriodPicker(
     label: String,
     periods: List<Period>,
     selectedId: String?,

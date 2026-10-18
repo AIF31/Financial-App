@@ -27,9 +27,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -66,7 +68,8 @@ import com.aif31.pocket.R
 import com.aif31.pocket.data.ComparisonMode
 import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.SpendPaceStatus
-import com.aif31.pocket.data.budgetStatus
+import com.aif31.pocket.data.PocketBudgetStatus
+import com.aif31.pocket.data.budgetStatusAt
 import com.aif31.pocket.data.PeriodComparison
 import com.aif31.pocket.data.PeriodInsights
 import com.aif31.pocket.data.PocketPeriodSummary
@@ -80,14 +83,15 @@ internal fun ActionableDashboardContent(
     modifier: Modifier = Modifier,
     onRecordExpenseIn: (pocketId: String) -> Unit = {},
     onComparePeriods: () -> Unit = {},
+    onOpenAnalysis: () -> Unit = {},
 ) {
+    val period = state.currentPeriod
+    val insights = remember(state) { period?.let { PeriodInsights.of(state, it.id) } }
     val activePockets = state.pockets
         .filterNot { it.pocket.archived || it.retiredThisPeriod }
-        .sortedBy { summary -> summary.budgetStatus.ordinal }
-    val period = state.currentPeriod
+        .sortedBy { summary -> summary.budgetStatusAt(insights).ordinal }
     val accountingCurrency = period?.accountingCurrency ?: SupportedCurrency.SAR
     fun money(minor: Long): String = MoneyText.format(minor, accountingCurrency)
-    val insights = remember(state) { period?.let { PeriodInsights.of(state, it.id) } }
     val comparison = remember(state) {
         period?.let { current ->
             PeriodComparison.previousPeriodId(state, current.id)?.let { PeriodComparison.of(state, current.id, it) }
@@ -177,6 +181,11 @@ internal fun ActionableDashboardContent(
                 modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
             )
         }
+        if (insights != null) {
+            item {
+                AnalysisEntry(onClick = onOpenAnalysis, modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp))
+            }
+        }
         item {
             // The whole header opens Pockets. A separate "Ver todos" button at the row's end would sit in the
             // floating action button's column, where it can scroll into place almost entirely covered.
@@ -222,6 +231,8 @@ internal fun ActionableDashboardContent(
                 PocketProgressRow(
                     summary = summary,
                     accountingCurrency = accountingCurrency,
+                    status = summary.budgetStatusAt(insights),
+                    runOut = insights?.runOutDateByPocket?.get(summary.pocket.id)?.let { runOutText(it, state.currentLocalDate) },
                     onRecordExpense = { onRecordExpenseIn(summary.pocket.id) },
                     modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp).animateItem(),
                 )
@@ -403,14 +414,43 @@ private fun CompactMetric(label: String, value: String, valueStyle: TextStyle, m
     }
 }
 
+/** Opens the period's breakdowns: merchants, weekdays, payment methods, foreign currency, rollover, and trend. */
+@Composable
+private fun AnalysisEntry(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.heightIn(min = 48.dp).testTag("open_analysis"),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Row(
+            Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.BarChart, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Análisis del periodo", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Comercios, días, métodos de pago, moneda extranjera y tendencia",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
 @Composable
 private fun PocketProgressRow(
     summary: PocketPeriodSummary,
     accountingCurrency: SupportedCurrency,
+    status: PocketBudgetStatus,
+    runOut: String?,
     onRecordExpense: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val status = summary.budgetStatus
     val colors = status.presentation()
     val available = availableText(summary.availabilityMinor, accountingCurrency)
     val rollover = "Rollover: ${MoneyText.format(summary.rolloverMinor, accountingCurrency)}"
@@ -424,7 +464,7 @@ private fun PocketProgressRow(
             .clip(CardDefaults.shape)
             .clickable(onClickLabel = "Registrar gasto en ${summary.pocket.name}", onClick = onRecordExpense)
             // A card scrolled partly out of view exposes only its visible children, so it carries its own label.
-            .semantics { contentDescription = listOf(summary.pocket.name, available.text, rollover, consumption, colors.label).joinToString(". ") }
+            .semantics { contentDescription = listOfNotNull(summary.pocket.name, available.text, rollover, runOut, consumption, colors.label).joinToString(". ") }
             .testTag("pocket_row_${summary.pocket.name}"),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
@@ -448,6 +488,16 @@ private fun PocketProgressRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    runOut?.let {
+                        Row(
+                            modifier = coveredByLabel.testTag("run_out_${summary.pocket.name}"),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.Schedule, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
                 }
                 Surface(
                     shape = CircleShape,

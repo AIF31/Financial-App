@@ -66,6 +66,10 @@ internal fun formatPeriodRange(start: LocalDate, endExclusive: LocalDate): Strin
 internal fun counted(count: Int, singular: String, plural: String): String =
     "$count ${if (count == 1) singular else plural}"
 
+/** "Al ritmo actual, se agota mañana", or "… se agota el 12 mar": when a Pocket's availability runs out. */
+internal fun runOutText(date: LocalDate, today: LocalDate): String =
+    if (date == today.plusDays(1)) "Al ritmo actual, se agota mañana" else "Al ritmo actual, se agota el ${date.format(shortDate)}"
+
 internal fun daysLeftText(days: Int): String = when (days) {
     0 -> "Último día del periodo"
     1 -> "Queda 1 día"

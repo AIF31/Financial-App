@@ -3,6 +3,7 @@ package com.aif31.pocket.data
 import com.aif31.pocket.domain.SupportedCurrency
 import java.time.LocalDate
 import java.time.LocalTime
+import java.util.Locale
 
 data class CurrencyBoundary(
     val from: SupportedCurrency,
@@ -95,6 +96,15 @@ data class Movement(
     val conversionEffectiveDate: LocalDate?,
     val conversionSource: String?,
 )
+
+/**
+ * Normalizes a merchant so "K.F.C", "KFC", and "Tamimi-Market" / "TAMIMI MARKET" are the same merchant, both for
+ * merchant memory and for merchant reports.
+ */
+internal fun merchantKey(merchant: String?): String? =
+    merchant?.lowercase(Locale.ROOT)
+        ?.replace(Regex("[^\\p{L}\\p{N}]+"), "")
+        ?.takeIf { it.isNotEmpty() }
 
 data class MovementSuggestion(
     val id: String,

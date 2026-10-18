@@ -33,3 +33,7 @@ Auto-recording and the detection alert are separate settings, both on by default
 - A wrong merchant memory records a wrong Pocket until the person edits the Movement. The alert and the "Detectado" label keep these records visible.
 - Deleting an auto-recorded Movement does not re-create it; the tombstone blocks the same message until it expires after 30 days.
 - The raw notification text is still never stored. Only a one-way identity hash and normalized fields are kept.
+
+## Amendment (2026-10-18): possible duplicates stay in review
+
+A purchase typed in by hand gives its merchant a known Pocket, so the bank alert that follows met every condition above and was recorded a second time. A detected payment is now also kept for review when an expense for the same normalized merchant, with the same amount in the payment's currency, is dated within 12 hours of it. This covers manual entries and the same purchase alerted by two apps. The review hint reads "Posible duplicado de un gasto ya registrado". A merchant is still required, so amount alone never decides. Two genuine identical purchases within 12 hours now need one confirmation instead of none.
