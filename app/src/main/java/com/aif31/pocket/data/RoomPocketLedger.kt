@@ -459,6 +459,30 @@ class RoomPocketLedger(
             }
             val suggestion = dao.movementSuggestion(command.suggestionId)
             require(suggestion?.status == "PENDING" && suggestion.expiresAtUtcMillis > clock.millis()) { "La sugerencia ya no está disponible" }
+            // Recording without review is checked again here, so an expense saved since the caller's check still wins.
+            if (command.automatic) {
+                val periods = dao.periods()
+                val periodCurrencies = periods.associate { it.id to SupportedCurrency.fromCode(it.accountingCurrencyCode) }
+                val pocketsById = dao.pockets().associateBy { it.id }
+                val methodsById = dao.paymentMethods().associateBy { it.id }
+                val payment = command.movement
+                // Without an original currency the payment is in the accounting currency of its own period.
+                val paymentCurrency = payment.originalCurrencyCode?.let(SupportedCurrency::fromCode)
+                    ?: periods.firstOrNull { payment.localDate.toEpochDay() in it.startEpochDay until it.endExclusiveEpochDay }
+                        ?.let { SupportedCurrency.fromCode(it.accountingCurrencyCode) }
+                val duplicate = paymentCurrency?.let { currency ->
+                    dao.movements().map { it.toModel(pocketsById, methodsById) }.likelyDuplicateOf(
+                        merchant = payment.merchant,
+                        amountMinor = payment.originalAmountMinor ?: payment.accountingAmountMinor,
+                        currency = currency,
+                        atUtcMillis = payment.occurredAtUtcMillis,
+                        accountingCurrencyOf = periodCurrencies::get,
+                    )
+                }
+                if (duplicate != null) {
+                    return@withTransaction LedgerResult.Rejected("Posible duplicado de un gasto ya registrado", RejectionKind.DUPLICATE)
+                }
+            }
             // A confirmed suggestion always creates a new Movement. A caller-provided ID could overwrite one.
             val movementResult = addMovement(command.movement.copy(
                 id = command.submissionId,

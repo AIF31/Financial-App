@@ -85,7 +85,7 @@ data class SpendingAnalysis(
     val earlierPeriodsInOtherCurrency: Boolean,
     /** Pockets with spending in any trend period, largest net spend in this period first. */
     val pocketTrends: List<PocketTrend>,
-    /** Pockets opted into rollover now or that received rollover in a trend period. */
+    /** Pockets opted into rollover now, eligible to carry it from this period, or that received it in a trend period. */
     val rollover: List<PocketRolloverTrend>,
 ) {
     val period: Period get() = insights.period
@@ -227,8 +227,10 @@ data class SpendingAnalysis(
         private fun rollover(state: LedgerState, trend: List<PeriodInsights>): List<PocketRolloverTrend> {
             val selected = trend.lastOrNull() ?: return emptyList()
             val optedIn = state.pocketCatalog.filter { it.rolloverEnabled && !it.archived }
+            // The period's own snapshot decides what it carries, even after the Pocket opted out later.
+            val carrying = selected.pockets.filter { it.rolloverEligible && !it.retiredThisPeriod }.map { it.pocket }
             val received = trend.flatMap { it.pockets }.filter { it.rolloverMinor > 0 }.map { it.pocket }
-            return (optedIn + received).distinctBy { it.id }.map { pocket ->
+            return (optedIn + carrying + received).distinctBy { it.id }.map { pocket ->
                 val current = selected.pockets.firstOrNull { it.pocket.id == pocket.id }
                 PocketRolloverTrend(
                     pocket = pocketIn(state, pocket),
@@ -242,4 +244,14 @@ data class SpendingAnalysis(
             }
         }
     }
+}
+
+/** The median of [values], averaging the two middle values of an even count without overflowing; null when empty. */
+internal fun medianMinor(values: List<Long>): Long? {
+    if (values.isEmpty()) return null
+    val sorted = values.sorted()
+    val upper = sorted[sorted.size / 2]
+    if (sorted.size % 2 == 1) return upper
+    val lower = sorted[sorted.size / 2 - 1]
+    return Math.floorDiv(lower, 2) + Math.floorDiv(upper, 2) + (Math.floorMod(lower, 2) + Math.floorMod(upper, 2)) / 2
 }

@@ -161,6 +161,29 @@ class SpendingAnalysisTest {
     }
 
     @Test
+    fun a_pocket_that_carries_money_forward_stays_in_the_rollover_history_after_opting_out() {
+        // Supermercado is not opted in any more, but this period's snapshot still carries its availability.
+        val state = state(
+            summaries = mapOf(
+                february.id to listOf(summary(market, expense = 0)),
+                march.id to listOf(summary(market, budget = 1_000, expense = 0, eligible = true)),
+            ),
+        )
+
+        val rollover = SpendingAnalysis.of(state, march.id)!!.rollover
+
+        assertEquals(1_000L, rollover.single { it.pocket.id == market.id }.carriesForwardMinor)
+    }
+
+    @Test
+    fun the_typical_earlier_pace_is_a_true_median() {
+        assertEquals(200L, medianMinor(listOf(300L, 100L)))
+        assertEquals(300L, medianMinor(listOf(500L, 100L, 300L)))
+        assertEquals(Long.MAX_VALUE - 1, medianMinor(listOf(Long.MAX_VALUE, Long.MAX_VALUE - 2)))
+        assertNull(medianMinor(emptyList()))
+    }
+
+    @Test
     fun an_unknown_period_has_no_analysis_and_an_empty_period_reports_nothing() {
         assertNull(SpendingAnalysis.of(state(), "missing"))
         val empty = SpendingAnalysis.of(state(), march.id)!!

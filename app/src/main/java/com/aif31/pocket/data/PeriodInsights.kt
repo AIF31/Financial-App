@@ -169,9 +169,11 @@ data class PeriodInsights(
                 val spendingDays = movements.filter { it.type == MovementType.EXPENSE }.distinctBy { it.localDate }.size
                 val dailyPace = movements.netSpendMinor() / elapsedDays
                 if (summary.availabilityMinor <= 0 || spendingDays < 2 || dailyPace <= 0) return@mapNotNull null
-                // Availability covers this many whole days after today; it runs out on the day after them.
-                val runOut = today.plusDays(summary.availabilityMinor / dailyPace + 1)
-                runOut.takeIf { it < periodEnd }?.let { summary.pocket.id to it }
+                // Availability covers this many whole days after today; it runs out on the day after them. The
+                // distance is bounded by the period before it becomes a date, since a huge budget would overflow one.
+                val daysUntilRunOut = summary.availabilityMinor / dailyPace + 1
+                if (daysUntilRunOut >= periodEnd.toEpochDay() - today.toEpochDay()) return@mapNotNull null
+                summary.pocket.id to today.plusDays(daysUntilRunOut)
             }.toMap()
         }
 
