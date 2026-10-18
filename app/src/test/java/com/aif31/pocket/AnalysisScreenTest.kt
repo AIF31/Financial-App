@@ -7,13 +7,17 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.aif31.pocket.data.ConversionStatus
 import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.Movement
+import com.aif31.pocket.data.MovementDrill
 import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.Period
 import com.aif31.pocket.data.Pocket
@@ -57,8 +61,11 @@ class AnalysisScreenTest {
             currentLocalDate = LocalDate.of(2026, 3, 5),
         )
         var selected: String? = null
+        val opened = mutableListOf<Pair<MovementDrill, String>>()
         compose.setContent {
-            PocketTheme { AnalysisScreen(state, march.id, onPeriodChange = { selected = it }, onBack = {}) }
+            PocketTheme {
+                AnalysisScreen(state, march.id, onPeriodChange = { selected = it }, onBack = {}, onOpenMovements = { drill, title -> opened += drill to title })
+            }
         }
         val list = compose.onNodeWithTag("analysis_list")
 
@@ -75,6 +82,18 @@ class AnalysisScreenTest {
         list.performScrollToNode(hasTestTag("trend_bars"))
         compose.onNodeWithTag("trend_bars").performTouchInput { click(Offset(width * 0.25f, height - 1f)) }
         assertEquals(february.id, selected)
+
+        list.performScrollToNode(hasText("Jarir"))
+        compose.onNodeWithText("Jarir").performClick()
+        list.performScrollToNode(hasContentDescription("28: SAR 50.00"))
+        compose.onNodeWithContentDescription("28: SAR 50.00").performClick()
+        assertEquals(
+            listOf(
+                MovementDrill.merchant(march.id, "jarir") to "Jarir",
+                MovementDrill.day(march.id, LocalDate.of(2026, 2, 28)) to "Sábado 28 feb",
+            ),
+            opened,
+        )
     }
 
     private fun spend(expense: Long) = PocketPeriodSummary(

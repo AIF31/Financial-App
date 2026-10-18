@@ -26,6 +26,11 @@ data class AppPreferences(
     val notificationSourcePackages: Set<String> = emptySet(),
     val notificationAutoRecord: Boolean = true,
     val notificationDetectionAlerts: Boolean = true,
+    val paceAlertsEnabled: Boolean = true,
+    /** Pace-alert levels already alerted or seen; null until the first check records a silent baseline. */
+    val paceAlertsSent: Set<String>? = null,
+    /** The period whose recap the person closed on the dashboard. */
+    val recapDismissedPeriodId: String? = null,
 )
 
 interface PreferencesStore {
@@ -47,6 +52,11 @@ interface PreferencesStore {
     }
     suspend fun setNotificationAutoRecord(enabled: Boolean) {}
     suspend fun setNotificationDetectionAlerts(enabled: Boolean) {}
+    suspend fun setPaceAlertsEnabled(enabled: Boolean) {}
+
+    /** Replaces the alerted pace levels with [transform] of the current ones, atomically. */
+    suspend fun updatePaceAlertsSent(transform: (Set<String>?) -> Set<String>) {}
+    suspend fun dismissRecap(periodId: String) {}
 }
 private val Context.pocketPreferences by preferencesDataStore("pocket_preferences")
 
@@ -69,6 +79,9 @@ class DataStorePreferences internal constructor(
             notificationSourcePackages = values[NOTIFICATION_SOURCE_PACKAGES] ?: emptySet(),
             notificationAutoRecord = values[NOTIFICATION_AUTO_RECORD] ?: true,
             notificationDetectionAlerts = values[NOTIFICATION_DETECTION_ALERTS] ?: true,
+            paceAlertsEnabled = values[PACE_ALERTS_ENABLED] ?: true,
+            paceAlertsSent = values[PACE_ALERTS_SENT],
+            recapDismissedPeriodId = values[RECAP_DISMISSED_PERIOD],
         )
     }
 
@@ -129,6 +142,18 @@ class DataStorePreferences internal constructor(
         dataStore.edit { it[NOTIFICATION_DETECTION_ALERTS] = enabled }
     }
 
+    override suspend fun setPaceAlertsEnabled(enabled: Boolean) {
+        dataStore.edit { it[PACE_ALERTS_ENABLED] = enabled }
+    }
+
+    override suspend fun updatePaceAlertsSent(transform: (Set<String>?) -> Set<String>) {
+        dataStore.edit { it[PACE_ALERTS_SENT] = transform(it[PACE_ALERTS_SENT]) }
+    }
+
+    override suspend fun dismissRecap(periodId: String) {
+        dataStore.edit { it[RECAP_DISMISSED_PERIOD] = periodId }
+    }
+
     private companion object {
         val START_DAY = intPreferencesKey("future_period_start_day")
         val REMINDER_ENABLED = booleanPreferencesKey("reminder_enabled")
@@ -140,6 +165,9 @@ class DataStorePreferences internal constructor(
         val DEFAULT_EXPENSE_CURRENCY = stringPreferencesKey("default_expense_currency")
         val NOTIFICATION_AUTO_RECORD = booleanPreferencesKey("notification_auto_record")
         val NOTIFICATION_DETECTION_ALERTS = booleanPreferencesKey("notification_detection_alerts")
+        val PACE_ALERTS_ENABLED = booleanPreferencesKey("pace_alerts_enabled")
+        val PACE_ALERTS_SENT = androidx.datastore.preferences.core.stringSetPreferencesKey("pace_alerts_sent")
+        val RECAP_DISMISSED_PERIOD = stringPreferencesKey("recap_dismissed_period")
         val NOTIFICATION_SOURCE_PACKAGES = androidx.datastore.preferences.core.stringSetPreferencesKey("notification_source_packages")
     }
 }

@@ -81,6 +81,7 @@ import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.Movement
+import com.aif31.pocket.data.MovementDrill
 import com.aif31.pocket.data.MovementSuggestion
 import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.notifications.ReviewReason
@@ -94,6 +95,7 @@ import com.aif31.pocket.data.netSpendMinor
 import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.ui.MoneyText
 import com.aif31.pocket.ui.PocketArtworkPlate
+import com.aif31.pocket.ui.counted
 import com.aif31.pocket.ui.formatPeriodRange
 import java.time.Instant
 import java.time.LocalDate
@@ -113,6 +115,8 @@ internal fun MovementsScreen(
     onRecordExpense: () -> Unit,
     onEditMovement: (Movement) -> Unit,
     onReviewSuggestion: (String) -> Unit = {},
+    /** Shows only these Movements, without the inbox, search, or filters: the list behind an analysis figure. */
+    drill: MovementDrill? = null,
 ) {
     fun currencyOf(movement: Movement): SupportedCurrency =
         state.periods.firstOrNull { it.id == movement.periodId }?.accountingCurrency ?: SupportedCurrency.SAR
@@ -133,8 +137,8 @@ internal fun MovementsScreen(
     val currencyOptions = listOf<String?>(null) + state.movements.map { it.originalCurrencyCode }.distinct()
     val methodOptions = listOf<String?>(null) + state.paymentMethods.map { it.id }
     // Filtering every Movement on each recomposition (each swipe frame or keystroke) is avoided for unchanged inputs.
-    val filtered = remember(state.movements, state.periods, state.paymentMethods, query, periodIndex, selectedPocketId, currencyIndex, methodIndex) {
-        state.movements.filter { movement ->
+    val filtered = remember(state, drill, query, periodIndex, selectedPocketId, currencyIndex, methodIndex) {
+        drill?.movements(state) ?: state.movements.filter { movement ->
             val text = listOfNotNull(movement.merchant, movement.note).joinToString(" ")
             (query.isBlank() || text.contains(query, ignoreCase = true)) &&
                 (periodOptions.getOrNull(periodIndex) == null || movement.periodId == periodOptions[periodIndex]) &&
@@ -171,10 +175,24 @@ internal fun MovementsScreen(
         contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        item {
+        if (drill != null) {
+            item {
+                val currency = state.periods.firstOrNull { it.id == drill.periodId }?.accountingCurrency ?: SupportedCurrency.SAR
+                Text(
+                    "${counted(filtered.size, "movimiento", "movimientos")} · Neto ${MoneyText.format(filtered.netSpendMinor(), currency)}",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.testTag("drill_summary"),
+                )
+            }
+            if (filtered.isEmpty()) {
+                item { EmptyHistory(title = "Ya no hay movimientos aquí", body = "Se editaron o eliminaron desde que abriste el análisis.") }
+            }
+        }
+        if (drill == null) item {
             Text("Movimientos", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { heading() })
         }
-        if (state.movementSuggestions.isNotEmpty()) {
+        if (drill == null && state.movementSuggestions.isNotEmpty()) {
             item(key = "suggestions-header") {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -218,7 +236,7 @@ internal fun MovementsScreen(
                 )
             }
         }
-        item {
+        if (drill == null) item {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -240,7 +258,7 @@ internal fun MovementsScreen(
                 modifier = Modifier.fillMaxWidth().testTag("history_search"),
             )
         }
-        item {
+        if (drill == null) item {
             LazyRow(
                 modifier = Modifier.testTag("history_filters"),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -271,7 +289,7 @@ internal fun MovementsScreen(
                 }
             }
         }
-        if (state.movements.isEmpty()) {
+        if (drill == null && state.movements.isEmpty()) {
             item {
                 EmptyHistory(
                     title = "Aún no hay movimientos",
@@ -280,7 +298,7 @@ internal fun MovementsScreen(
                     onAction = onRecordExpense,
                 )
             }
-        } else if (filtered.isEmpty()) {
+        } else if (drill == null && filtered.isEmpty()) {
             item {
                 EmptyHistory(
                     title = "No hay movimientos para estos filtros",

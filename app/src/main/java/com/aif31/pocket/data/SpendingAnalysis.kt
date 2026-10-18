@@ -7,6 +7,8 @@ import java.time.DayOfWeek
 
 /** Net spending at one merchant within a period, merchants matched the same way merchant memory matches them. */
 data class MerchantSpend(
+    /** The normalized merchant, as [merchantKey] returns it. */
+    val key: String,
     /** The merchant as written on its most recent Movement. */
     val name: String,
     val netSpendMinor: Long,
@@ -132,6 +134,7 @@ data class SpendingAnalysis(
                     key ?: return@mapNotNull null
                     val expenses = group.filter { it.type == MovementType.EXPENSE }
                     MerchantSpend(
+                        key = key,
                         name = group.maxBy { it.occurredAtUtcMillis }.merchant!!.trim(),
                         netSpendMinor = group.netSpendMinor(),
                         expenseCount = expenses.size,

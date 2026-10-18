@@ -178,6 +178,9 @@ sealed interface LedgerCommand {
     ) : LedgerCommand
     data class UpdatePeriodFunds(val periodId: String, val newFundsMinor: Long) : LedgerCommand
     data class SetAllocation(val periodId: String, val pocketId: String, val amountMinor: Long) : LedgerCommand
+
+    /** Sets several Pocket budgets of one period in one transaction; only the final total must fit the new funds. */
+    data class SetAllocations(val periodId: String, val amountsMinor: Map<String, Long>) : LedgerCommand
     data class UpsertPocket(
         val id: String? = null,
         val name: String,

@@ -47,6 +47,25 @@ class AppPreferencesTest {
     }
 
     @Test
+    fun `pace alerts start on without a baseline and recap dismissal and sent levels round trip`() = runTest {
+        val store = DataStorePreferences(newDataStore("pace.preferences_pb", backgroundScope))
+        val initial = store.state.first()
+        assertTrue(initial.paceAlertsEnabled)
+        assertEquals(null, initial.paceAlertsSent)
+        assertEquals(null, initial.recapDismissedPeriodId)
+
+        store.setPaceAlertsEnabled(false)
+        store.updatePaceAlertsSent { sent -> sent.orEmpty() + "p1/market/AT_RISK" }
+        store.updatePaceAlertsSent { sent -> sent.orEmpty() + "p1/food/RUN_OUT" }
+        store.dismissRecap("p0")
+
+        val updated = store.state.first()
+        assertFalse(updated.paceAlertsEnabled)
+        assertEquals(setOf("p1/market/AT_RISK", "p1/food/RUN_OUT"), updated.paceAlertsSent)
+        assertEquals("p0", updated.recapDismissedPeriodId)
+    }
+
+    @Test
     fun `missing upgrade keys default to disabled online FX and SAR input`() = runTest {
         val store = DataStorePreferences(newDataStore("upgrade.preferences_pb", backgroundScope))
 

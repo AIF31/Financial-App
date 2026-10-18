@@ -271,6 +271,15 @@ internal fun NotificationAssistanceSettings(
                             testTag = "notification_detection_alerts",
                             onCheckedChange = { savePreference { setNotificationDetectionAlerts(it) } },
                         )
+                        SettingSwitch(
+                            title = "Aviso de ritmo de Pockets",
+                            detail = "Si un gasto registrado automáticamente deja un Pocket camino de agotarse, en riesgo o " +
+                                "sin disponible, Pocket te avisa una vez por nivel.",
+                            checked = preferences.paceAlertsEnabled,
+                            enabled = preferencesStore != null,
+                            testTag = "pace_alerts",
+                            onCheckedChange = { savePreference { setPaceAlertsEnabled(it) } },
+                        )
                     }
                 }
                 saveError?.let { message ->

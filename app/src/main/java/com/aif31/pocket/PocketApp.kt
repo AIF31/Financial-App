@@ -82,14 +82,17 @@ import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.Movement
+import com.aif31.pocket.data.MovementDrill
 import com.aif31.pocket.data.PeriodComparison
 import com.aif31.pocket.data.PocketLedger
+import com.aif31.pocket.notifications.PaceAlertCoordinator
 import com.aif31.pocket.domain.Money
 import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.settings.AppPreferences
 import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
 import com.aif31.pocket.ui.ActionableDashboardContent
+import com.aif31.pocket.ui.PocketTopAppBar
 import com.aif31.pocket.ui.SettingsSection
 import com.aif31.pocket.ui.counted
 import java.util.UUID
@@ -145,6 +148,10 @@ private data class ComparisonRoute(val periodId: String, val baselinePeriodId: S
 
 @Serializable
 private data class AnalysisRoute(val periodId: String) : PocketRoute
+
+/** The Movements behind one figure of the period analysis, titled with what was tapped. */
+@Serializable
+private data class MovementDrillRoute(val drill: MovementDrill, val title: String) : PocketRoute
 
 @Serializable
 private data class SettingsDetailRoute(val section: SettingsSection) : PocketRoute
@@ -379,6 +386,7 @@ fun PocketApp(
     val movementRoute = currentRoute as? MovementRoute
     val comparisonRoute = currentRoute as? ComparisonRoute
     val analysisRoute = currentRoute as? AnalysisRoute
+    val drillRoute = currentRoute as? MovementDrillRoute
     val settingsSection = (currentRoute as? SettingsDetailRoute)?.section
     val snackbar = remember { SnackbarHostState() }
     val appScope = rememberCoroutineScope()
@@ -396,6 +404,10 @@ fun PocketApp(
         backStack[0] = RootRoute(destination)
         while (backStack.size > 1) backStack.removeLastOrNull()
     }
+
+    // Pace levels reached while the app is in view are already on the dashboard, so they never alert later.
+    val paceAlerts = remember(preferences) { preferences?.let { PaceAlertCoordinator(it) {} } }
+    LaunchedEffect(state, paceAlerts) { paceAlerts?.markSeen(state) }
 
     fun openComparison(periodId: String) {
         backStack.add(ComparisonRoute(periodId, PeriodComparison.previousPeriodId(state, periodId)))
@@ -439,8 +451,10 @@ fun PocketApp(
                 onDismiss = { backStack.removeLastOrNull() },
                 onSaved = {
                     // A form stacked over another Movement form (the launcher shortcut over an edit) returns to it
-                    // with its draft; only a form opened from a root screen goes back to that screen.
-                    if (backStack.getOrNull(backStack.lastIndex - 1) is MovementRoute) {
+                    // with its draft, and one opened from an analysis list returns to that list; only a form opened
+                    // from a root screen goes back to that screen.
+                    val underneath = backStack.getOrNull(backStack.lastIndex - 1)
+                    if (underneath is MovementRoute || underneath is MovementDrillRoute) {
                         backStack.removeLastOrNull()
                     } else {
                         navigateRoot(if (movementRoute.movementId == null) RootScreen.DASHBOARD else RootScreen.MOVEMENTS)
@@ -478,8 +492,29 @@ fun PocketApp(
             state = state,
             periodId = analysisRoute.periodId,
             onPeriodChange = { backStack[backStack.lastIndex] = AnalysisRoute(it) },
+            onOpenMovements = { drill, title -> backStack.add(MovementDrillRoute(drill, title)) },
             onBack = { backStack.removeLastOrNull() },
         )
+        return
+    }
+
+    if (drillRoute != null) {
+        BackHandler { backStack.removeLastOrNull() }
+        Scaffold(
+            topBar = { PocketTopAppBar(title = drillRoute.title, onNavigateBack = { backStack.removeLastOrNull() }) },
+            snackbarHost = { SnackbarHost(snackbar) },
+        ) { padding ->
+            MovementsScreen(
+                state = state,
+                ledger = ledger,
+                snackbar = snackbar,
+                padding = padding,
+                undoWindowMillis = undoWindowMillis,
+                onRecordExpense = { backStack.add(movementForm()) },
+                onEditMovement = { backStack.add(movementForm(movementId = it.id)) },
+                drill = drillRoute.drill,
+            )
+        }
         return
     }
 
@@ -554,7 +589,9 @@ fun PocketApp(
                         onManagePockets = { navigateRoot(RootScreen.POCKETS) },
                         onRecordExpenseIn = { backStack.add(movementForm(pocketId = it)) },
                         onComparePeriods = { openComparison(state.currentPeriod.id) },
-                        onOpenAnalysis = { backStack.add(AnalysisRoute(state.currentPeriod.id)) },
+                        onOpenAnalysis = { backStack.add(AnalysisRoute(it)) },
+                        recapDismissedPeriodId = preferenceState.recapDismissedPeriodId,
+                        onDismissRecap = { periodId -> appScope.launch { preferences?.dismissRecap(periodId) } },
                     )
                     RootScreen.MOVEMENTS -> MovementsScreen(
                         state = state,
@@ -764,7 +801,9 @@ private fun DashboardScreen(
     onManagePockets: () -> Unit,
     onRecordExpenseIn: (String) -> Unit,
     onComparePeriods: () -> Unit,
-    onOpenAnalysis: () -> Unit,
+    onOpenAnalysis: (periodId: String) -> Unit,
+    recapDismissedPeriodId: String?,
+    onDismissRecap: (periodId: String) -> Unit,
 ) {
     ActionableDashboardContent(
         state = state,
@@ -773,6 +812,8 @@ private fun DashboardScreen(
         onRecordExpenseIn = onRecordExpenseIn,
         onComparePeriods = onComparePeriods,
         onOpenAnalysis = onOpenAnalysis,
+        recapDismissedPeriodId = recapDismissedPeriodId,
+        onDismissRecap = onDismissRecap,
     )
 }
 @Composable

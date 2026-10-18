@@ -1,5 +1,6 @@
 package com.aif31.pocket
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -22,6 +23,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -29,6 +33,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.MerchantSpend
+import com.aif31.pocket.data.MovementDrill
 import com.aif31.pocket.data.PeriodInsights
 import com.aif31.pocket.data.SpendingAnalysis
 import com.aif31.pocket.domain.SupportedCurrency
@@ -52,6 +57,7 @@ import kotlin.math.abs
 
 private const val TOP_MERCHANTS = 8
 private val monthLabel = DateTimeFormatter.ofPattern("MMM", Locale.forLanguageTag("es"))
+private val dayTitle = DateTimeFormatter.ofPattern("EEEE d MMM", Locale.forLanguageTag("es"))
 
 /**
  * Breakdowns of one budget period: how daily spending trends across periods, where and when the money went, how it
@@ -63,6 +69,8 @@ internal fun AnalysisScreen(
     periodId: String,
     onPeriodChange: (String) -> Unit,
     onBack: () -> Unit,
+    /** Opens the Movements behind a tapped figure, titled with what was tapped. */
+    onOpenMovements: (drill: MovementDrill, title: String) -> Unit = { _, _ -> },
 ) {
     val analysis = remember(state, periodId) { SpendingAnalysis.of(state, periodId) }
     Scaffold(topBar = { PocketTopAppBar(title = "Análisis del periodo", onNavigateBack = onBack) }) { padding ->
@@ -85,9 +93,9 @@ internal fun AnalysisScreen(
             if (analysis == null) return@LazyColumn
             val currency = analysis.period.accountingCurrency
             item { Section("Tendencia del gasto diario", bounded) { TrendSection(analysis, currency, onPeriodChange) } }
-            item { Section("Comercios principales", bounded) { MerchantSection(analysis, currency) } }
-            item { Section("Cuándo gastas", bounded) { WhenSection(analysis, currency) } }
-            item { Section("Métodos de pago", bounded) { PaymentMethodSection(analysis, currency) } }
+            item { Section("Comercios principales", bounded) { MerchantSection(analysis, currency, onOpenMovements) } }
+            item { Section("Cuándo gastas", bounded) { WhenSection(analysis, currency, onOpenMovements) } }
+            item { Section("Métodos de pago", bounded) { PaymentMethodSection(analysis, currency, onOpenMovements) } }
             item { Section("Moneda extranjera", bounded) { ForeignCurrencySection(analysis, currency) } }
             if (analysis.rollover.isNotEmpty()) {
                 item { Section("Rollover acumulado", bounded) { RolloverSection(analysis, currency) } }
@@ -104,6 +112,11 @@ private fun Section(title: String, modifier: Modifier, content: @Composable Colu
             content()
         }
     }
+}
+
+/** A row that opens the Movements behind it, announced as such. */
+private fun Modifier.opensMovements(onClick: () -> Unit): Modifier = composed {
+    clip(MaterialTheme.shapes.small).clickable(onClickLabel = "Ver movimientos", role = Role.Button, onClick = onClick)
 }
 
 @Composable
@@ -206,7 +219,7 @@ private fun merchantSupporting(merchant: MerchantSpend, currency: SupportedCurre
 }
 
 @Composable
-private fun MerchantSection(analysis: SpendingAnalysis, currency: SupportedCurrency) {
+private fun MerchantSection(analysis: SpendingAnalysis, currency: SupportedCurrency, onOpenMovements: (MovementDrill, String) -> Unit) {
     if (analysis.merchants.isEmpty()) {
         Muted("Aún no hay movimientos con comercio en este periodo.")
         return
@@ -218,9 +231,12 @@ private fun MerchantSection(analysis: SpendingAnalysis, currency: SupportedCurre
             label = merchant.name,
             value = MoneyText.format(merchant.netSpendMinor, currency),
             supporting = merchantSupporting(merchant, currency),
-            modifier = Modifier.testTag("merchant_row"),
+            modifier = Modifier.testTag("merchant_row").opensMovements {
+                onOpenMovements(MovementDrill.merchant(analysis.period.id, merchant.key), merchant.name)
+            },
         )
     }
+    Muted("Toca un comercio para ver sus movimientos.")
     if (analysis.merchants.size > TOP_MERCHANTS) {
         DisclosureRow(
             showAll,
@@ -234,7 +250,7 @@ private fun MerchantSection(analysis: SpendingAnalysis, currency: SupportedCurre
 }
 
 @Composable
-private fun WhenSection(analysis: SpendingAnalysis, currency: SupportedCurrency) {
+private fun WhenSection(analysis: SpendingAnalysis, currency: SupportedCurrency, onOpenMovements: (MovementDrill, String) -> Unit) {
     val insights = analysis.insights
     if (insights.elapsedDays == 0) {
         Muted("El periodo aún no ha comenzado.")
@@ -255,7 +271,12 @@ private fun WhenSection(analysis: SpendingAnalysis, currency: SupportedCurrency)
                 label = day.dayOfWeek.shortSpanish(),
                 fraction = (average ?: 0).coerceAtLeast(0).toFloat() / maxAverage,
                 value = average?.let { MoneyText.format(it, currency) } ?: "—",
-                modifier = Modifier.semantics(mergeDescendants = true) {},
+                modifier = Modifier
+                    .opensMovements {
+                        val title = day.dayOfWeek.recurringSpanish().replaceFirstChar { it.uppercase() }
+                        onOpenMovements(MovementDrill.weekday(analysis.period.id, day.dayOfWeek), title)
+                    }
+                    .semantics(mergeDescendants = true) {},
             )
         }
     }
@@ -265,6 +286,7 @@ private fun WhenSection(analysis: SpendingAnalysis, currency: SupportedCurrency)
         totalDays = insights.totalDays,
         dailyNetSpendMinor = analysis.dailyNetSpendMinor,
         currency = currency,
+        onDayClick = { date -> onOpenMovements(MovementDrill.day(analysis.period.id, date), date.format(dayTitle).replaceFirstChar { it.uppercase() }) },
         modifier = Modifier.widthIn(max = 420.dp),
     )
     if (insights.netSpendAfterTodayMinor != 0L) {
@@ -273,7 +295,7 @@ private fun WhenSection(analysis: SpendingAnalysis, currency: SupportedCurrency)
 }
 
 @Composable
-private fun PaymentMethodSection(analysis: SpendingAnalysis, currency: SupportedCurrency) {
+private fun PaymentMethodSection(analysis: SpendingAnalysis, currency: SupportedCurrency, onOpenMovements: (MovementDrill, String) -> Unit) {
     val methods = analysis.paymentMethods
     if (methods.isEmpty()) {
         Muted("Aún no hay movimientos en este periodo.")
@@ -281,9 +303,15 @@ private fun PaymentMethodSection(analysis: SpendingAnalysis, currency: Supported
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         methods.forEach { method ->
-            Column(Modifier.semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            val label = method.name ?: "Sin método"
+            Column(
+                Modifier
+                    .opensMovements { onOpenMovements(MovementDrill.paymentMethod(analysis.period.id, method.id), label) }
+                    .semantics(mergeDescendants = true) {},
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 Row(Modifier.fillMaxWidth()) {
-                    Text(method.name ?: "Sin método", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                     Text(
                         MoneyText.format(method.netSpendMinor, currency),
                         style = MaterialTheme.typography.labelLarge,
