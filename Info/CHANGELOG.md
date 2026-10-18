@@ -32,6 +32,15 @@ The development version advances to `1.0.10` (`versionCode` 11). No schema or ba
   Every chart uses one hue, has a spoken summary, and comes with the figures as text.
 - Verification on Ubuntu with JDK 17, through the gradle-run wrapper. The three new auto-recorder duplicate tests failed before the guard and pass after it; a same-amount purchase on another day still auto-records. New `SpendingAnalysisTest`, run-out and status tests in `PeriodInsightsTest`, `AnalysisScreenTest`, and a dashboard test cover the features. `:app:testDebugUnitTest` passed 313 tests in 37 suites with no failures, errors or skips. `:app:lintDebug` reported the existing 26 advisory warnings, none in changed files. `:app:assembleDebug`, `:app:assembleRelease` and `:app:assembleDebugAndroidTest` passed. The Pixel 6 API 35 managed-device suite (excluding `LargeTest`) passed 25 tests. The analysis screen (light and dark) and the dashboard were rendered with a throwaway Robolectric capture and checked by eye. That pass fixed a wrapped Pocket name, an orphaned ▲ arrow, and an **En buen ritmo** badge shown beside a run-out date.
 - Limits: not checked on a physical device or with TalkBack. How far estimated conversions moved once confirmed is not shown, because the replaced estimate is not stored. Two genuine identical purchases at one merchant within 12 hours now need one confirmation.
+- **Review follow-up.** An independent GPT-6.1 review found eight issues; seven are fixed, each with a test that failed first, and one is declined:
+  - A huge budget spent slowly crashed the dashboard, because the run-out date overflowed the calendar. The distance is now bounded by the period first.
+  - A hand entry converted from another currency (USD 10.00 recorded as SAR 37.50) did not stop the SAR bank alert from auto-recording. Amounts now also match as converted.
+  - An expense saved between the recorder's check and its write was recorded twice. `ConfirmSuggestion` repeats the check inside its transaction for automatic records and returns the new `RejectionKind.DUPLICATE`.
+  - A Pocket funded only by rollover could show a run-out date without **Ritmo alto**. It now gets that badge too.
+  - The rollover history dropped a Pocket that carried money forward but later opted out.
+  - "Mediana" used the upper middle value for an even count. It is now a true median.
+  - The trend chart's tap handler could keep a stale period mapping, and the bars had no screen-reader action. The chart now reads the latest mapping and offers one "Ver periodo …" action per bar. Sparklines now speak their whole history.
+  - Declined: drawing negative net spending (refund-heavy periods) below a zero line. Bars and sparklines still treat it as zero, while the spoken summary and the period table give the signed values.
 
 ## 2026-10-15
 

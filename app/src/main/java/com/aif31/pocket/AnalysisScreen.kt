@@ -36,6 +36,7 @@ import com.aif31.pocket.data.MerchantSpend
 import com.aif31.pocket.data.MovementDrill
 import com.aif31.pocket.data.PeriodInsights
 import com.aif31.pocket.data.SpendingAnalysis
+import com.aif31.pocket.data.medianMinor
 import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.ui.DisclosureRow
 import com.aif31.pocket.ui.MetricRow
@@ -141,7 +142,7 @@ private fun TrendSection(analysis: SpendingAnalysis, currency: SupportedCurrency
     if (earlier.isEmpty()) {
         Muted("Aún no hay periodos anteriores en ${currency.name} para mostrar una tendencia.")
     } else {
-        val typical = earlier.sorted()[earlier.size / 2]
+        val typical = medianMinor(earlier)!!
         Muted("Mediana de ${counted(earlier.size, "periodo anterior", "periodos anteriores")}: ${money(typical)} al día.")
         val description = "Gasto diario promedio por periodo. " + trend.joinToString(". ") { insights ->
             "${formatPeriodRange(insights.period.start, insights.period.endExclusive)}: " +
@@ -199,7 +200,11 @@ private fun TrendSection(analysis: SpendingAnalysis, currency: SupportedCurrency
                         fontFamily = FontFamily.Monospace,
                     )
                 }
-                Sparkline(pocketTrend.averageDailyByPeriodMinor)
+                Sparkline(
+                    pocketTrend.averageDailyByPeriodMinor,
+                    description = "${pocketTrend.pocket.name}: promedio diario por periodo, " +
+                        pocketTrend.averageDailyByPeriodMinor.joinToString(", ") { it?.let(::money) ?: "sin días" },
+                )
             }
         }
     }
@@ -379,7 +384,13 @@ private fun RolloverSection(analysis: SpendingAnalysis, currency: SupportedCurre
                         MoneyText.format(pocket.carriesForwardMinor, currency),
                 )
             }
-            if (showSparkline) Sparkline(pocket.rolloverByPeriodMinor)
+            if (showSparkline) {
+                Sparkline(
+                    pocket.rolloverByPeriodMinor,
+                    description = "${pocket.pocket.name}: rollover recibido por periodo, " +
+                        pocket.rolloverByPeriodMinor.joinToString(", ") { MoneyText.format(it, currency) },
+                )
+            }
         }
     }
 }

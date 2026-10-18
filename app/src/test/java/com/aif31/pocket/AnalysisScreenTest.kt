@@ -1,7 +1,11 @@
 package com.aif31.pocket
 
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
@@ -25,6 +29,8 @@ import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.data.PocketPeriodSummary
 import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.ui.PocketTheme
+import com.aif31.pocket.ui.TrendBar
+import com.aif31.pocket.ui.TrendBars
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -79,6 +85,7 @@ class AnalysisScreenTest {
         list.performScrollToNode(hasText("33% del gasto neto se registró en otra moneda"))
         list.performScrollToNode(hasText("Original MXN 150.00 · 1 movimiento"))
 
+        list.performScrollToNode(hasContentDescription("Supermercado: promedio diario por periodo, SAR 1.00, SAR 10.00", substring = true))
         list.performScrollToNode(hasTestTag("trend_bars"))
         compose.onNodeWithTag("trend_bars").performTouchInput { click(Offset(width * 0.25f, height - 1f)) }
         assertEquals(february.id, selected)
@@ -94,6 +101,33 @@ class AnalysisScreenTest {
             ),
             opened,
         )
+    }
+
+    @Test
+    fun trend_bars_select_with_the_current_mapping_and_offer_a_screen_reader_action_per_bar() {
+        var window by mutableStateOf(listOf("p1", "p2"))
+        var selected: String? = null
+        compose.setContent {
+            val shown = window
+            PocketTheme {
+                TrendBars(
+                    bars = shown.map { TrendBar(it, 100, selected = false) },
+                    description = "Tendencia",
+                    onSelect = { selected = shown[it] },
+                )
+            }
+        }
+
+        // Same number of bars, different periods: a tap must use the new mapping.
+        window = listOf("p0", "p1")
+        compose.waitForIdle()
+        compose.onNodeWithTag("trend_bars").performTouchInput { click(Offset(width * 0.25f, height - 1f)) }
+        assertEquals("p0", selected)
+
+        val actions = compose.onNodeWithTag("trend_bars").fetchSemanticsNode().config[SemanticsActions.CustomActions]
+        assertEquals(listOf("Ver periodo p0", "Ver periodo p1"), actions.map { it.label })
+        actions[1].action()
+        assertEquals("p1", selected)
     }
 
     private fun spend(expense: Long) = PocketPeriodSummary(

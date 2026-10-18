@@ -260,7 +260,8 @@ sealed interface LedgerResult {
     data class Deleted(val movement: Movement) : LedgerResult
 }
 
-enum class RejectionKind { VALIDATION, PERSISTENCE }
+/** [DUPLICATE]: an automatic record matched an expense already in the ledger. */
+enum class RejectionKind { VALIDATION, PERSISTENCE, DUPLICATE }
 
 interface PocketLedger {
     val state: kotlinx.coroutines.flow.Flow<LedgerState>

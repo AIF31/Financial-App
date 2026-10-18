@@ -223,7 +223,7 @@ internal fun MovementsScreen(
                         .atZone(BUDGET_ZONE).toLocalDate()
                         .let { date -> state.periods.firstOrNull { !date.isBefore(it.start) && date.isBefore(it.endExclusive) } }
                         ?.accountingCurrency ?: state.currentPeriod?.accountingCurrency,
-                    possibleDuplicate = suggestion.likelyDuplicateIn(state.movements) != null,
+                    possibleDuplicate = suggestion.likelyDuplicateIn(state) != null,
                     today = state.currentLocalDate,
                     onReview = { onReviewSuggestion(suggestion.id) },
                     onDiscard = {

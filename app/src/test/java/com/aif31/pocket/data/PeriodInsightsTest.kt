@@ -477,6 +477,36 @@ class PeriodInsightsTest {
         assertEquals(LocalDate.of(2026, 3, 10), PeriodInsights.of(state, march.id)!!.runOutDateByPocket[market.id])
     }
 
+    @Test
+    fun a_huge_budget_spent_slowly_has_no_run_out_date_instead_of_overflowing_the_calendar() {
+        // 10^14 minor units at SAR 0.22 a day would run out after more days than a date can hold.
+        val state = state(
+            today = LocalDate.of(2026, 3, 5),
+            elapsedDays = 9,
+            summaries = mapOf(march.id to listOf(summary(market, budget = 100_000_000_000_000, expense = 200))),
+            movements = listOf(
+                movement("a", march, LocalDate.of(2026, 2, 26), 100),
+                movement("b", march, LocalDate.of(2026, 3, 3), 100),
+            ),
+        )
+
+        assertTrue(PeriodInsights.of(state, march.id)!!.runOutDateByPocket.isEmpty())
+    }
+
+    @Test
+    fun a_pocket_funded_only_by_rollover_that_will_run_out_reads_as_a_fast_pace() {
+        val rolloverOnly = summary(market, budget = 0, rollover = 10_000, expense = 6_000)
+        val state = state(
+            today = LocalDate.of(2026, 3, 5),
+            elapsedDays = 9,
+            summaries = mapOf(march.id to listOf(rolloverOnly)),
+            movements = listOf(movement("a", march, LocalDate.of(2026, 2, 26), 3_000), movement("b", march, LocalDate.of(2026, 3, 3), 3_000)),
+        )
+
+        assertEquals(PocketBudgetStatus.FAST_PACE, rolloverOnly.budgetStatusAt(PeriodInsights.of(state, march.id)))
+        assertEquals(PocketBudgetStatus.UNBUDGETED, rolloverOnly.budgetStatusAt(null))
+    }
+
     private fun state(
         today: LocalDate,
         elapsedDays: Int,

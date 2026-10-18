@@ -15,11 +15,13 @@ val PocketPeriodSummary.budgetStatus: PocketBudgetStatus
     }
 
 /**
- * [budgetStatus], except that a Pocket still on track by consumption but forecast to run out before the period ends
- * is [PocketBudgetStatus.FAST_PACE], so its badge never says it is on track beside a run-out date.
+ * [budgetStatus], except that a Pocket forecast to run out before the period ends is [PocketBudgetStatus.FAST_PACE]
+ * unless the ledger already flags it at risk or exhausted. That includes a Pocket funded only by rollover, which has no
+ * budget of its own but can still run out.
  */
 fun PocketPeriodSummary.budgetStatusAt(insights: PeriodInsights?): PocketBudgetStatus {
     val status = budgetStatus
     val runsOut = insights?.runOutDateByPocket?.containsKey(pocket.id) == true
-    return if (status == PocketBudgetStatus.ON_TRACK && runsOut) PocketBudgetStatus.FAST_PACE else status
+    val canBeFaster = status == PocketBudgetStatus.ON_TRACK || status == PocketBudgetStatus.UNBUDGETED
+    return if (canBeFaster && runsOut) PocketBudgetStatus.FAST_PACE else status
 }

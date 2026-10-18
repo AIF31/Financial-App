@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,9 +35,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.font.FontFamily
@@ -63,7 +67,8 @@ internal class TrendBar(val label: String, val valueMinor: Long?, val selected: 
 
 /**
  * One bar per period, the selected period at full strength and the rest lighter. Every bar is the same series, so a
- * single hue carries it and the selected bar is also named in the caption above. Tapping a bar selects its period.
+ * single hue carries it and the selected bar is also named in the caption above. Tapping a bar selects its period;
+ * screen readers get one action per bar instead.
  */
 @Composable
 internal fun TrendBars(
@@ -75,17 +80,24 @@ internal fun TrendBars(
     val barColor = MaterialTheme.colorScheme.primary
     val baselineColor = MaterialTheme.colorScheme.outlineVariant
     val maxValue = bars.maxOfOrNull { it.valueMinor ?: 0 }?.coerceAtLeast(1) ?: 1
+    // The tap handler outlives recompositions with the same bar count, so it reads the latest selection mapping.
+    val currentOnSelect by rememberUpdatedState(onSelect)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Canvas(
             Modifier
                 .fillMaxWidth()
                 .height(140.dp)
                 .testTag("trend_bars")
-                .clearAndSetSemantics { contentDescription = description }
+                .clearAndSetSemantics {
+                    contentDescription = description
+                    customActions = bars.mapIndexed { index, bar ->
+                        CustomAccessibilityAction("Ver periodo ${bar.label}") { currentOnSelect(index); true }
+                    }
+                }
                 .pointerInput(bars.size) {
                     detectTapGestures { offset ->
                         val index = (offset.x / (size.width / bars.size.toFloat())).toInt().coerceIn(0, bars.lastIndex)
-                        onSelect(index)
+                        currentOnSelect(index)
                     }
                 },
         ) {
@@ -128,11 +140,19 @@ internal fun TrendBars(
     }
 }
 
-/** A small line of values from zero, with the latest point marked; gaps where a value is missing. */
+/**
+ * A small line of values from zero, with the latest point marked; gaps where a value is missing. [description] speaks
+ * the whole series, since the surrounding text gives only the latest value.
+ */
 @Composable
-internal fun Sparkline(values: List<Long?>, modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.primary) {
+internal fun Sparkline(
+    values: List<Long?>,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+    description: String? = null,
+) {
     val maxValue = values.maxOfOrNull { it ?: 0 }?.coerceAtLeast(1) ?: 1
-    Canvas(modifier.width(72.dp).height(28.dp).clearAndSetSemantics { }) {
+    Canvas(modifier.width(72.dp).height(28.dp).clearAndSetSemantics { description?.let { contentDescription = it } }) {
         if (values.size < 2) return@Canvas
         val inset = 4.dp.toPx()
         val usableHeight = size.height - inset * 2

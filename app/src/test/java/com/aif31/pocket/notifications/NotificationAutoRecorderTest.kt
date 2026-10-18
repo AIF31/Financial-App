@@ -6,6 +6,7 @@ import com.aif31.pocket.data.FinanceDatabase
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.MovementType
+import com.aif31.pocket.data.PocketLedger
 import com.aif31.pocket.data.RoomPocketLedger
 import com.aif31.pocket.domain.SupportedCurrency
 import java.time.Clock
@@ -229,5 +230,56 @@ class NotificationAutoRecorderTest {
             AutoRecordOutcome.Recorded(autoRecordedMovementId(suggestionId), pocket.name),
             NotificationAutoRecorder(ledger, zone).record(suggestionId),
         )
+    }
+
+    @Test fun a_hand_entry_converted_from_another_currency_still_marks_a_possible_duplicate() = runTest {
+        // USD 10.00 typed in by hand becomes SAR 37.50; the bank then reports the SAR charge.
+        val pocket = ledger.state.first().pockets.first().pocket
+        val occurredAt = instant.minusSeconds(180)
+        assertEquals(
+            LedgerResult.Success,
+            ledger.execute(
+                LedgerCommand.AddMovement(
+                    pocketId = pocket.id,
+                    type = MovementType.EXPENSE,
+                    accountingAmountMinor = 3_750,
+                    occurredAtUtcMillis = occurredAt.toEpochMilli(),
+                    localDate = occurredAt.atZone(zone).toLocalDate(),
+                    merchant = "Shop",
+                    originalAmountMinor = 1_000,
+                    originalCurrencyCode = "USD",
+                ),
+            ),
+        )
+        val suggestionId = detect("converted", ParsedPayment(3_750, SupportedCurrency.SAR, "SHOP"))
+
+        assertEquals(
+            AutoRecordOutcome.NeedsReview(ReviewReason.POSSIBLE_DUPLICATE),
+            NotificationAutoRecorder(ledger, zone).record(suggestionId),
+        )
+    }
+
+    @Test fun a_hand_entry_saved_while_the_payment_is_being_recorded_still_blocks_it() = runTest {
+        val pocket = ledger.state.first().pockets.first().pocket
+        recordManually(pocket.id, "Starbucks", minutesAgo = 60 * 24 * 3, amountMinor = 900)
+        val suggestionId = detect("race", ParsedPayment(2_500, SupportedCurrency.SAR, "Starbucks"))
+        // The person saves the same purchase after the recorder's check but before its write.
+        val racing = object : PocketLedger by ledger {
+            var raced = false
+            override suspend fun execute(command: LedgerCommand): LedgerResult {
+                if (command is LedgerCommand.ConfirmSuggestion && !raced) {
+                    raced = true
+                    recordManually(pocket.id, "Starbucks", minutesAgo = 1, amountMinor = 2_500)
+                }
+                return ledger.execute(command)
+            }
+        }
+
+        val outcome = NotificationAutoRecorder(racing, zone).record(suggestionId)
+
+        assertEquals(AutoRecordOutcome.NeedsReview(ReviewReason.POSSIBLE_DUPLICATE), outcome)
+        val state = ledger.state.first()
+        assertEquals(1, state.movements.count { it.merchant == "Starbucks" && it.accountingAmountMinor == 2_500L })
+        assertEquals(listOf(suggestionId), state.movementSuggestions.map { it.id })
     }
 }

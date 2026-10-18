@@ -22,7 +22,7 @@ With auto-recording on, the payment becomes a Movement when:
 
 - it has a merchant, and the most recent expense for that merchant (ignoring case and punctuation) is in a Pocket that is not archived; and
 - its currency equals the accounting currency of the period containing its date. If that period does not exist yet because Pocket has not been opened since it began, Pocket catches up periods first, as it does on launch. A foreign currency always needs review, and its hint asks for the conversion even when the merchant is new; and
-- no expense already records it: no expense for the same merchant, with the same amount in the same currency, is dated within 12 hours of the payment. Such a match, whether typed in by hand or detected from another app, keeps the payment in review with the hint `Posible duplicado de un gasto ya registrado`. A payment without a merchant is never matched on amount alone.
+- no expense already records it: no expense for the same merchant, with the same amount in the payment's currency (as entered, or as converted into its period's accounting currency), is dated within 12 hours of the payment. The ledger checks again while recording, so an expense saved at that moment still counts. Such a match, whether typed in by hand or detected from another app, keeps the payment in review with the hint `Posible duplicado de un gasto ya registrado`. A payment without a merchant is never matched on amount alone.
 
 Only the newest matching expense decides the Pocket. If its Pocket is archived, the payment goes to review; Pocket never falls back to an older expense's Pocket. Merchant matching drops case, spaces, and punctuation, so `K.F.C` matches `KFC`.
 
