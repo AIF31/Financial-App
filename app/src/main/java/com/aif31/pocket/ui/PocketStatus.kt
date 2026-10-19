@@ -35,6 +35,7 @@ internal fun PocketBudgetStatus.presentation(): StatusPresentation = with(Materi
     when (this@presentation) {
         PocketBudgetStatus.EXHAUSTED -> StatusPresentation("Agotado", Icons.Default.Error, errorContainer, onErrorContainer, error)
         PocketBudgetStatus.AT_RISK -> StatusPresentation("En riesgo", Icons.Default.Warning, tertiaryContainer, onTertiaryContainer, tertiary)
+        PocketBudgetStatus.FAST_PACE -> StatusPresentation("Ritmo alto", Icons.Default.Warning, tertiaryContainer, onTertiaryContainer, tertiary)
         PocketBudgetStatus.UNBUDGETED -> StatusPresentation("Sin presupuesto", Icons.Default.RemoveCircleOutline, surfaceContainerHighest, onSurfaceVariant, outline)
         PocketBudgetStatus.ON_TRACK -> StatusPresentation("En buen ritmo", Icons.Default.CheckCircle, primaryContainer, onPrimaryContainer, primary)
     }

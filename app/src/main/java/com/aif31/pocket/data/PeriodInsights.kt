@@ -4,9 +4,19 @@ import com.aif31.pocket.domain.FrozenRate
 import com.aif31.pocket.domain.PocketMath
 import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.domain.sumMoneyExact
+import java.time.LocalDate
 
 /** How the period's spending relates to its plan; the dashboard's status line reads this. */
 enum class SpendPaceStatus { NO_FUNDS, OVERSPENT, OVER_PACE, ON_PLAN }
+
+/**
+ * The period's Movements that count toward its totals: those whose Pocket is in the period's snapshot, matching the
+ * ledger's own net spend.
+ */
+fun LedgerState.periodMovements(periodId: String): List<Movement> {
+    val snapshotPocketIds = pocketSummariesByPeriod[periodId].orEmpty().mapTo(HashSet()) { it.pocket.id }
+    return movements.filter { it.periodId == periodId && it.pocketId in snapshotPocketIds }
+}
 
 /** Net spending of Movements: expenses add, refunds subtract. */
 fun Iterable<Movement>.netSpendMinor(): Long =
@@ -49,6 +59,12 @@ data class PeriodInsights(
     val netSpendAfterTodayMinor: Long,
     /** [netSpendAfterTodayMinor] by Pocket ID; Pockets with nothing dated after today are absent. */
     val netSpendAfterTodayByPocketMinor: Map<String, Long>,
+    /**
+     * The day each Pocket's availability runs out at its pace through today, for Pockets that would run out before
+     * the period ends. Only Pockets spent on at least two days are forecast, so a single large expense such as rent
+     * is not extrapolated. Empty for closed periods.
+     */
+    val runOutDateByPocket: Map<String, LocalDate>,
     val pockets: List<PocketPeriodSummary>,
 ) {
     val accountingCurrency: SupportedCurrency get() = period.accountingCurrency
@@ -85,9 +101,7 @@ data class PeriodInsights(
             // Rollover is spendable money too, so a period funded only by rollover still has a plan.
             val periodFunds = Math.addExact(period.newFundsMinor, rollover)
             val remainingDays = if (inProgress) totalDays - elapsedDays else 0
-            // Match the ledger's net spend, which only counts Pockets present in this period's snapshot.
-            val snapshotPocketIds = pockets.mapTo(HashSet()) { it.pocket.id }
-            val periodMovements = state.movements.filter { it.periodId == period.id && it.pocketId in snapshotPocketIds }
+            val periodMovements = state.periodMovements(period.id)
             val expenses = periodMovements.filter { it.type == MovementType.EXPENSE }
             val netSpendAfterTodayByPocket = if (inProgress) {
                 periodMovements.filter { it.localDate > today }.groupBy { it.pocketId }.mapValues { it.value.netSpendMinor() }
@@ -133,8 +147,34 @@ data class PeriodInsights(
                 cumulativeNetSpendByDayMinor = cumulativeByDay(period, elapsedDays, periodMovements),
                 netSpendAfterTodayMinor = netSpendAfterToday,
                 netSpendAfterTodayByPocketMinor = netSpendAfterTodayByPocket,
+                runOutDateByPocket = if (inProgress) {
+                    runOutDates(pockets, periodMovements.filter { it.localDate <= today }, today, elapsedDays, period.endExclusive)
+                } else {
+                    emptyMap()
+                },
                 pockets = pockets,
             )
+        }
+
+        private fun runOutDates(
+            pockets: List<PocketPeriodSummary>,
+            movementsThroughToday: List<Movement>,
+            today: LocalDate,
+            elapsedDays: Int,
+            periodEnd: LocalDate,
+        ): Map<String, LocalDate> {
+            val byPocket = movementsThroughToday.groupBy { it.pocketId }
+            return pockets.mapNotNull { summary ->
+                val movements = byPocket[summary.pocket.id].orEmpty()
+                val spendingDays = movements.filter { it.type == MovementType.EXPENSE }.distinctBy { it.localDate }.size
+                val dailyPace = movements.netSpendMinor() / elapsedDays
+                if (summary.availabilityMinor <= 0 || spendingDays < 2 || dailyPace <= 0) return@mapNotNull null
+                // Availability covers this many whole days after today; it runs out on the day after them. The
+                // distance is bounded by the period before it becomes a date, since a huge budget would overflow one.
+                val daysUntilRunOut = summary.availabilityMinor / dailyPace + 1
+                if (daysUntilRunOut >= periodEnd.toEpochDay() - today.toEpochDay()) return@mapNotNull null
+                summary.pocket.id to today.plusDays(daysUntilRunOut)
+            }.toMap()
         }
 
         private fun cumulativeByDay(period: Period, elapsedDays: Int, movements: List<Movement>): List<Long> {

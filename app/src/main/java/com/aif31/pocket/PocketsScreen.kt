@@ -63,6 +63,7 @@ internal fun PocketsScreen(
     val selectedCurrency = selectedPeriod?.accountingCurrency ?: SupportedCurrency.SAR
     fun money(minor: Long): String = MoneyText.format(minor, selectedCurrency)
     val shownPockets = state.pocketSummariesByPeriod[selectedPeriodId].orEmpty()
+    val shownInsights = remember(state, selectedPeriodId) { selectedPeriodId?.let { PeriodInsights.of(state, it) } }
     val archivedPockets = state.pocketCatalog.filter { it.archived }
     val isHistorical = selectedPeriod?.id != null && selectedPeriod.id != state.currentPeriod?.id
     val activePockets = shownPockets.filterNot { summary ->
@@ -223,7 +224,7 @@ internal fun PocketsScreen(
             }
         }
         items(activePockets, key = { it.pocket.id }) { summary ->
-            val status = summary.budgetStatus
+            val status = summary.budgetStatusAt(shownInsights)
             val presentation = status.presentation()
             val statusColor = presentation.indicator
             val available = availableText(summary.availabilityMinor, selectedCurrency)

@@ -144,6 +144,9 @@ private fun movementForm(movementId: String? = null, suggestionId: String? = nul
 private data class ComparisonRoute(val periodId: String, val baselinePeriodId: String?) : PocketRoute
 
 @Serializable
+private data class AnalysisRoute(val periodId: String) : PocketRoute
+
+@Serializable
 private data class SettingsDetailRoute(val section: SettingsSection) : PocketRoute
 
 @Composable
@@ -375,6 +378,7 @@ fun PocketApp(
     val screen = backStack.filterIsInstance<RootRoute>().lastOrNull()?.screen ?: RootScreen.DASHBOARD
     val movementRoute = currentRoute as? MovementRoute
     val comparisonRoute = currentRoute as? ComparisonRoute
+    val analysisRoute = currentRoute as? AnalysisRoute
     val settingsSection = (currentRoute as? SettingsDetailRoute)?.section
     val snackbar = remember { SnackbarHostState() }
     val appScope = rememberCoroutineScope()
@@ -468,6 +472,17 @@ fun PocketApp(
         return
     }
 
+    if (analysisRoute != null) {
+        BackHandler { backStack.removeLastOrNull() }
+        AnalysisScreen(
+            state = state,
+            periodId = analysisRoute.periodId,
+            onPeriodChange = { backStack[backStack.lastIndex] = AnalysisRoute(it) },
+            onBack = { backStack.removeLastOrNull() },
+        )
+        return
+    }
+
     BackHandler(enabled = backStack.size > 1) { backStack.removeLastOrNull() }
     // Platform convention: back from another root tab returns to Inicio before leaving the app.
     BackHandler(enabled = backStack.size == 1 && screen != RootScreen.DASHBOARD) { navigateRoot(RootScreen.DASHBOARD) }
@@ -539,6 +554,7 @@ fun PocketApp(
                         onManagePockets = { navigateRoot(RootScreen.POCKETS) },
                         onRecordExpenseIn = { backStack.add(movementForm(pocketId = it)) },
                         onComparePeriods = { openComparison(state.currentPeriod.id) },
+                        onOpenAnalysis = { backStack.add(AnalysisRoute(state.currentPeriod.id)) },
                     )
                     RootScreen.MOVEMENTS -> MovementsScreen(
                         state = state,
@@ -748,6 +764,7 @@ private fun DashboardScreen(
     onManagePockets: () -> Unit,
     onRecordExpenseIn: (String) -> Unit,
     onComparePeriods: () -> Unit,
+    onOpenAnalysis: () -> Unit,
 ) {
     ActionableDashboardContent(
         state = state,
@@ -755,6 +772,7 @@ private fun DashboardScreen(
         onManagePockets = onManagePockets,
         onRecordExpenseIn = onRecordExpenseIn,
         onComparePeriods = onComparePeriods,
+        onOpenAnalysis = onOpenAnalysis,
     )
 }
 @Composable

@@ -65,7 +65,7 @@ A normalized, temporary candidate derived from one message in an allowed app's n
 _Avoid_: Imported transaction
 
 **Auto-recording**:
-Turning a Movement suggestion into a Movement without review, only when its merchant's most recent expense sits in an active Pocket and its currency equals the period's accounting currency. Anything else stays a suggestion.
+Turning a Movement suggestion into a Movement without review, only when its merchant's most recent expense sits in an active Pocket, its currency equals the period's accounting currency, and no expense for the same merchant and amount, as entered or as converted, is dated within 12 hours of it. Anything else stays a suggestion; the last case is a possible duplicate.
 _Avoid_: Bank sync, automatic categorization
 
 **Merchant memory**:
