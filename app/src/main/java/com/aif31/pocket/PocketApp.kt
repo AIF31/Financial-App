@@ -619,6 +619,7 @@ fun PocketApp(
                         notificationPermissionRevision = notificationPermissionRevision,
                         padding = padding,
                         section = settingsSection,
+                        snackbar = snackbar,
                         onSectionChange = { section ->
                             if (section == null) {
                                 if (backStack.lastOrNull() is SettingsDetailRoute) backStack.removeLastOrNull()

@@ -62,6 +62,7 @@ internal fun SettingsScreen(
     notificationPermissionRevision: Int = 0,
     padding: PaddingValues,
     section: SettingsSection?,
+    snackbar: SnackbarHostState? = null,
     onSectionChange: (SettingsSection?) -> Unit,
 ) {
     val selectedSection = section
@@ -70,6 +71,10 @@ internal fun SettingsScreen(
             contentPadding = padding,
             onOpenSection = { onSectionChange(it) },
         )
+        return
+    }
+    if (selectedSection == SettingsSection.MERCHANT_MEMORY) {
+        MerchantMemorySettings(state, ledger, padding, snackbar, onBack = { onSectionChange(null) })
         return
     }
     if (selectedSection == SettingsSection.CURRENCY) {

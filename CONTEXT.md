@@ -73,7 +73,7 @@ Turning a Movement suggestion into a Movement without review, only when its merc
 _Avoid_: Bank sync, automatic categorization
 
 **Merchant memory**:
-The Pocket of the most recent expense whose merchant matches after ignoring case and punctuation. It is derived from existing Movements and is not stored separately.
+The Pocket of the most recent expense whose merchant matches after ignoring case and punctuation. It is derived from existing Movements and is not stored separately. Changing a merchant’s Pocket in Settings moves its most recent expense to that Pocket, which also directs future automatic records there.
 _Avoid_: Rule, category mapping
 
 **Budget suggestion**:

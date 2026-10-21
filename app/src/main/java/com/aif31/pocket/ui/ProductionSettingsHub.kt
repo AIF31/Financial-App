@@ -65,6 +65,11 @@ internal enum class SettingsSection(
         "Registra gastos leídos de tu banco o SMS · Experimental",
         Icons.Default.NotificationsActive,
     ),
+    MERCHANT_MEMORY(
+        "Memoria de comercios",
+        "A qué Pocket van los pagos registrados automáticamente",
+        Icons.Default.AccountBalanceWallet,
+    ),
     PAYMENT_METHODS(
         "Métodos de pago",
         "Añade, edita, archiva y restaura métodos",

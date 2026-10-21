@@ -207,6 +207,8 @@ sealed interface LedgerCommand {
         val conversionSource: String? = null,
         val accountingCurrency: SupportedCurrency? = null,
         val createOnly: Boolean = false,
+        /** Reject a stale edit inside the write transaction, preserving intervening changes or deletion. */
+        val expectedMovement: Movement? = null,
     ) : LedgerCommand
     /**
      * Replaces a provider estimate with the final rate of the Movement's own date. It does nothing when [estimate]
