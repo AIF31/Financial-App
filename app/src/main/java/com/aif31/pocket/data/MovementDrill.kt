@@ -6,13 +6,21 @@ import kotlinx.serialization.Serializable
 
 /**
  * One slice of a period's Movements picked from the period analysis: a merchant, a weekday, a day, or a payment
- * method. It selects from the same Movements the analysis counted, so the list adds up to the figure tapped.
+ * method. Recurring-charge history instead selects past expenses in the selected period's accounting currency.
  */
 @Serializable
 data class MovementDrill(val periodId: String, val kind: Kind, val value: String?) {
-    enum class Kind { MERCHANT, WEEKDAY, DAY, PAYMENT_METHOD }
+    enum class Kind { MERCHANT, WEEKDAY, DAY, PAYMENT_METHOD, MERCHANT_HISTORY }
 
     fun movements(state: LedgerState): List<Movement> {
+        if (kind == Kind.MERCHANT_HISTORY) {
+            val currency = state.periods.firstOrNull { it.id == periodId }?.accountingCurrency ?: return emptyList()
+            val eligiblePeriods = state.periods.filter { it.accountingCurrency == currency }.map { it.id }.toSet()
+            return state.movements.filter {
+                it.periodId in eligiblePeriods && it.type == MovementType.EXPENSE &&
+                    merchantKey(it.merchant) == value && it.localDate <= state.currentLocalDate
+            }
+        }
         val inProgress = periodId == state.currentPeriod?.id
         return state.periodMovements(periodId).filter { movement ->
             when (kind) {
@@ -22,6 +30,7 @@ data class MovementDrill(val periodId: String, val kind: Kind, val value: String
                     (!inProgress || movement.localDate <= state.currentLocalDate)
                 Kind.DAY -> movement.localDate.toString() == value
                 Kind.PAYMENT_METHOD -> movement.paymentMethodId == value
+                Kind.MERCHANT_HISTORY -> false
             }
         }
     }
@@ -38,6 +47,7 @@ data class MovementDrill(val periodId: String, val kind: Kind, val value: String
 
     companion object {
         fun merchant(periodId: String, key: String) = MovementDrill(periodId, Kind.MERCHANT, key)
+        fun merchantHistory(periodId: String, key: String) = MovementDrill(periodId, Kind.MERCHANT_HISTORY, key)
         fun weekday(periodId: String, day: DayOfWeek) = MovementDrill(periodId, Kind.WEEKDAY, day.value.toString())
         fun day(periodId: String, date: LocalDate) = MovementDrill(periodId, Kind.DAY, date.toString())
 

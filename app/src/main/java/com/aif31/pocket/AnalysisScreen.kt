@@ -35,6 +35,7 @@ import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.data.MerchantSpend
 import com.aif31.pocket.data.MovementDrill
 import com.aif31.pocket.data.PeriodInsights
+import com.aif31.pocket.data.RecurringCharges
 import com.aif31.pocket.data.SpendingAnalysis
 import com.aif31.pocket.data.medianMinor
 import com.aif31.pocket.domain.SupportedCurrency
@@ -59,6 +60,7 @@ import kotlin.math.abs
 private const val TOP_MERCHANTS = 8
 private val monthLabel = DateTimeFormatter.ofPattern("MMM", Locale.forLanguageTag("es"))
 private val dayTitle = DateTimeFormatter.ofPattern("EEEE d MMM", Locale.forLanguageTag("es"))
+private val recurringDate = DateTimeFormatter.ofPattern("d MMM", Locale.forLanguageTag("es"))
 
 /**
  * Breakdowns of one budget period: how daily spending trends across periods, where and when the money went, how it
@@ -74,6 +76,9 @@ internal fun AnalysisScreen(
     onOpenMovements: (drill: MovementDrill, title: String) -> Unit = { _, _ -> },
 ) {
     val analysis = remember(state, periodId) { SpendingAnalysis.of(state, periodId) }
+    val recurring = remember(state, periodId) {
+        if (periodId == state.currentPeriod?.id) RecurringCharges.of(state, periodId) else null
+    }
     Scaffold(topBar = { PocketTopAppBar(title = "Análisis del periodo", onNavigateBack = onBack) }) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding).testTag("analysis_list"),
@@ -94,6 +99,30 @@ internal fun AnalysisScreen(
             if (analysis == null) return@LazyColumn
             val currency = analysis.period.accountingCurrency
             item { Section("Tendencia del gasto diario", bounded) { TrendSection(analysis, currency, onPeriodChange) } }
+            recurring?.let { charges ->
+                item {
+                    Section("Cargos recurrentes", bounded) {
+                        if (charges.items.isEmpty()) Muted("No hay cargos recurrentes pendientes detectados.")
+                        charges.items.forEach { charge ->
+                            Column(
+                                Modifier.fillMaxWidth().opensMovements {
+                                    onOpenMovements(MovementDrill.merchantHistory(periodId, charge.merchantKey), charge.merchantName)
+                                }.padding(vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Text(charge.merchantName, style = MaterialTheme.typography.bodyLarge)
+                                Muted(charge.pocketName)
+                                Text(
+                                    "Esperado el ${charge.expectedDate.format(recurringDate)} · ${MoneyText.format(charge.expectedAmountMinor, currency)}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                if (charge.overdue) Text("Vencido", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                        Text("Faltan por cobrarse: ${MoneyText.format(charges.totalExpectedMinor, currency)}", style = MaterialTheme.typography.titleSmall)
+                    }
+                }
+            }
             item { Section("Comercios principales", bounded) { MerchantSection(analysis, currency, onOpenMovements) } }
             item { Section("Cuándo gastas", bounded) { WhenSection(analysis, currency, onOpenMovements) } }
             item { Section("Métodos de pago", bounded) { PaymentMethodSection(analysis, currency, onOpenMovements) } }

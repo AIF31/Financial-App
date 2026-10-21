@@ -76,6 +76,7 @@ import com.aif31.pocket.data.budgetStatusAt
 import com.aif31.pocket.data.PeriodComparison
 import com.aif31.pocket.data.PeriodInsights
 import com.aif31.pocket.data.PeriodRecap
+import com.aif31.pocket.data.RecurringCharges
 import com.aif31.pocket.data.PocketPeriodSummary
 import com.aif31.pocket.domain.SupportedCurrency
 
@@ -184,6 +185,7 @@ internal fun ActionableDashboardContent(
                 comparison = comparison,
                 accountingCurrency = accountingCurrency,
                 onComparePeriods = onComparePeriods,
+                onOpenAnalysis = onOpenAnalysis,
                 modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
             )
         }
@@ -274,6 +276,7 @@ private fun AvailabilityHero(
     comparison: PeriodComparison?,
     accountingCurrency: SupportedCurrency,
     onComparePeriods: () -> Unit,
+    onOpenAnalysis: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var detailsExpanded by rememberSaveable { mutableStateOf(false) }
@@ -322,7 +325,7 @@ private fun AvailabilityHero(
                     enter = expandVertically() + fadeIn(),
                     exit = shrinkVertically() + fadeOut(),
                 ) {
-                    HeroDetails(state, insights, comparison, onComparePeriods)
+                    HeroDetails(state, insights, comparison, onComparePeriods, onOpenAnalysis)
                 }
             }
         }
@@ -335,11 +338,13 @@ private fun HeroDetails(
     insights: PeriodInsights,
     comparison: PeriodComparison?,
     onComparePeriods: () -> Unit,
+    onOpenAnalysis: (String) -> Unit,
 ) {
     val currency = insights.accountingCurrency
     fun money(minor: Long) = MoneyText.format(minor, currency)
     val onPrimary = MaterialTheme.colorScheme.onPrimary
     val muted = onPrimary.copy(alpha = 0.8f)
+    val recurring = remember(state, insights.period.id) { RecurringCharges.of(state, insights.period.id) }
     Column(Modifier.padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("Ritmo de gasto", style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
         SpendPaceMetrics(
@@ -348,6 +353,19 @@ private fun HeroDetails(
             supportingColor = muted,
             barColor = onPrimary,
             trackColor = onPrimary.copy(alpha = 0.2f),
+            afterProjectionContent = {
+                if (recurring.items.isNotEmpty()) {
+                    Text(
+                        "Cargos recurrentes pendientes: ${money(recurring.totalExpectedMinor)} (${recurring.items.size})",
+                        color = onPrimary,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                            .clip(MaterialTheme.shapes.small)
+                            .clickable(onClickLabel = "Ver análisis del periodo", role = Role.Button) { onOpenAnalysis(insights.period.id) }
+                            .padding(vertical = 8.dp),
+                    )
+                }
+            },
         )
         Spacer(Modifier.height(4.dp))
         Text("Frente al periodo anterior", style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })

@@ -76,6 +76,10 @@ _Avoid_: Bank sync, automatic categorization
 The Pocket of the most recent expense whose merchant matches after ignoring case and punctuation. It is derived from existing Movements and is not stored separately. Changing a merchant’s Pocket in Settings moves its most recent expense to that Pocket, which also directs future automatic records there.
 _Avoid_: Rule, category mapping
 
+**Recurring charge**:
+A detected expectation of a merchant's next expense, derived from regular dates and stable amounts in existing Movements using the same accounting currency. It is not stored and never records a Movement automatically. It is distinct from `RecurringTemplate`, a shortcut that prefills a movement form.
+_Avoid_: Subscription billing, scheduled expense, Recurring template
+
 **Budget suggestion**:
 A proposed Pocket budget: the median net spend of up to three recent ended periods in the same accounting currency, each scaled to the target period's length and rounded up to a whole unit. A Pocket with no spending to go on gets no suggestion. Applying suggestions replaces the chosen budgets in one step and only when their total fits the period's new funds.
 _Avoid_: Automatic budget, forecast

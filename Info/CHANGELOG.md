@@ -4,6 +4,14 @@ Notable repository changes are recorded here for future maintainers.
 
 ## 2026-10-21
 
+Stacked on PR #45. The development version advances to `1.0.12` (`versionCode` 13). No Room schema or backup-format change.
+
+### Upcoming recurring charges
+
+- **Cargos recurrentes** in the current period's analysis lists expected merchant charges with their latest Pocket, date and amount, marks recent missed charges **Vencido**, and gives **Faltan por cobrarse** as a separate total. The dashboard details show the pending total and occurrence count below the pace projection; tapping opens the current analysis. A charge opens that merchant's past expenses in the same accounting currency through the existing MovementDrill route.
+- Detection uses at least three expenses with consistently monthly (26–35 days) or weekly (6–8 days) gaps and each of the last three amounts within 10% of their median. Dates advance by the median gap, rounded down to a whole day; amounts use the latest expense. All pending weekly occurrences before the exclusive period end count. Once the next charge is more than half a cadence overdue, the merchant is dropped. Refunds and expenses whose period uses another accounting currency are excluded; existing accounting amounts need no new conversion. No Movements, suggestions or persistent records are created. Pace projections, run-out dates and alerts stay separate.
+- Verification on Ubuntu with JDK 17 through the gradle-run wrapper: `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` passed. The 382 tests in 47 suites had no failures, errors or skips. Lint retains the same 26 advisory warnings, with no new issues in changed files. Sixteen new data tests cover monthly and weekly detection, gap and amount rejection, currency exclusion, paid cycles, overdue limits, refunds, exact totals and merchant history; two host tests cover the dashboard → analysis → past-charges flow, the overdue word, unchanged Movements and suggestions, and absence from historical analysis. Tests first failed on the missing detector, then on weekly, stability and expiry rules; the host tests failed on the missing section and dashboard line before UI implementation. `graphify update .` completed. No physical-device or TalkBack check was run.
+
 ### Manage merchant memory
 
 - **Memoria de comercios** in Ajustes lists each merchant’s remembered Pocket, latest expense with its period’s accounting currency, and expense count. Case and punctuation variants share one entry; refunds never decide memory. Archived Pockets are labelled **Pocket archivado · no se registra automáticamente**.
