@@ -21,7 +21,7 @@ data class RecurringCharge(
 
 /** Derived expectations only: this module never records a Movement or a suggestion. */
 data class RecurringCharges(val items: List<RecurringCharge>) {
-    val totalExpectedMinor: Long = items.map { it.expectedAmountMinor }.sumMoneyExact()
+    val totalExpectedMinor: Long? = runCatching { items.map { it.expectedAmountMinor }.sumMoneyExact() }.getOrNull()
 
     companion object {
         fun of(state: LedgerState, periodId: String): RecurringCharges {
@@ -45,11 +45,11 @@ data class RecurringCharges(val items: List<RecurringCharge>) {
                 val gap = medianMinor(gaps)!!
                 val latest = ordered.last()
                 var expected = latest.localDate.plusDays(gap)
-                // Do not perpetually invent future dates after the first missed charge suggests the merchant ended.
-                if (ChronoUnit.DAYS.between(expected, state.currentLocalDate) > gap / 2) return@flatMap emptyList()
+                // Two consecutive expired expectations indicate the merchant has ended.
+                if (ChronoUnit.DAYS.between(expected.plusDays(gap), state.currentLocalDate) > gap / 2) return@flatMap emptyList()
                 buildList {
                     while (expected < period.endExclusive) {
-                        if (expected >= period.start) {
+                        if (expected >= period.start && ChronoUnit.DAYS.between(expected, state.currentLocalDate) <= gap / 2) {
                             add(RecurringCharge(
                                 key, latest.merchant!!, latest.pocketId, latest.pocketName, expected, latest.accountingAmountMinor,
                                 cadence, charges.size, expected < state.currentLocalDate,

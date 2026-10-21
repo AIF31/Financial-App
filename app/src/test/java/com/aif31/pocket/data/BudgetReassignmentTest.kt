@@ -40,6 +40,17 @@ class BudgetReassignmentTest {
         assertEquals(700L, BudgetReassignment.of(state, period.id, "target")!!.neededMinor)
     }
 
+    @Test fun forecast_keeps_fractional_daily_pace_until_the_whole_unit_ceiling() {
+        val target = summary("target", 2_419, 1_410)
+        val state = state(target).copy(movements = listOf(
+            movement("a", "target", LocalDate.of(2026, 3, 2), 500),
+            movement("b", "target", LocalDate.of(2026, 3, 3), 509),
+        ))
+
+        // 1,009 × 21 / 10 − 1,410 = 708.9 minor, rounded up once to 800.
+        assertEquals(800L, BudgetReassignment.of(state, period.id, "target")!!.neededMinor)
+    }
+
     @Test fun only_current_active_targets_that_need_covering_are_offered() {
         val target = summary("target", 1_000, -235)
         assertNull(BudgetReassignment.of(state(target).copy(currentPeriod = null), period.id, "target"))

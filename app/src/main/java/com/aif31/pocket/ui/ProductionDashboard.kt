@@ -354,9 +354,10 @@ private fun HeroDetails(
             barColor = onPrimary,
             trackColor = onPrimary.copy(alpha = 0.2f),
             afterProjectionContent = {
-                if (recurring.items.isNotEmpty()) {
+                val recurringTotal = recurring.totalExpectedMinor
+                if (recurring.items.isNotEmpty() && recurringTotal != null) {
                     Text(
-                        "Cargos recurrentes pendientes: ${money(recurring.totalExpectedMinor)} (${recurring.items.size})",
+                        "Cargos recurrentes pendientes: ${money(recurringTotal)} (${recurring.items.size})",
                         color = onPrimary,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)

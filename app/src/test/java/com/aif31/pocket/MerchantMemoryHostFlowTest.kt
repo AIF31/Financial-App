@@ -1,7 +1,16 @@
 package com.aif31.pocket
 
 import android.content.Context
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasTestTag
@@ -11,12 +20,16 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.aif31.pocket.data.FinanceDatabase
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.MovementType
+import com.aif31.pocket.data.PocketLedger
 import com.aif31.pocket.data.RoomPocketLedger
 import java.time.Clock
 import java.time.Instant
@@ -72,7 +85,10 @@ class MerchantMemoryHostFlowTest {
         compose.onNodeWithTag("merchant_memory_tamimi").assertTextContains(pockets[0].name)
         compose.onNodeWithTag("merchant_memory_tamimi").performClick()
         compose.onNodeWithText("Se moverá este gasto al Pocket que elijas. Los futuros registros automáticos de este comercio irán allí.").assertExists()
-        compose.onNodeWithTag("merchant_memory_pocket_${pockets[1].id}").performClick()
+        compose.onNodeWithTag("merchant_memory_pocket_${pockets[1].id}")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
         compose.onNodeWithTag("merchant_memory_confirm").performClick()
         compose.waitUntilDoesNotExist(hasTestTag("merchant_memory_confirm"), 5_000)
         compose.onNodeWithTag("merchant_memory_tamimi").assertTextContains(pockets[1].name)
@@ -82,5 +98,32 @@ class MerchantMemoryHostFlowTest {
     @Test fun settings_shows_the_empty_memory_state() {
         openMemory()
         compose.onNodeWithText("Aún no hay comercios. Aparecen cuando registras un gasto con comercio.").assertExists()
+    }
+
+    @Test fun large_font_dialog_can_scroll_the_explanation_choices_and_rejection_into_view() {
+        val state = runBlocking {
+            val before = ledger.state.first()
+            assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.AddMovement(
+                pocketId = before.pocketCatalog.first().id, type = MovementType.EXPENSE, accountingAmountMinor = 1_875,
+                occurredAtUtcMillis = instant.toEpochMilli(), localDate = instant.atZone(zone).toLocalDate(), merchant = "Tamimi",
+            )))
+            ledger.state.first()
+        }
+        val rejectingLedger = object : PocketLedger by ledger {
+            override suspend fun execute(command: LedgerCommand): LedgerResult = LedgerResult.Rejected("El gasto cambió; revisa sus datos.")
+        }
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale = 2f)) {
+                MerchantMemorySettings(state, rejectingLedger, PaddingValues(), null, {})
+            }
+        }
+        compose.onNodeWithTag("merchant_memory_tamimi").performClick()
+        compose.onNodeWithText("Se moverá este gasto al Pocket que elijas. Los futuros registros automáticos de este comercio irán allí.")
+            .performScrollTo().assertIsDisplayed()
+        val lastPocket = state.pockets.last().pocket
+        compose.onNodeWithTag("merchant_memory_pocket_${lastPocket.id}").performScrollTo().performClick()
+        compose.onNodeWithTag("merchant_memory_confirm").performClick()
+        compose.waitUntilExactlyOneExists(hasText("El gasto cambió; revisa sus datos."), 5_000)
+        compose.onNodeWithTag("merchant_memory_error", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
     }
 }

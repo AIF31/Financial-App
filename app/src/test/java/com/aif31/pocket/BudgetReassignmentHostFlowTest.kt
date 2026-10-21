@@ -1,7 +1,12 @@
 package com.aif31.pocket
 
 import android.content.Context
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
@@ -12,6 +17,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.MediumTest
@@ -72,7 +79,10 @@ class BudgetReassignmentHostFlowTest {
         compose.onNodeWithTag("pockets_list").performScrollToNode(hasContentDescription("Gestionar Supermercado"))
         compose.onNodeWithContentDescription("Gestionar Supermercado").performClick()
         compose.onNodeWithTag("cover_pocket").performClick()
-        compose.onNodeWithText("Restaurantes", substring = true).performClick()
+        compose.onNodeWithText("Restaurantes", substring = true)
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
         compose.onNodeWithTag("confirm_budget_reassignment").performClick()
         compose.waitUntilDoesNotExist(hasTestTag("confirm_budget_reassignment"), 5_000)
 
@@ -80,5 +90,21 @@ class BudgetReassignmentHostFlowTest {
         assertEquals(0L, state.pockets.single { it.pocket.id == targetId }.availabilityMinor)
         assertEquals(87_500L, state.pockets.single { it.pocket.id == donorId }.budgetMinor)
         assertTrue(state.pockets.sumOf { it.budgetMinor } <= state.currentPeriod!!.newFundsMinor)
+    }
+
+    @Test fun invalid_amount_is_announced_on_the_field_and_clears_when_edited() {
+        val state = runBlocking { ledger.state.first() }
+        compose.setContent {
+            BudgetReassignmentDialog(state, state.currentPeriod!!.id, targetId, ledger, state.currentPeriod.accountingCurrency, {}, {})
+        }
+        compose.onNodeWithTag("reassignment_amount").performTextReplacement("abc")
+        compose.onNodeWithTag("confirm_budget_reassignment").performClick()
+        compose.onNodeWithTag("reassignment_amount")
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Error))
+        compose.onNodeWithText("Escribe un importe válido").assertExists()
+
+        compose.onNodeWithTag("reassignment_amount").performTextReplacement("25")
+        compose.onNodeWithTag("reassignment_amount")
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Error))
     }
 }

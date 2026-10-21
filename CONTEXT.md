@@ -33,7 +33,7 @@ The portion of a period's new funds assigned to a Pocket. Pocket budgets across 
 _Avoid_: Expense, transfer
 
 **Budget reassignment**:
-An increase to one Pocket's budget covered by a decrease to another Pocket's budget or by unassigned funds in the same budget period. It changes neither Movements nor rollover.
+An increase to one Pocket's budget covered by a decrease to another Pocket's budget or by unassigned funds in the same budget period. A giving Pocket must be active, with availability left, and neither exhausted, at risk nor forecast to run out. It can give at most the lesser of its availability and budget. Reassignment changes neither Movements nor rollover.
 _Avoid_: Transfer
 
 **Rollover**:
@@ -77,7 +77,7 @@ The Pocket of the most recent expense whose merchant matches after ignoring case
 _Avoid_: Rule, category mapping
 
 **Recurring charge**:
-A detected expectation of a merchant's next expense, derived from regular dates and stable amounts in existing Movements using the same accounting currency. It is not stored and never records a Movement automatically. It is distinct from `RecurringTemplate`, a shortcut that prefills a movement form.
+A detected expectation of a merchant's next expense, derived from regular dates and stable amounts in existing Movements using the same accounting currency. Each expected occurrence is overdue for at most half a cadence, then drops from the list; later occurrences remain expected. After two consecutive expected occurrences pass that window without a charge, the merchant is treated as ended and no occurrences are listed. It is not stored and never records a Movement automatically. It is distinct from `RecurringTemplate`, a shortcut that prefills a movement form.
 _Avoid_: Subscription billing, scheduled expense, Recurring template
 
 **Budget suggestion**:

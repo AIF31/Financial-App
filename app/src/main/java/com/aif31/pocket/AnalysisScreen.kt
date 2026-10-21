@@ -119,7 +119,9 @@ internal fun AnalysisScreen(
                                 if (charge.overdue) Text("Vencido", style = MaterialTheme.typography.labelMedium)
                             }
                         }
-                        Text("Faltan por cobrarse: ${MoneyText.format(charges.totalExpectedMinor, currency)}", style = MaterialTheme.typography.titleSmall)
+                        charges.totalExpectedMinor?.let { total ->
+                            Text("Faltan por cobrarse: ${MoneyText.format(total, currency)}", style = MaterialTheme.typography.titleSmall)
+                        }
                     }
                 }
             }

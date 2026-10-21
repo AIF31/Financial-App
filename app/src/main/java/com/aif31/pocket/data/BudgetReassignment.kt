@@ -50,11 +50,12 @@ object BudgetReassignment {
     }
 
     private fun forecastShortfall(target: PocketPeriodSummary, insights: PeriodInsights): Long? = runCatching {
-        // Match run-out dates' integer daily pace. Later-dated spending already reduces availability.
-        val dailyPace = insights.pocketNetSpendThroughTodayMinor(target.pocket.id) / insights.elapsedDays
-        val shortfall = Math.subtractExact(Math.multiplyExact(dailyPace, insights.remainingDays.toLong()), target.availabilityMinor)
-        shortfall.takeIf { it > 0 }?.let {
-            BigDecimal.valueOf(it).divide(BigDecimal.valueOf(100), 0, RoundingMode.CEILING)
+        val elapsedDays = BigDecimal.valueOf(insights.elapsedDays.toLong())
+        val shortfallNumerator = BigDecimal.valueOf(insights.pocketNetSpendThroughTodayMinor(target.pocket.id))
+            .multiply(BigDecimal.valueOf(insights.remainingDays.toLong()))
+            .subtract(BigDecimal.valueOf(target.availabilityMinor).multiply(elapsedDays))
+        shortfallNumerator.takeIf { it.signum() > 0 }?.let {
+            it.divide(elapsedDays.multiply(BigDecimal.valueOf(100)), 0, RoundingMode.CEILING)
                 .multiply(BigDecimal.valueOf(100)).longValueExact()
         }
     }.getOrNull()

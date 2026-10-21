@@ -3,7 +3,9 @@ package com.aif31.pocket
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -11,7 +13,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -19,6 +20,7 @@ import com.aif31.pocket.data.*
 import com.aif31.pocket.ui.MoneyText
 import com.aif31.pocket.ui.PocketTopAppBar
 import com.aif31.pocket.ui.SettingsSection
+import com.aif31.pocket.ui.SelectableRadioRow
 import com.aif31.pocket.ui.counted
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -144,21 +146,19 @@ private fun MerchantMemoryDialog(
         onDismissRequest = onDismiss,
         title = { Text(entry.displayName) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(latestExpenseText(entry))
                 Text("Se moverá este gasto al Pocket que elijas. Los futuros registros automáticos de este comercio irán allí.")
                 if (choices.isEmpty()) Text("No hay otro Pocket activo en el periodo de este gasto.")
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
-                    items(choices, key = { it.id }) { pocket ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth()
-                                .selectable(pocketId == pocket.id, enabled = !saving, role = Role.RadioButton) { pocketId = pocket.id }
-                                .testTag("merchant_memory_pocket_${pocket.id}").padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                Column(Modifier.selectableGroup()) {
+                    choices.forEach { pocket ->
+                        SelectableRadioRow(
+                            selected = pocketId == pocket.id,
+                            enabled = !saving,
+                            onClick = { pocketId = pocket.id },
+                            modifier = Modifier.testTag("merchant_memory_pocket_${pocket.id}"),
                         ) {
-                            RadioButton(selected = pocketId == pocket.id, onClick = null, enabled = !saving)
-                            Text(pocket.name, modifier = Modifier.weight(1f))
+                            Text(pocket.name)
                         }
                     }
                 }

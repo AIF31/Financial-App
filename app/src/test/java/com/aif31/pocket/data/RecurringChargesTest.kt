@@ -4,6 +4,7 @@ import com.aif31.pocket.domain.SupportedCurrency
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -99,13 +100,40 @@ class RecurringChargesTest {
     }
 
     @Test
-    fun overdue_charges_are_kept_through_half_a_cadence_then_the_merchant_is_dropped() {
+    fun a_monthly_occurrence_expires_after_half_a_cadence() {
         assertTrue(RecurringCharges.of(state(monthly(), "2026-03-30"), current.id).items.single().overdue)
         assertTrue(RecurringCharges.of(state(monthly(), "2026-03-31"), current.id).items.isEmpty())
+    }
+
+    @Test
+    fun a_recently_missed_weekly_occurrence_is_marked_overdue() {
         val weeklyResult = RecurringCharges.of(state(weekly(), "2026-03-04"), current.id)
         assertTrue(weeklyResult.items.first().overdue)
         assertFalse(weeklyResult.items[1].overdue)
-        assertTrue(RecurringCharges.of(state(weekly(), "2026-03-05"), current.id).items.isEmpty())
+    }
+
+    @Test
+    fun one_expired_weekly_occurrence_does_not_drop_later_occurrences() {
+        val period = current.copy(start = date("2026-02-25"))
+        val ledger = state(weekly(), "2026-03-05").copy(
+            periods = listOf(history.copy(endExclusive = period.start), period), currentPeriod = period,
+        )
+
+        val result = RecurringCharges.of(ledger, period.id)
+
+        assertEquals(listOf("2026-03-08", "2026-03-15", "2026-03-22", "2026-03-29").map(::date), result.items.map { it.expectedDate })
+        assertTrue(result.items.none { it.overdue })
+        assertEquals(4_000L, result.totalExpectedMinor)
+    }
+
+    @Test
+    fun two_consecutive_expired_occurrences_end_the_merchant_forecast() {
+        val stillExpected = RecurringCharges.of(state(weekly(), "2026-03-11"), current.id)
+        assertEquals(date("2026-03-08"), stillExpected.items.first().expectedDate)
+        assertTrue(stillExpected.items.first().overdue)
+
+        assertTrue(RecurringCharges.of(state(weekly(), "2026-03-12"), current.id).items.isEmpty())
+        assertTrue(RecurringCharges.of(state(weekly(), "2026-03-20"), current.id).items.isEmpty())
     }
 
     @Test
@@ -121,10 +149,17 @@ class RecurringChargesTest {
         assertEquals(2_764L, RecurringCharges.of(state(charges, "2026-03-01"), current.id).totalExpectedMinor)
     }
 
-    @Test(expected = ArithmeticException::class)
-    fun totals_never_wrap_when_expectations_exceed_the_money_range() {
-        RecurringCharges.of(state(monthly().map { it.copy(accountingAmountMinor = Long.MAX_VALUE) } +
+    @Test
+    fun an_unrepresentable_total_is_absent_without_losing_individual_expectations() {
+        val result = RecurringCharges.of(state(monthly().map { it.copy(accountingAmountMinor = Long.MAX_VALUE) } +
             monthly().map { it.copy(merchant = "Other", accountingAmountMinor = 1) }), current.id)
+        assertNull(result.totalExpectedMinor)
+        assertEquals(2, result.items.size)
+
+        val weeklyResult = RecurringCharges.of(state(weekly().map { it.copy(accountingAmountMinor = Long.MAX_VALUE) }), current.id)
+        assertNull(weeklyResult.totalExpectedMinor)
+        assertEquals(4, weeklyResult.items.size)
+        assertTrue(weeklyResult.items.all { it.expectedAmountMinor == Long.MAX_VALUE })
     }
 
     @Test
