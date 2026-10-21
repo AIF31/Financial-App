@@ -660,6 +660,20 @@ private fun PocketManagementDialog(
         )
         return
     }
+    var covering by rememberSaveable(summary.pocket.id, periodId) { mutableStateOf(false) }
+    val reassignment = remember(state, periodId, summary.pocket.id) { BudgetReassignment.of(state, periodId, summary.pocket.id) }
+    if (covering) {
+        BudgetReassignmentDialog(
+            state = state,
+            periodId = periodId,
+            targetPocketId = summary.pocket.id,
+            ledger = ledger,
+            currency = currency,
+            onDismiss = { covering = false },
+            onCovered = onDismiss,
+        )
+        return
+    }
     val initialAmount = if (summary.budgetMinor == 0L) "" else minorNumber(summary.budgetMinor)
     var amount by rememberSaveable(summary.pocket.id, periodId, stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(initialAmount))
@@ -683,6 +697,12 @@ private fun PocketManagementDialog(
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Gestiona el presupuesto y las opciones de este Pocket sin saturar la vista general.")
+                if (reassignment != null) {
+                    OutlinedButton(
+                        onClick = { covering = true },
+                        modifier = Modifier.fillMaxWidth().testTag("cover_pocket"),
+                    ) { Text("Cubrir con otro Pocket") }
+                }
                 OutlinedTextField(
                     value = amount,
                     onValueChange = { amount = it; error = null },

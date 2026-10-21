@@ -32,6 +32,10 @@ _Avoid_: Live rate, reversible rate, unlabeled conversion
 The portion of a period's new funds assigned to a Pocket. Pocket budgets across a period cannot exceed its new funds.
 _Avoid_: Expense, transfer
 
+**Budget reassignment**:
+An increase to one Pocket's budget covered by a decrease to another Pocket's budget or by unassigned funds in the same budget period. It changes neither Movements nor rollover.
+_Avoid_: Transfer
+
 **Rollover**:
 Positive availability carried from an opted-in Pocket into the next period. Negative availability never rolls over.
 _Avoid_: Funds, income

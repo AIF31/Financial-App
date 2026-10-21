@@ -2,6 +2,14 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-10-21
+
+### Cover an overspent Pocket
+
+- **Cubrir con otro Pocket** appears in a current Pocket's management dialog when availability is negative or its status is **Ritmo alto**. The dialog prefills the exact overspending or the remaining pace shortfall rounded up to a whole unit, and lets the person edit it. Unassigned funds come first, followed by active Pockets with the most budget available to give. Archived, retired, exhausted, high-pace and 80%-used Pockets cannot donate; a donor's contribution is capped by its own budget so rollover stays in place.
+- Confirmation applies both budgets through one atomic `SetAllocations` command, or raises only the target when using unassigned funds. The source is checked again against the latest ledger state; validation and ledger rejections appear in the dialog. Dashboard Pocket rows still open expense entry, so this adds no dashboard navigation. `CONTEXT.md` defines **Budget reassignment**. No version bump, Room migration or backup-format change.
+- Verification on Ubuntu with JDK 17 through the gradle-run wrapper: `:app:testDebugUnitTest :app:lintDebug` passed. The 354 host tests in 43 suites had no failures, errors or skips; lint reported 26 existing advisory warnings, none in changed files. New tests cover overspending, forecast shortfalls and rounding, source eligibility and rollover caps, unassigned funds, command validation, fully allocated atomic coverage, and the management-dialog flow. The amount and source tests failed before their implementation; the host flow failed at the missing action before the dialog was added. `graphify update .` completed. No physical-device or TalkBack check was run.
+
 ## 2026-10-18
 
 ### Analysis drill-through, budget suggestions, pace alerts, and a period recap

@@ -46,6 +46,31 @@ class SetAllocationsTest {
     }
 
     @Test
+    fun covering_an_overspent_pocket_keeps_the_fully_assigned_total_and_applies_both_budgets() = runTest {
+        val (target, donor) = setUpBudgets(10_000, 90_000)
+        val before = ledger.state.first()
+        val periodId = before.currentPeriod!!.id
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.AddMovement(
+            pocketId = target, type = MovementType.EXPENSE, accountingAmountMinor = 12_500,
+            occurredAtUtcMillis = Instant.parse("2026-02-26T08:00:00Z").toEpochMilli(), localDate = before.currentLocalDate,
+        )))
+        val overspent = ledger.state.first()
+        assertEquals(-2_500L, overspent.pockets.single { it.pocket.id == target }.availabilityMinor)
+        val needed = BudgetReassignment.of(overspent, periodId, target)!!.neededMinor!!
+
+        val command = BudgetReassignment.command(overspent, periodId, target, donor, needed)
+        assertEquals(LedgerResult.Success, ledger.execute(command))
+
+        val covered = ledger.state.first()
+        assertEquals(12_500L, covered.pockets.single { it.pocket.id == target }.budgetMinor)
+        assertEquals(87_500L, covered.pockets.single { it.pocket.id == donor }.budgetMinor)
+        assertEquals(0L, covered.pockets.single { it.pocket.id == target }.availabilityMinor)
+        assertEquals(100_000L, covered.pockets.sumOf { it.budgetMinor })
+        assertTrue(covered.pockets.sumOf { it.budgetMinor } <= covered.currentPeriod!!.newFundsMinor)
+        assertEquals(0L, covered.unallocatedMinor)
+    }
+
+    @Test
     fun budgets_change_together_even_when_one_at_a_time_would_exceed_new_funds() = runTest {
         val (a, b) = setUpBudgets(60_000, 30_000)
         val periodId = ledger.state.first().currentPeriod!!.id
