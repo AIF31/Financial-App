@@ -88,6 +88,10 @@ _Avoid_: Automatic budget, forecast
 A notification that a Pocket is forecast to run out before the period ends, has reached 80% of its budget, or has no availability left. Each level alerts once per Pocket and period, and only after auto-recording; levels reached through changes made in the app count as seen. When a payment is auto-recorded while the app is open, the alert may or may not post, depending on which check runs first.
 _Avoid_: Budget warning, reminder
 
+**Rate alert**:
+An opt-in notification of the latest Banxico FIX for one chosen pair of MXN against USD or SAR, with SAR derived through the SAMA peg. It also gives the change from the previous FIX and the average of every FIX dated in the seven days ending on the latest one. It posts daily, weekly on a chosen day, or only for a FIX not yet alerted, at a chosen `Asia/Riyadh` time, and requires online conversion. An optional minimum rate holds it back until 1 unit of the first currency buys at least that much of the second. It never changes a Movement or a currency boundary quote.
+_Avoid_: Live rate, rate tracker, Pace alert
+
 **Experimental notification parser**:
 An opt-in beta parser for English and Spanish notifications from user-selected apps. It is generic, is tested with synthetic notifications, and makes no claim of supporting a particular bank.
 _Avoid_: Bank integration, transaction feed

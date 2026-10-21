@@ -51,7 +51,7 @@ class DefaultExchangeRateRepository(
             effectiveDate = requestedDate,
             base = SupportedCurrency.USD,
             quote = SupportedCurrency.SAR,
-            rate = "3.75",
+            rate = canonicalRate(SAMA_SAR_PER_USD),
             source = "SAMA_PARITY",
         )
         return when (base to quote) {

@@ -8,23 +8,39 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.CurrencyBoundary
 import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.fx.FxQuote
+import com.aif31.pocket.settings.FxRateAlertFrequency
+import com.aif31.pocket.settings.FxRateAlertSettings
+import com.aif31.pocket.settings.ReminderStatus
 import com.aif31.pocket.ui.ChoiceOption
 import com.aif31.pocket.ui.SegmentedChoice
 import com.aif31.pocket.ui.SingleChoiceChips
+import com.aif31.pocket.ui.TimeOfDayPickerDialog
+import java.math.BigDecimal
+import java.time.DayOfWeek
+import java.time.format.TextStyle
+import java.util.Locale
 
 internal sealed interface CurrencyQuoteState {
     data object Idle : CurrencyQuoteState
@@ -40,6 +56,12 @@ internal data class CurrencySettingsUiState(
     val targetCurrency: SupportedCurrency? = null,
     val quoteState: CurrencyQuoteState = CurrencyQuoteState.Idle,
     val pendingChange: CurrencyBoundary? = null,
+    val fxRateAlert: FxRateAlertUiState = FxRateAlertUiState(),
+)
+
+internal data class FxRateAlertUiState(
+    val settings: FxRateAlertSettings = FxRateAlertSettings(),
+    val status: ReminderStatus = ReminderStatus.Off,
 )
 
 @Composable
@@ -53,6 +75,9 @@ internal fun CurrencySettingsContent(
     onCancelQuote: () -> Unit = {},
     onConfirmTransition: () -> Unit = {},
     onCancelPendingTransition: () -> Unit = {},
+    onFxRateAlertChange: (FxRateAlertSettings) -> Unit = {},
+    onRetryFxRateAlert: () -> Unit = {},
+    onRequestNotificationPermission: () -> Unit = {},
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().testTag("currency_settings_list"),
@@ -144,5 +169,163 @@ internal fun CurrencySettingsContent(
                 }
             }
         }
+        item {
+            FxRateAlertCard(
+                state = state.fxRateAlert,
+                onlineFxEnabled = state.onlineFxEnabled,
+                onChange = onFxRateAlertChange,
+                onRetry = onRetryFxRateAlert,
+                onRequestNotificationPermission = onRequestNotificationPermission,
+            )
+        }
     }
 }
+
+@Composable
+private fun FxRateAlertCard(
+    state: FxRateAlertUiState,
+    onlineFxEnabled: Boolean,
+    onChange: (FxRateAlertSettings) -> Unit,
+    onRetry: () -> Unit,
+    onRequestNotificationPermission: () -> Unit,
+) {
+    val settings = state.settings
+    var pickerVisible by rememberSaveable { mutableStateOf(false) }
+    var minimum by rememberSaveable(settings.minimumRate) { mutableStateOf(settings.minimumRate?.toPlainString().orEmpty()) }
+    var minimumError by rememberSaveable { mutableStateOf<String?>(null) }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Aviso de tipo de cambio", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        when {
+                            !onlineFxEnabled -> if (settings.enabled) "En pausa · activa la conversión en línea" else "Requiere la conversión en línea"
+                            else -> when (state.status) {
+                                ReminderStatus.Off -> "Desactivado"
+                                ReminderStatus.PermissionRequired -> "Permiso necesario"
+                                ReminderStatus.Scheduled -> "Programado · ${scheduleText(settings)}"
+                                ReminderStatus.Failed -> "No se pudo programar"
+                            }
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("fx_rate_alert_status"),
+                    )
+                }
+                Switch(
+                    checked = settings.enabled,
+                    onCheckedChange = { onChange(settings.copy(enabled = it)) },
+                    // Turning it off stays possible after online conversion is withdrawn.
+                    enabled = onlineFxEnabled || settings.enabled,
+                    modifier = Modifier.testTag("fx_rate_alert_switch"),
+                )
+            }
+            Text(
+                "Muestra el FIX de Banxico en la moneda elegida, su cambio frente al FIX anterior y el promedio de los últimos 7 días.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (onlineFxEnabled && settings.enabled && state.status == ReminderStatus.PermissionRequired) {
+                Button(onClick = onRequestNotificationPermission) { Text("Permitir notificaciones") }
+            }
+            if (onlineFxEnabled && settings.enabled && state.status == ReminderStatus.Failed) {
+                Text("Comprueba los ajustes de notificaciones y vuelve a intentarlo.")
+                TextButton(onClick = onRetry) { Text("Reintentar") }
+            }
+            Text("Monedas", style = MaterialTheme.typography.titleSmall)
+            SingleChoiceChips(
+                options = FxRateAlertSettings.PAIRS.map { (base, quote) ->
+                    ChoiceOption(base to quote, "${base.name} → ${quote.name}", "fx_rate_alert_pair_${base.name}_${quote.name}")
+                },
+                selected = settings.base to settings.quote,
+                onSelect = { (base, quote) -> onChange(settings.copy(base = base, quote = quote, minimumRate = null)) },
+            )
+            Text("Frecuencia", style = MaterialTheme.typography.titleSmall)
+            SegmentedChoice(
+                options = listOf(
+                    ChoiceOption(FxRateAlertFrequency.DAILY, "Diario", "fx_rate_alert_daily"),
+                    ChoiceOption(FxRateAlertFrequency.NEW_FIX, "FIX nuevo", "fx_rate_alert_new_fix"),
+                    ChoiceOption(FxRateAlertFrequency.WEEKLY, "Semanal", "fx_rate_alert_weekly"),
+                ),
+                selected = settings.frequency,
+                onSelect = { onChange(settings.copy(frequency = it)) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (settings.frequency == FxRateAlertFrequency.WEEKLY) {
+                SingleChoiceChips(
+                    options = DayOfWeek.entries.map { ChoiceOption(it, weekdayText(it), "fx_rate_alert_day_${it.name}") },
+                    selected = settings.weekday,
+                    onSelect = { onChange(settings.copy(weekday = it)) },
+                )
+            }
+            Text(
+                when (settings.frequency) {
+                    FxRateAlertFrequency.DAILY -> "Llega todos los días; los fines de semana y festivos repite el último FIX."
+                    FxRateAlertFrequency.NEW_FIX -> "Llega solo cuando Banxico publica un FIX nuevo, normalmente en días hábiles."
+                    FxRateAlertFrequency.WEEKLY -> "Llega una vez por semana con el último FIX publicado."
+                } + " Un horario de mañana trae el FIX del día hábil anterior.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Hora: ${settings.time} (Asia/Riyadh)")
+                TextButton(onClick = { pickerVisible = true }, modifier = Modifier.testTag("fx_rate_alert_time")) {
+                    Text("Cambiar hora")
+                }
+            }
+            OutlinedTextField(
+                value = minimum,
+                onValueChange = { minimum = it; minimumError = null },
+                label = { Text("Solo si 1 ${settings.base.name} ≥ (${settings.quote.name})") },
+                supportingText = { Text(minimumError ?: "Déjalo vacío para recibirlo con cualquier tipo de cambio.") },
+                isError = minimumError != null,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.fillMaxWidth().testTag("fx_rate_alert_minimum"),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        val text = minimum.trim().replace(',', '.')
+                        val rate = if (text.isEmpty()) null else text.toBigDecimalOrNull()?.takeIf { it > BigDecimal.ZERO }
+                        if (text.isNotEmpty() && rate == null) {
+                            minimumError = "Escribe un tipo de cambio mayor que cero"
+                        } else {
+                            onChange(settings.copy(minimumRate = rate))
+                        }
+                    },
+                    modifier = Modifier.testTag("fx_rate_alert_minimum_save"),
+                ) { Text("Guardar mínimo") }
+                if (settings.minimumRate != null) {
+                    TextButton(onClick = { onChange(settings.copy(minimumRate = null)) }) { Text("Quitar mínimo") }
+                }
+            }
+        }
+    }
+    if (pickerVisible) {
+        TimeOfDayPickerDialog(
+            initial = settings.time,
+            onPicked = { pickerVisible = false; onChange(settings.copy(time = it)) },
+            onDismiss = { pickerVisible = false },
+        )
+    }
+}
+
+private fun scheduleText(settings: FxRateAlertSettings): String = when (settings.frequency) {
+    FxRateAlertFrequency.DAILY -> "a diario a las ${settings.time}"
+    FxRateAlertFrequency.NEW_FIX -> "con cada FIX nuevo, a las ${settings.time}"
+    FxRateAlertFrequency.WEEKLY -> "los ${weekdayText(settings.weekday).lowercase(SPANISH)} a las ${settings.time}"
+}
+
+private fun weekdayText(day: DayOfWeek): String =
+    day.getDisplayName(TextStyle.FULL, SPANISH).replaceFirstChar { it.titlecase(SPANISH) }
+
+private val SPANISH: Locale = Locale.forLanguageTag("es")

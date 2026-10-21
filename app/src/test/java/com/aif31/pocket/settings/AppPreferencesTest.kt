@@ -66,6 +66,52 @@ class AppPreferencesTest {
     }
 
     @Test
+    fun `rate alert defaults to an off daily SAR to MXN alert and its settings round trip`() = runTest {
+        val store = DataStorePreferences(newDataStore("fx-alert.preferences_pb", backgroundScope))
+        assertEquals(FxRateAlertSettings(), store.state.first().fxRateAlert)
+        assertEquals(SupportedCurrency.SAR to SupportedCurrency.MXN, store.state.first().fxRateAlert.let { it.base to it.quote })
+        assertEquals(FxRateAlertFrequency.DAILY, store.state.first().fxRateAlert.frequency)
+
+        val configured = FxRateAlertSettings(
+            enabled = true,
+            time = LocalTime.of(21, 30),
+            base = SupportedCurrency.MXN,
+            quote = SupportedCurrency.USD,
+            frequency = FxRateAlertFrequency.WEEKLY,
+            weekday = java.time.DayOfWeek.FRIDAY,
+            minimumRate = java.math.BigDecimal("0.0525"),
+        )
+        store.setFxRateAlert(configured)
+        assertEquals(configured, store.state.first().fxRateAlert)
+
+        store.setFxRateAlert(configured.copy(minimumRate = null))
+        assertEquals(null, store.state.first().fxRateAlert.minimumRate)
+    }
+
+    @Test
+    fun `unreadable rate alert values fall back to defaults`() = runTest {
+        val dataStore = newDataStore("fx-alert-bad.preferences_pb", backgroundScope)
+        dataStore.edit { values ->
+            values[stringPreferencesKey("fx_rate_alert_base")] = "USD"
+            values[stringPreferencesKey("fx_rate_alert_quote")] = "SAR"
+            values[stringPreferencesKey("fx_rate_alert_frequency")] = "HOURLY"
+            values[stringPreferencesKey("fx_rate_alert_minimum")] = "-1"
+        }
+
+        assertEquals(FxRateAlertSettings(), DataStorePreferences(dataStore).state.first().fxRateAlert)
+    }
+
+    @Test
+    fun `a rate alert slot is claimed once`() = runTest {
+        val store = DataStorePreferences(newDataStore("fx-slot.preferences_pb", backgroundScope))
+
+        assertTrue(store.claimFxRateAlertSlot("day/2026-10-21"))
+        assertFalse(store.claimFxRateAlertSlot("day/2026-10-21"))
+        assertTrue(store.claimFxRateAlertSlot("day/2026-10-22"))
+        assertEquals("day/2026-10-22", store.state.first().fxRateAlertLastSlot)
+    }
+
+    @Test
     fun `missing upgrade keys default to disabled online FX and SAR input`() = runTest {
         val store = DataStorePreferences(newDataStore("upgrade.preferences_pb", backgroundScope))
 

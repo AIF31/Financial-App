@@ -119,6 +119,7 @@ class MainActivity : ComponentActivity() {
                     preferences = (application as PocketApplication).preferences,
                     exchangeRates = (application as PocketApplication).exchangeRates,
                     reminderScheduler = (application as PocketApplication).reminderScheduler,
+                    fxRateAlertScheduler = (application as PocketApplication).fxRateAlertScheduler,
                     newExpenseRequest = newExpenseRequest,
                     restoreCandidate = recovery.restoreCandidate,
                     onRestoreCandidateHandled = recovery::clearRestoreCandidate,

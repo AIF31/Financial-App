@@ -10,6 +10,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.data.PortableSettings
+import java.math.BigDecimal
+import java.time.DayOfWeek
 import java.time.LocalTime
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -31,6 +33,9 @@ data class AppPreferences(
     val paceAlertsSent: Set<String>? = null,
     /** The period whose recap the person closed on the dashboard. */
     val recapDismissedPeriodId: String? = null,
+    val fxRateAlert: FxRateAlertSettings = FxRateAlertSettings(),
+    /** Identifies the last rate alert sent, so one FIX or day never alerts twice. */
+    val fxRateAlertLastSlot: String? = null,
 )
 
 interface PreferencesStore {
@@ -57,6 +62,10 @@ interface PreferencesStore {
     /** Replaces the alerted pace levels with [transform] of the current ones, atomically. */
     suspend fun updatePaceAlertsSent(transform: (Set<String>?) -> Set<String>) {}
     suspend fun dismissRecap(periodId: String) {}
+    suspend fun setFxRateAlert(settings: FxRateAlertSettings) {}
+
+    /** Records [slot] as the last rate alert and returns true, unless it already was, atomically. */
+    suspend fun claimFxRateAlertSlot(slot: String): Boolean = false
 }
 private val Context.pocketPreferences by preferencesDataStore("pocket_preferences")
 
@@ -82,6 +91,8 @@ class DataStorePreferences internal constructor(
             paceAlertsEnabled = values[PACE_ALERTS_ENABLED] ?: true,
             paceAlertsSent = values[PACE_ALERTS_SENT],
             recapDismissedPeriodId = values[RECAP_DISMISSED_PERIOD],
+            fxRateAlert = fxRateAlertSettings(values),
+            fxRateAlertLastSlot = values[FX_RATE_ALERT_LAST_SLOT],
         )
     }
 
@@ -154,6 +165,51 @@ class DataStorePreferences internal constructor(
         dataStore.edit { it[RECAP_DISMISSED_PERIOD] = periodId }
     }
 
+    override suspend fun setFxRateAlert(settings: FxRateAlertSettings) {
+        dataStore.edit {
+            it[FX_RATE_ALERT_ENABLED] = settings.enabled
+            it[FX_RATE_ALERT_HOUR] = settings.time.hour
+            it[FX_RATE_ALERT_MINUTE] = settings.time.minute
+            it[FX_RATE_ALERT_BASE] = settings.base.name
+            it[FX_RATE_ALERT_QUOTE] = settings.quote.name
+            it[FX_RATE_ALERT_FREQUENCY] = settings.frequency.name
+            it[FX_RATE_ALERT_WEEKDAY] = settings.weekday.value
+            settings.minimumRate?.let { rate -> it[FX_RATE_ALERT_MINIMUM] = rate.toPlainString() } ?: it.remove(FX_RATE_ALERT_MINIMUM)
+        }
+    }
+
+    override suspend fun claimFxRateAlertSlot(slot: String): Boolean {
+        var claimed = false
+        dataStore.edit { values ->
+            claimed = values[FX_RATE_ALERT_LAST_SLOT] != slot
+            values[FX_RATE_ALERT_LAST_SLOT] = slot
+        }
+        return claimed
+    }
+
+    /** Stored alert settings; any unreadable value falls back to its default. */
+    private fun fxRateAlertSettings(values: Preferences): FxRateAlertSettings {
+        val defaults = FxRateAlertSettings()
+        fun currency(key: Preferences.Key<String>) = values[key]?.let { runCatching { SupportedCurrency.fromCode(it) }.getOrNull() }
+        val base = currency(FX_RATE_ALERT_BASE) ?: defaults.base
+        val quote = currency(FX_RATE_ALERT_QUOTE) ?: defaults.quote
+        val pairSupported = base to quote in FxRateAlertSettings.PAIRS
+        return FxRateAlertSettings(
+            enabled = values[FX_RATE_ALERT_ENABLED] ?: defaults.enabled,
+            time = runCatching { LocalTime.of(values[FX_RATE_ALERT_HOUR] ?: 9, values[FX_RATE_ALERT_MINUTE] ?: 0) }
+                .getOrDefault(defaults.time),
+            base = if (pairSupported) base else defaults.base,
+            quote = if (pairSupported) quote else defaults.quote,
+            frequency = values[FX_RATE_ALERT_FREQUENCY]
+                ?.let { name -> FxRateAlertFrequency.entries.firstOrNull { it.name == name } }
+                ?: defaults.frequency,
+            weekday = values[FX_RATE_ALERT_WEEKDAY]?.let { runCatching { DayOfWeek.of(it) }.getOrNull() } ?: defaults.weekday,
+            minimumRate = values[FX_RATE_ALERT_MINIMUM]
+                ?.let { runCatching { BigDecimal(it) }.getOrNull() }
+                ?.takeIf { it > BigDecimal.ZERO },
+        )
+    }
+
     private companion object {
         val START_DAY = intPreferencesKey("future_period_start_day")
         val REMINDER_ENABLED = booleanPreferencesKey("reminder_enabled")
@@ -168,6 +224,15 @@ class DataStorePreferences internal constructor(
         val PACE_ALERTS_ENABLED = booleanPreferencesKey("pace_alerts_enabled")
         val PACE_ALERTS_SENT = androidx.datastore.preferences.core.stringSetPreferencesKey("pace_alerts_sent")
         val RECAP_DISMISSED_PERIOD = stringPreferencesKey("recap_dismissed_period")
+        val FX_RATE_ALERT_ENABLED = booleanPreferencesKey("fx_rate_alert_enabled")
+        val FX_RATE_ALERT_HOUR = intPreferencesKey("fx_rate_alert_hour")
+        val FX_RATE_ALERT_MINUTE = intPreferencesKey("fx_rate_alert_minute")
+        val FX_RATE_ALERT_BASE = stringPreferencesKey("fx_rate_alert_base")
+        val FX_RATE_ALERT_QUOTE = stringPreferencesKey("fx_rate_alert_quote")
+        val FX_RATE_ALERT_FREQUENCY = stringPreferencesKey("fx_rate_alert_frequency")
+        val FX_RATE_ALERT_WEEKDAY = intPreferencesKey("fx_rate_alert_weekday")
+        val FX_RATE_ALERT_MINIMUM = stringPreferencesKey("fx_rate_alert_minimum")
+        val FX_RATE_ALERT_LAST_SLOT = stringPreferencesKey("fx_rate_alert_last_slot")
         val NOTIFICATION_SOURCE_PACKAGES = androidx.datastore.preferences.core.stringSetPreferencesKey("notification_source_packages")
     }
 }

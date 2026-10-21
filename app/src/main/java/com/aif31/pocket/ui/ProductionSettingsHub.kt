@@ -52,7 +52,7 @@ internal enum class SettingsSection(
     ),
     CURRENCY(
         "Moneda y conversión",
-        "Moneda contable, cotizaciones y moneda predeterminada para gastos",
+        "Moneda contable, cotizaciones, moneda de gastos y aviso diario del tipo de cambio",
         Icons.Default.CurrencyExchange,
     ),
     REMINDERS(

@@ -54,6 +54,7 @@ internal fun SettingsScreen(
     preferencesStore: PreferencesStore?,
     exchangeRates: ExchangeRateRepository? = null,
     reminderScheduler: ReminderScheduler?,
+    fxRateAlertScheduler: ReminderScheduler? = null,
     onCreateBackup: () -> Unit,
     onShareBackup: () -> Unit = {},
     onCreateCsv: () -> Unit,
@@ -84,6 +85,9 @@ internal fun SettingsScreen(
             preferences = preferences,
             preferencesStore = preferencesStore,
             exchangeRates = exchangeRates,
+            fxRateAlertScheduler = fxRateAlertScheduler,
+            onRequestNotificationPermission = onRequestNotificationPermission,
+            notificationPermissionRevision = notificationPermissionRevision,
             padding = padding,
             onBack = { onSectionChange(null) },
         )
@@ -125,6 +129,9 @@ private fun CurrencySettingsRoute(
     preferences: AppPreferences,
     preferencesStore: PreferencesStore?,
     exchangeRates: ExchangeRateRepository?,
+    fxRateAlertScheduler: ReminderScheduler?,
+    onRequestNotificationPermission: () -> Unit,
+    notificationPermissionRevision: Int,
     padding: PaddingValues,
     onBack: () -> Unit,
 ) {
@@ -139,6 +146,45 @@ private fun CurrencySettingsRoute(
     var quoteState by remember { mutableStateOf<CurrencyQuoteState>(CurrencyQuoteState.Idle) }
     var refreshGeneration by rememberSaveable { mutableIntStateOf(0) }
     var quoteCancelled by rememberSaveable { mutableStateOf(false) }
+    var fxRateAlertStatus by remember { mutableStateOf<ReminderStatus>(ReminderStatus.Off) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    fun refreshFxRateAlertStatus() {
+        scope.launch {
+            fxRateAlertStatus = try {
+                fxRateAlertScheduler?.status(preferences.fxRateAlert.enabled)
+                    ?: if (preferences.fxRateAlert.enabled) ReminderStatus.Failed else ReminderStatus.Off
+            } catch (_: Exception) {
+                ReminderStatus.Failed
+            }
+        }
+    }
+
+    /** Saves [settings]; the schedule is re-anchored only when [reschedule] or its on/off state or time changed. */
+    fun applyFxRateAlert(settings: FxRateAlertSettings, reschedule: Boolean = false) {
+        val current = preferences.fxRateAlert
+        scope.launch {
+            try {
+                preferencesStore?.setFxRateAlert(settings)
+                if (reschedule || settings.enabled != current.enabled || settings.time != current.time) {
+                    fxRateAlertStatus = fxRateAlertScheduler?.applyAndCheck(settings.enabled, settings.time)
+                        ?: if (settings.enabled) ReminderStatus.Failed else ReminderStatus.Off
+                }
+            } catch (_: Exception) {
+                fxRateAlertStatus = ReminderStatus.Failed
+            }
+        }
+    }
+    LaunchedEffect(preferences.fxRateAlert.enabled, preferences.fxRateAlert.time, notificationPermissionRevision) {
+        refreshFxRateAlertStatus()
+    }
+    DisposableEffect(lifecycleOwner, preferences.fxRateAlert.enabled) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refreshFxRateAlertStatus()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(
         currentCurrency,
@@ -188,6 +234,7 @@ private fun CurrencySettingsRoute(
                 targetCurrency = targetCurrency,
                 quoteState = quoteState,
                 pendingChange = state.pendingCurrencyChange?.boundary,
+                fxRateAlert = FxRateAlertUiState(settings = preferences.fxRateAlert, status = fxRateAlertStatus),
             ),
             contentPadding = PaddingValues(16.dp),
             onOnlineFxEnabledChange = { enabled ->
@@ -222,6 +269,9 @@ private fun CurrencySettingsRoute(
             onCancelPendingTransition = {
                 scope.launch { ledger.execute(LedgerCommand.CancelCurrencyChange) }
             },
+            onFxRateAlertChange = { settings -> applyFxRateAlert(settings) },
+            onRetryFxRateAlert = { applyFxRateAlert(preferences.fxRateAlert, reschedule = true) },
+            onRequestNotificationPermission = onRequestNotificationPermission,
         )
     }
 }

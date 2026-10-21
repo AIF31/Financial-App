@@ -12,6 +12,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequest
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkInfo
@@ -36,22 +37,37 @@ interface ReminderScheduler {
     }
 }
 
-class WorkReminderScheduler(private val context: Context) : ReminderScheduler {
+class WorkReminderScheduler(context: Context) : ReminderScheduler by DailyNotificationScheduler(
+    context = context,
+    workName = "daily-spending-review",
+    channelId = CHANNEL_ID,
+    createChannel = ::createReminderChannel,
+    request = { initialDelay ->
+        PeriodicWorkRequestBuilder<ReminderWorker>(24, TimeUnit.HOURS).setInitialDelay(initialDelay).build()
+    },
+)
+
+/**
+ * Runs one unique periodic worker every 24 hours from the next [LocalTime] in Asia/Riyadh, and reports whether it can
+ * deliver: notifications permitted, its channel not blocked, and the work enqueued.
+ */
+internal class DailyNotificationScheduler(
+    private val context: Context,
+    private val workName: String,
+    private val channelId: String,
+    private val createChannel: (Context) -> Unit,
+    private val request: (initialDelay: Duration) -> PeriodicWorkRequest,
+) : ReminderScheduler {
     override fun apply(enabled: Boolean, time: LocalTime) { enqueue(enabled, time) }
 
     private fun enqueue(enabled: Boolean, time: LocalTime): Operation {
         val manager = WorkManager.getInstance(context)
         if (!enabled) {
-            return manager.cancelUniqueWork(WORK_NAME)
+            return manager.cancelUniqueWork(workName)
         }
-        createReminderChannel(context)
-        val now = ZonedDateTime.now(ZoneId.of("Asia/Riyadh"))
-        var next = now.withHour(time.hour).withMinute(time.minute).withSecond(0).withNano(0)
-        if (!next.isAfter(now)) next = next.plusDays(1)
-        val request = PeriodicWorkRequestBuilder<ReminderWorker>(24, TimeUnit.HOURS)
-            .setInitialDelay(Duration.between(now, next))
-            .build()
-        return manager.enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE, request)
+        createChannel(context)
+        val delay = delayUntilNext(time, ZonedDateTime.now(ZoneId.of("Asia/Riyadh")))
+        return manager.enqueueUniquePeriodicWork(workName, ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE, request(delay))
     }
 
     override suspend fun applyAndCheck(enabled: Boolean, time: LocalTime): ReminderStatus = withContext(Dispatchers.IO) {
@@ -61,17 +77,24 @@ class WorkReminderScheduler(private val context: Context) : ReminderScheduler {
 
     override suspend fun status(enabled: Boolean): ReminderStatus = withContext(Dispatchers.IO) {
         if (!enabled) return@withContext ReminderStatus.Off
-        val permissionGranted = NotificationManagerCompat.from(context).areNotificationsEnabled() &&
-            (android.os.Build.VERSION.SDK_INT < 33 ||
-                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
-        val channel = context.getSystemService(NotificationManager::class.java).getNotificationChannel(CHANNEL_ID)
-        val scheduled = WorkManager.getInstance(context).getWorkInfosForUniqueWork(WORK_NAME).get()
+        val channel = context.getSystemService(NotificationManager::class.java).getNotificationChannel(channelId)
+        val scheduled = WorkManager.getInstance(context).getWorkInfosForUniqueWork(workName).get()
             .any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING }
-        resolveReminderStatus(enabled, permissionGranted, channel != null && channel.importance != NotificationManager.IMPORTANCE_NONE, scheduled)
+        resolveReminderStatus(enabled, notificationsPermitted(context), channel != null && channel.importance != NotificationManager.IMPORTANCE_NONE, scheduled)
     }
 
-    private companion object { const val WORK_NAME = "daily-spending-review" }
+    private fun delayUntilNext(time: LocalTime, now: ZonedDateTime): Duration {
+        var next = now.withHour(time.hour).withMinute(time.minute).withSecond(0).withNano(0)
+        if (!next.isAfter(now)) next = next.plusDays(1)
+        return Duration.between(now, next)
+    }
 }
+
+/** Whether the app may post notifications at all: enabled for the app and, on Android 13+, permission granted. */
+internal fun notificationsPermitted(context: Context): Boolean =
+    NotificationManagerCompat.from(context).areNotificationsEnabled() &&
+        (android.os.Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
 
 private const val CHANNEL_ID = "daily-review"
 

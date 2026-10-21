@@ -162,6 +162,7 @@ fun PocketApp(
     preferences: PreferencesStore? = null,
     exchangeRates: ExchangeRateRepository? = null,
     reminderScheduler: ReminderScheduler? = null,
+    fxRateAlertScheduler: ReminderScheduler? = null,
     openNewExpense: Boolean = false,
     /** Increments once per "new expense" launch (shortcut or onNewIntent); each value opens quick entry once. */
     newExpenseRequest: Int = if (openNewExpense) 1 else 0,
@@ -611,6 +612,7 @@ fun PocketApp(
                         preferencesStore = preferences,
                         exchangeRates = exchangeRates,
                         reminderScheduler = reminderScheduler,
+                        fxRateAlertScheduler = fxRateAlertScheduler,
                         onCreateBackup = { requestBackup("create") },
                         onShareBackup = { requestBackup("share") },
                         onCreateCsv = onCreateCsv,

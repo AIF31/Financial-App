@@ -4,6 +4,14 @@ Notable repository changes are recorded here for future maintainers.
 
 ## 2026-10-21
 
+### Rate alerts
+
+- **Aviso de tipo de cambio** in **Moneda y conversión** sends the latest Banxico FIX for one chosen pair: SAR → MXN (default), MXN → SAR, USD → MXN or MXN → USD. SAR uses the SAMA peg of 3.75 per dollar. The notification shows `1 SAR = 4.9123 MXN`, the percent change from the previous FIX, and the average of every FIX dated in the seven days ending on the latest one, with how far today sits above or below it.
+- Frequency is **Diario** (default; weekends and holidays repeat the last FIX), **FIX nuevo** (only for a FIX not yet alerted for that pair) or **Semanal** on a chosen day, at a chosen `Asia/Riyadh` time (default 09:00). An optional minimum rate holds the alert back until the rate reaches it; with **FIX nuevo**, the first qualifying FIX still alerts.
+- The alert requires online conversion; while that is off the alert is paused and its switch can only be turned off. A daily `WorkManager` job, which requires a network connection, fetches 20 days of the FIX series in one request. Provider failures retry up to three times. An atomically claimed slot keeps a day, or a FIX in **FIX nuevo** mode, from alerting twice. The rate is public, so the notification is visible on the lock screen. `WorkReminderScheduler` and the new scheduler share `DailyNotificationScheduler`.
+- `CONTEXT.md` defines **Rate alert**. Nine DataStore preferences are added. No Room migration, backup-format change or version bump.
+- Verification on Ubuntu with JDK 17 through the gradle-run wrapper: `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` passed. The 412 tests in 49 suites had no failures, errors or skips. Lint retains the same 26 advisory warnings, none in changed files; its `MissingPermission` error on the first draft led to an explicit check before posting. New tests cover pair conversion, change and seven-day average arithmetic, Banxico history parsing and failures, each frequency, weekday gating, the minimum rate, slot de-duplication, preference round trips and fallbacks, the network-constrained schedule, and the settings card. Three existing settings tests failed when the card sat above the quote controls, so it moved to the end. `graphify update .` completed. No physical-device or TalkBack check was run.
+
 Stacked on PR #45. The development version advances to `1.0.12` (`versionCode` 13). No Room schema or backup-format change.
 
 ### Upcoming recurring charges

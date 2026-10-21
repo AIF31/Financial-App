@@ -8,6 +8,7 @@ import com.aif31.pocket.fx.DefaultExchangeRateRepository
 import com.aif31.pocket.fx.ExchangeRateRepository
 import com.aif31.pocket.fx.HttpsBanxicoClient
 import com.aif31.pocket.fx.RoomFxQuoteCache
+import com.aif31.pocket.notifications.WorkFxRateAlertScheduler
 import com.aif31.pocket.notifications.notificationBetaMetrics as createNotificationBetaMetrics
 import com.aif31.pocket.settings.DataStorePreferences
 import com.aif31.pocket.settings.PreferencesStore
@@ -33,13 +34,15 @@ class PocketApplication : Application() {
         )
     }
     val preferences: PreferencesStore by lazy { DataStorePreferences(this) }
+    internal val banxico: HttpsBanxicoClient by lazy { HttpsBanxicoClient(BuildConfig.POCKET_BANXICO_TOKEN) }
     val exchangeRates: ExchangeRateRepository by lazy {
         DefaultExchangeRateRepository(
-            banxico = HttpsBanxicoClient(BuildConfig.POCKET_BANXICO_TOKEN),
+            banxico = banxico,
             cache = RoomFxQuoteCache(database.financeDao()),
             onlineFxEnabled = { preferences.state.first().onlineFxEnabled },
             clock = clock,
         )
     }
     val reminderScheduler: ReminderScheduler by lazy { WorkReminderScheduler(this) }
+    val fxRateAlertScheduler: ReminderScheduler by lazy { WorkFxRateAlertScheduler(this) }
 }
