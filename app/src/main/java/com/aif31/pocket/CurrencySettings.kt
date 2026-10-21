@@ -242,7 +242,12 @@ private fun FxRateAlertCard(
                     ChoiceOption(base to quote, "${base.name} → ${quote.name}", "fx_rate_alert_pair_${base.name}_${quote.name}")
                 },
                 selected = settings.base to settings.quote,
-                onSelect = { (base, quote) -> onChange(settings.copy(base = base, quote = quote, minimumRate = null)) },
+                onSelect = { (base, quote) ->
+                    // A minimum belongs to its pair; re-tapping the selected pair keeps it.
+                    if (base != settings.base || quote != settings.quote) {
+                        onChange(settings.copy(base = base, quote = quote, minimumRate = null))
+                    }
+                },
             )
             Text("Frecuencia", style = MaterialTheme.typography.titleSmall)
             SegmentedChoice(

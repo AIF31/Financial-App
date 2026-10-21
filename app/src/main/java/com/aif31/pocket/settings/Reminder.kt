@@ -20,10 +20,13 @@ import androidx.work.Operation
 import androidx.work.WorkerParameters
 import com.aif31.pocket.MainActivity
 import com.aif31.pocket.R
+import com.google.common.util.concurrent.ListenableFuture
+import java.time.Clock
 import java.time.Duration
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -42,9 +45,7 @@ class WorkReminderScheduler(context: Context) : ReminderScheduler by DailyNotifi
     workName = "daily-spending-review",
     channelId = CHANNEL_ID,
     createChannel = ::createReminderChannel,
-    request = { initialDelay ->
-        PeriodicWorkRequestBuilder<ReminderWorker>(24, TimeUnit.HOURS).setInitialDelay(initialDelay).build()
-    },
+    request = { PeriodicWorkRequestBuilder<ReminderWorker>(24, TimeUnit.HOURS) },
 )
 
 /**
@@ -56,7 +57,8 @@ internal class DailyNotificationScheduler(
     private val workName: String,
     private val channelId: String,
     private val createChannel: (Context) -> Unit,
-    private val request: (initialDelay: Duration) -> PeriodicWorkRequest,
+    private val request: () -> PeriodicWorkRequest.Builder,
+    private val clock: Clock = Clock.systemUTC(),
 ) : ReminderScheduler {
     override fun apply(enabled: Boolean, time: LocalTime) { enqueue(enabled, time) }
 
@@ -66,9 +68,17 @@ internal class DailyNotificationScheduler(
             return manager.cancelUniqueWork(workName)
         }
         createChannel(context)
-        val delay = delayUntilNext(time, ZonedDateTime.now(ZoneId.of("Asia/Riyadh")))
-        return manager.enqueueUniquePeriodicWork(workName, ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE, request(delay))
+        // A schedule override needs the UPDATE policy, which would keep a stale run, so the first run uses a delay.
+        val first = request().setInitialDelay(Duration.ofMillis(nextRunMillis(time) - clock.millis())).build()
+        return manager.enqueueUniquePeriodicWork(workName, ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE, first)
     }
+
+    /**
+     * Moves the next run of the work [id] back to the next [time]. A periodic run delayed by its constraints restarts
+     * the 24-hour period from when it finished, so without this every later run would keep the delay.
+     */
+    fun realign(id: UUID, time: LocalTime): ListenableFuture<WorkManager.UpdateResult> =
+        WorkManager.getInstance(context).updateWork(request().setId(id).setNextScheduleTimeOverride(nextRunMillis(time)).build())
 
     override suspend fun applyAndCheck(enabled: Boolean, time: LocalTime): ReminderStatus = withContext(Dispatchers.IO) {
         enqueue(enabled, time).result.get()
@@ -83,10 +93,11 @@ internal class DailyNotificationScheduler(
         resolveReminderStatus(enabled, notificationsPermitted(context), channel != null && channel.importance != NotificationManager.IMPORTANCE_NONE, scheduled)
     }
 
-    private fun delayUntilNext(time: LocalTime, now: ZonedDateTime): Duration {
+    private fun nextRunMillis(time: LocalTime): Long {
+        val now = ZonedDateTime.now(clock.withZone(ZoneId.of("Asia/Riyadh")))
         var next = now.withHour(time.hour).withMinute(time.minute).withSecond(0).withNano(0)
         if (!next.isAfter(now)) next = next.plusDays(1)
-        return Duration.between(now, next)
+        return next.toInstant().toEpochMilli()
     }
 }
 

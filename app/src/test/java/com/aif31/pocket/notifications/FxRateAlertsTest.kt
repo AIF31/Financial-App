@@ -17,6 +17,9 @@ import java.math.BigDecimal
 import java.nio.file.FileSystems
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.ZonedDateTime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -71,8 +74,8 @@ class FxRateAlertsTest {
         val coordinator = FxRateAlertCoordinator(
             preferences = store,
             history = BanxicoHistorySource { start, end -> range = start to end; week },
-            today = { today },
-            post = { posted += it },
+            now = { at(today) },
+            post = { posted += it; true },
         )
 
         assertEquals(FxRateAlertOutcome.POSTED, coordinator.run())
@@ -80,7 +83,7 @@ class FxRateAlertsTest {
 
         assertEquals(today.minusDays(20) to today, range)
         assertEquals(listOf("1 SAR = 5.1000 MXN"), posted.map { it.title })
-        assertEquals("day/2026-10-21", store.state.first().fxRateAlertLastSlot)
+        assertEquals(setOf("scheduled=2026-10-21T09:00"), store.state.first().fxRateAlertSent)
     }
 
     @Test
@@ -88,12 +91,12 @@ class FxRateAlertsTest {
         val store = store(backgroundScope)
         store.setOnlineFxEnabled(true)
         store.setFxRateAlert(FxRateAlertSettings(enabled = true))
-        var day = today
+        var day = at(today)
         val posted = mutableListOf<FxRateAlert>()
-        val coordinator = FxRateAlertCoordinator(store, { _, _ -> week }, { day }) { posted += it }
+        val coordinator = FxRateAlertCoordinator(store, { _, _ -> week }, { day }) { posted += it; true }
 
         coordinator.run()
-        day = today.plusDays(1)
+        day = at(today.plusDays(1))
         assertEquals(FxRateAlertOutcome.POSTED, coordinator.run())
 
         assertEquals(listOf("1 SAR = 5.1000 MXN", "1 SAR = 5.1000 MXN"), posted.map { it.title })
@@ -104,13 +107,13 @@ class FxRateAlertsTest {
         val store = store(backgroundScope)
         store.setOnlineFxEnabled(true)
         store.setFxRateAlert(FxRateAlertSettings(enabled = true, frequency = FxRateAlertFrequency.NEW_FIX))
-        var day = today
+        var day = at(today)
         var observations = week.dropLast(1)
         val posted = mutableListOf<FxRateAlert>()
-        val coordinator = FxRateAlertCoordinator(store, { _, _ -> observations }, { day }) { posted += it }
+        val coordinator = FxRateAlertCoordinator(store, { _, _ -> observations }, { day }) { posted += it; true }
 
         assertEquals(FxRateAlertOutcome.POSTED, coordinator.run())
-        day = today.plusDays(1)
+        day = at(today.plusDays(1))
         assertEquals(FxRateAlertOutcome.SKIPPED, coordinator.run())
         observations = week
         assertEquals(FxRateAlertOutcome.POSTED, coordinator.run())
@@ -126,13 +129,13 @@ class FxRateAlertsTest {
             FxRateAlertSettings(enabled = true, frequency = FxRateAlertFrequency.WEEKLY, weekday = DayOfWeek.THURSDAY),
         )
         var calls = 0
-        var day = today // A Wednesday.
+        var day = at(today) // A Wednesday.
         val posted = mutableListOf<FxRateAlert>()
-        val coordinator = FxRateAlertCoordinator(store, { _, _ -> calls += 1; week }, { day }) { posted += it }
+        val coordinator = FxRateAlertCoordinator(store, { _, _ -> calls += 1; week }, { day }) { posted += it; true }
 
         assertEquals(FxRateAlertOutcome.SKIPPED, coordinator.run())
         assertEquals(0, calls)
-        day = today.plusDays(1)
+        day = at(today.plusDays(1))
         assertEquals(FxRateAlertOutcome.POSTED, coordinator.run())
         assertEquals(1, posted.size)
     }
@@ -146,14 +149,115 @@ class FxRateAlertsTest {
         )
         var observations = week.dropLast(1)
         val posted = mutableListOf<FxRateAlert>()
-        val coordinator = FxRateAlertCoordinator(store, { _, _ -> observations }, { today }) { posted += it }
+        val coordinator = FxRateAlertCoordinator(store, { _, _ -> observations }, { at(today) }) { posted += it; true }
 
         assertEquals(FxRateAlertOutcome.SKIPPED, coordinator.run())
-        assertEquals(null, store.state.first().fxRateAlertLastSlot)
+        assertEquals(emptySet<String>(), store.state.first().fxRateAlertSent)
         observations = week
         assertEquals(FxRateAlertOutcome.POSTED, coordinator.run())
 
         assertEquals(listOf("1 SAR = 5.1000 MXN"), posted.map { it.title })
+    }
+
+    @Test
+    fun `a new-FIX alert remembers each pair separately`() = runTest {
+        val store = store(backgroundScope)
+        store.setOnlineFxEnabled(true)
+        val sarToMxn = FxRateAlertSettings(enabled = true, frequency = FxRateAlertFrequency.NEW_FIX)
+        val posted = mutableListOf<FxRateAlert>()
+        val coordinator = FxRateAlertCoordinator(store, { _, _ -> week }, { at(today) }) { posted += it; true }
+
+        store.setFxRateAlert(sarToMxn)
+        assertEquals(FxRateAlertOutcome.POSTED, coordinator.run())
+        store.setFxRateAlert(sarToMxn.copy(base = SupportedCurrency.MXN, quote = SupportedCurrency.SAR))
+        assertEquals(FxRateAlertOutcome.POSTED, coordinator.run())
+        store.setFxRateAlert(sarToMxn)
+        assertEquals(FxRateAlertOutcome.SKIPPED, coordinator.run())
+
+        assertEquals(2, posted.size)
+    }
+
+    @Test
+    fun `an alert that could not be shown is sent on a later run`() = runTest {
+        val store = store(backgroundScope)
+        store.setOnlineFxEnabled(true)
+        store.setFxRateAlert(FxRateAlertSettings(enabled = true, frequency = FxRateAlertFrequency.NEW_FIX))
+        var shown = false
+        val posted = mutableListOf<FxRateAlert>()
+        val coordinator = FxRateAlertCoordinator(store, { _, _ -> week }, { at(today) }) { if (shown) posted += it; shown }
+
+        assertEquals(FxRateAlertOutcome.SKIPPED, coordinator.run())
+        assertEquals(emptySet<String>(), store.state.first().fxRateAlertSent)
+        shown = true
+        assertEquals(FxRateAlertOutcome.POSTED, coordinator.run())
+
+        assertEquals(1, posted.size)
+    }
+
+    @Test
+    fun `a weekly alert retried after midnight still serves its occurrence`() = runTest {
+        val store = store(backgroundScope)
+        store.setOnlineFxEnabled(true)
+        store.setFxRateAlert(
+            FxRateAlertSettings(
+                enabled = true,
+                time = LocalTime.of(23, 59),
+                frequency = FxRateAlertFrequency.WEEKLY,
+                weekday = DayOfWeek.WEDNESDAY,
+            ),
+        )
+        var now = at(today, 23, 59)
+        var available = false
+        val posted = mutableListOf<FxRateAlert>()
+        val coordinator = FxRateAlertCoordinator(
+            store,
+            { _, _ -> if (available) week else throw IOException("down") },
+            { now },
+        ) { posted += it; true }
+
+        assertEquals(FxRateAlertOutcome.RETRY, coordinator.run())
+        now = at(today.plusDays(1), 0, 20)
+        available = true
+        assertEquals(FxRateAlertOutcome.POSTED, coordinator.run())
+        now = at(today.plusDays(1), 23, 59)
+        assertEquals(FxRateAlertOutcome.SKIPPED, coordinator.run())
+
+        assertEquals(1, posted.size)
+    }
+
+    @Test
+    fun `a daily run a few minutes early counts as its occurrence`() = runTest {
+        val store = store(backgroundScope)
+        store.setOnlineFxEnabled(true)
+        store.setFxRateAlert(FxRateAlertSettings(enabled = true))
+        var now = at(today, 8, 58)
+        val posted = mutableListOf<FxRateAlert>()
+        val coordinator = FxRateAlertCoordinator(store, { _, _ -> week }, { now }) { posted += it; true }
+
+        assertEquals(FxRateAlertOutcome.POSTED, coordinator.run())
+        now = at(today, 9, 30)
+        assertEquals(FxRateAlertOutcome.SKIPPED, coordinator.run())
+        now = at(today.plusDays(1), 8, 58)
+        assertEquals(FxRateAlertOutcome.POSTED, coordinator.run())
+
+        assertEquals(setOf("scheduled=2026-10-22T09:00"), store.state.first().fxRateAlertSent)
+    }
+
+    @Test
+    fun `withdrawing online conversion during the fetch stops the alert`() = runTest {
+        val store = store(backgroundScope)
+        store.setOnlineFxEnabled(true)
+        store.setFxRateAlert(FxRateAlertSettings(enabled = true))
+        val posted = mutableListOf<FxRateAlert>()
+        val coordinator = FxRateAlertCoordinator(
+            store,
+            { _, _ -> store.setOnlineFxEnabled(false); week },
+            { at(today) },
+        ) { posted += it; true }
+
+        assertEquals(FxRateAlertOutcome.SKIPPED, coordinator.run())
+        assertTrue(posted.isEmpty())
+        assertEquals(emptySet<String>(), store.state.first().fxRateAlertSent)
     }
 
     @Test
@@ -163,7 +267,7 @@ class FxRateAlertsTest {
         store.setFxRateAlert(FxRateAlertSettings(enabled = true, base = SupportedCurrency.MXN, quote = SupportedCurrency.USD))
         val posted = mutableListOf<FxRateAlert>()
 
-        FxRateAlertCoordinator(store, { _, _ -> week }, { today }) { posted += it }.run()
+        FxRateAlertCoordinator(store, { _, _ -> week }, { at(today) }) { posted += it; true }.run()
 
         assertEquals("1 MXN = 0.052288 USD", posted.single().title)
         assertTrue(posted.single().text.startsWith("-1.96% vs. 19 oct · Promedio 7 días: 0.05"))
@@ -177,8 +281,8 @@ class FxRateAlertsTest {
         val alertOff = store(backgroundScope, "off.preferences_pb").apply { setOnlineFxEnabled(true) }
         val consentOff = store(backgroundScope, "consent.preferences_pb").apply { setFxRateAlert(FxRateAlertSettings(enabled = true)) }
 
-        assertEquals(FxRateAlertOutcome.SKIPPED, FxRateAlertCoordinator(alertOff, history, { today }) {}.run())
-        assertEquals(FxRateAlertOutcome.SKIPPED, FxRateAlertCoordinator(consentOff, history, { today }) {}.run())
+        assertEquals(FxRateAlertOutcome.SKIPPED, FxRateAlertCoordinator(alertOff, history, { at(today) }) { true }.run())
+        assertEquals(FxRateAlertOutcome.SKIPPED, FxRateAlertCoordinator(consentOff, history, { at(today) }) { true }.run())
         assertEquals(0, calls)
     }
 
@@ -191,24 +295,27 @@ class FxRateAlertsTest {
 
         assertEquals(
             FxRateAlertOutcome.RETRY,
-            FxRateAlertCoordinator(store, { _, _ -> throw QuoteFailure.Unavailable() }, { today }) { posted += it }.run(),
+            FxRateAlertCoordinator(store, { _, _ -> throw QuoteFailure.Unavailable() }, { at(today) }) { posted += it; true }.run(),
         )
         assertEquals(
             FxRateAlertOutcome.RETRY,
-            FxRateAlertCoordinator(store, { _, _ -> throw IOException("down") }, { today }) { posted += it }.run(),
+            FxRateAlertCoordinator(store, { _, _ -> throw IOException("down") }, { at(today) }) { posted += it; true }.run(),
         )
         assertEquals(
             FxRateAlertOutcome.RETRY,
-            FxRateAlertCoordinator(store, { _, _ -> emptyList() }, { today }) { posted += it }.run(),
+            FxRateAlertCoordinator(store, { _, _ -> emptyList() }, { at(today) }) { posted += it; true }.run(),
         )
         assertEquals(
             FxRateAlertOutcome.SKIPPED,
-            FxRateAlertCoordinator(store, { _, _ -> throw QuoteFailure.ConfigurationUnavailable() }, { today }) { posted += it }.run(),
+            FxRateAlertCoordinator(store, { _, _ -> throw QuoteFailure.ConfigurationUnavailable() }, { at(today) }) { posted += it; true }.run(),
         )
 
         assertTrue(posted.isEmpty())
-        assertEquals(null, store.state.first().fxRateAlertLastSlot)
+        assertEquals(emptySet<String>(), store.state.first().fxRateAlertSent)
     }
+
+    private fun at(date: LocalDate, hour: Int = 9, minute: Int = 0): ZonedDateTime =
+        date.atTime(hour, minute).atZone(ZoneId.of("Asia/Riyadh"))
 
     private fun sarToMxn(observations: List<FxObservation>) =
         FxRateDigest.of(observations, SupportedCurrency.SAR, SupportedCurrency.MXN)!!

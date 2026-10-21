@@ -160,6 +160,10 @@ class CurrencySettingsContentTest {
 
         list.performScrollToNode(hasTestTag("fx_rate_alert_status"))
         compose.onNodeWithText("Programado · a diario a las 09:00").assertIsDisplayed()
+        list.performScrollToNode(hasTestTag("fx_rate_alert_pair_SAR_MXN"))
+        settings = settings.copy(minimumRate = BigDecimal("5.2"))
+        compose.onNodeWithTag("fx_rate_alert_pair_SAR_MXN").performClick()
+        assertEquals(BigDecimal("5.2"), settings.minimumRate)
         list.performScrollToNode(hasTestTag("fx_rate_alert_pair_MXN_SAR"))
         compose.onNodeWithTag("fx_rate_alert_pair_MXN_SAR").performClick()
         list.performScrollToNode(hasTestTag("fx_rate_alert_weekly"))

@@ -34,8 +34,8 @@ data class AppPreferences(
     /** The period whose recap the person closed on the dashboard. */
     val recapDismissedPeriodId: String? = null,
     val fxRateAlert: FxRateAlertSettings = FxRateAlertSettings(),
-    /** Identifies the last rate alert sent, so one FIX or day never alerts twice. */
-    val fxRateAlertLastSlot: String? = null,
+    /** The latest rate alert sent per family, as `family=value`, so one day or one pair's FIX never alerts twice. */
+    val fxRateAlertSent: Set<String> = emptySet(),
 )
 
 interface PreferencesStore {
@@ -64,8 +64,14 @@ interface PreferencesStore {
     suspend fun dismissRecap(periodId: String) {}
     suspend fun setFxRateAlert(settings: FxRateAlertSettings) {}
 
-    /** Records [slot] as the last rate alert and returns true, unless it already was, atomically. */
-    suspend fun claimFxRateAlertSlot(slot: String): Boolean = false
+    /**
+     * Records [value] as [family]'s latest rate alert and returns true, unless it already is, atomically. Families
+     * are independent, so a claim for one never undoes another's.
+     */
+    suspend fun claimFxRateAlert(family: String, value: String): Boolean = false
+
+    /** Forgets [family]'s claim of [value], when its alert could not be shown. */
+    suspend fun releaseFxRateAlert(family: String, value: String) {}
 }
 private val Context.pocketPreferences by preferencesDataStore("pocket_preferences")
 
@@ -92,7 +98,7 @@ class DataStorePreferences internal constructor(
             paceAlertsSent = values[PACE_ALERTS_SENT],
             recapDismissedPeriodId = values[RECAP_DISMISSED_PERIOD],
             fxRateAlert = fxRateAlertSettings(values),
-            fxRateAlertLastSlot = values[FX_RATE_ALERT_LAST_SLOT],
+            fxRateAlertSent = values[FX_RATE_ALERT_SENT] ?: emptySet(),
         )
     }
 
@@ -178,13 +184,21 @@ class DataStorePreferences internal constructor(
         }
     }
 
-    override suspend fun claimFxRateAlertSlot(slot: String): Boolean {
+    override suspend fun claimFxRateAlert(family: String, value: String): Boolean {
+        val entry = "$family=$value"
         var claimed = false
         dataStore.edit { values ->
-            claimed = values[FX_RATE_ALERT_LAST_SLOT] != slot
-            values[FX_RATE_ALERT_LAST_SLOT] = slot
+            val sent = values[FX_RATE_ALERT_SENT] ?: emptySet()
+            claimed = entry !in sent
+            if (claimed) values[FX_RATE_ALERT_SENT] = sent.filterNotTo(HashSet()) { it.startsWith("$family=") } + entry
         }
         return claimed
+    }
+
+    override suspend fun releaseFxRateAlert(family: String, value: String) {
+        dataStore.edit { values ->
+            values[FX_RATE_ALERT_SENT] = (values[FX_RATE_ALERT_SENT] ?: emptySet()) - "$family=$value"
+        }
     }
 
     /** Stored alert settings; any unreadable value falls back to its default. */
@@ -232,7 +246,7 @@ class DataStorePreferences internal constructor(
         val FX_RATE_ALERT_FREQUENCY = stringPreferencesKey("fx_rate_alert_frequency")
         val FX_RATE_ALERT_WEEKDAY = intPreferencesKey("fx_rate_alert_weekday")
         val FX_RATE_ALERT_MINIMUM = stringPreferencesKey("fx_rate_alert_minimum")
-        val FX_RATE_ALERT_LAST_SLOT = stringPreferencesKey("fx_rate_alert_last_slot")
+        val FX_RATE_ALERT_SENT = androidx.datastore.preferences.core.stringSetPreferencesKey("fx_rate_alert_sent")
         val NOTIFICATION_SOURCE_PACKAGES = androidx.datastore.preferences.core.stringSetPreferencesKey("notification_source_packages")
     }
 }

@@ -102,13 +102,17 @@ class AppPreferencesTest {
     }
 
     @Test
-    fun `a rate alert slot is claimed once`() = runTest {
+    fun `a rate alert is claimed once per family value and can be released`() = runTest {
         val store = DataStorePreferences(newDataStore("fx-slot.preferences_pb", backgroundScope))
 
-        assertTrue(store.claimFxRateAlertSlot("day/2026-10-21"))
-        assertFalse(store.claimFxRateAlertSlot("day/2026-10-21"))
-        assertTrue(store.claimFxRateAlertSlot("day/2026-10-22"))
-        assertEquals("day/2026-10-22", store.state.first().fxRateAlertLastSlot)
+        assertTrue(store.claimFxRateAlert("day", "2026-10-21"))
+        assertFalse(store.claimFxRateAlert("day", "2026-10-21"))
+        assertTrue(store.claimFxRateAlert("fix/SAR-MXN", "2026-10-20"))
+        assertTrue(store.claimFxRateAlert("day", "2026-10-22"))
+        assertEquals(setOf("day=2026-10-22", "fix/SAR-MXN=2026-10-20"), store.state.first().fxRateAlertSent)
+
+        store.releaseFxRateAlert("day", "2026-10-22")
+        assertTrue(store.claimFxRateAlert("day", "2026-10-22"))
     }
 
     @Test
