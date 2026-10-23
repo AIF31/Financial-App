@@ -30,6 +30,15 @@ class AnalysisTextTest {
     }
 
     @Test
+    fun a_share_rounds_toward_zero_without_overflowing_and_needs_a_positive_whole() {
+        assertEquals(66, sharePercent(2, 3))
+        // Just under half of the largest amount: no overflow, and 49.99… rounds toward zero.
+        assertEquals(49, sharePercent(Long.MAX_VALUE / 2, Long.MAX_VALUE))
+        assertEquals(null, sharePercent(5, 0))
+        assertEquals(null, sharePercent(5, -10))
+    }
+
+    @Test
     fun a_relative_line_spans_its_own_lowest_to_highest_value() {
         assertEquals(2_113.0 to 3_140.0, relativeRange(listOf(3_010, 2_870, 3_140, 2_113)))
     }

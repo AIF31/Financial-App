@@ -85,7 +85,10 @@ data class SpendingAnalysis(
      */
     val trend: List<PeriodInsights>,
     val earlierPeriodsInOtherCurrency: Boolean,
-    /** Pockets with spending in any trend period, largest net spend in this period first. */
+    /**
+     * This period's Pockets and any other with spending in a trend period, largest net spend in this period first, so
+     * a Pocket with no spending at all is still listed and can be named as such.
+     */
     val pocketTrends: List<PocketTrend>,
     /** Pockets opted into rollover now, eligible to carry it from this period, or that received it in a trend period. */
     val rollover: List<PocketRolloverTrend>,
@@ -212,9 +215,8 @@ data class SpendingAnalysis(
 
         private fun pocketTrends(state: LedgerState, trend: List<PeriodInsights>): List<PocketTrend> {
             val selected = trend.lastOrNull() ?: return emptyList()
-            return trend.flatMap { it.pockets }
-                .filter { it.netSpendMinor != 0L }
-                .map { it.pocket }
+            val withSpending = trend.flatMap { it.pockets }.filter { it.netSpendMinor != 0L }.map { it.pocket }
+            return (withSpending + selected.pockets.map { it.pocket })
                 .distinctBy { it.id }
                 .sortedByDescending { pocket -> selected.pockets.firstOrNull { it.pocket.id == pocket.id }?.netSpendMinor ?: 0 }
                 .map { pocket ->

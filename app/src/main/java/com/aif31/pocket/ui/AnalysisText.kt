@@ -16,13 +16,14 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.PeriodInsights
+import com.aif31.pocket.domain.PocketMath
 import com.aif31.pocket.domain.SupportedCurrency
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
-private const val NO_BREAK_SPACE = ' '
+private const val NO_BREAK_SPACE = '\u00A0'
 private val monthLabel = DateTimeFormatter.ofPattern("MMM", Locale.forLanguageTag("es"))
 
 /** "SAR 1,234.00" with a no-break space, so a line never ends between the currency and its amount. */
@@ -97,7 +98,7 @@ internal fun NameValueRow(
     nameStyle: TextStyle = MaterialTheme.typography.bodyLarge,
     valueStyle: TextStyle = MaterialTheme.typography.titleSmall,
 ) {
-    if (LocalDensity.current.fontScale > STACKED_FONT_SCALE) {
+    if (LocalDensity.current.fontScale > LARGE_FONT_SCALE) {
         Column(modifier) {
             Text(name, style = nameStyle)
             Text(value, style = valueStyle)
@@ -110,4 +111,12 @@ internal fun NameValueRow(
     }
 }
 
-private const val STACKED_FONT_SCALE = 1.3f
+/** From this font scale up, a name and its amount no longer fit side by side on a phone, so they stack. */
+internal const val LARGE_FONT_SCALE = 1.3f
+
+/**
+ * [partMinor] as a whole percentage of [wholeMinor], rounded toward zero like every other share in the app; null when
+ * there is no positive whole to divide by.
+ */
+internal fun sharePercent(partMinor: Long, wholeMinor: Long): Int? =
+    wholeMinor.takeIf { it > 0 }?.let { PocketMath.percent(partMinor, it) }

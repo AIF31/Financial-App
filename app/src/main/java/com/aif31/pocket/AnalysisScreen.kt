@@ -57,6 +57,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -92,6 +93,7 @@ import com.aif31.pocket.ui.changeText
 import com.aif31.pocket.ui.counted
 import com.aif31.pocket.ui.formatPeriodRange
 import com.aif31.pocket.ui.recurringSpanish
+import com.aif31.pocket.ui.sharePercent
 import com.aif31.pocket.ui.shortLabel
 import com.aif31.pocket.ui.shortSpanish
 import com.aif31.pocket.ui.unbroken
@@ -221,7 +223,7 @@ private fun Muted(text: String, modifier: Modifier = Modifier) {
 
 @Composable
 private fun TrendSection(analysis: SpendingAnalysis, currency: SupportedCurrency, onPeriodChange: (String) -> Unit) {
-    fun money(minor: Long) = MoneyText.format(minor, currency)
+    fun money(minor: Long) = MoneyText.unbroken(minor, currency)
     val trend = analysis.trend
     val selected = analysis.insights
     val average = selected.averageDailySpendMinor
@@ -250,7 +252,8 @@ private fun TrendSection(analysis: SpendingAnalysis, currency: SupportedCurrency
         }
         val description = "Gasto diario promedio por periodo. " + trend.joinToString(". ") { insights ->
             "${formatPeriodRange(insights.period.start, insights.period.endExclusive)}: " +
-                (insights.averageDailySpendMinor?.let(::money) ?: "sin días") + if (insights.inProgress) ", en curso" else ""
+                (insights.averageDailySpendMinor?.let { MoneyText.format(it, currency) } ?: "sin días") +
+                if (insights.inProgress) ", en curso" else ""
         }
         TrendBars(
             bars = trend.map { TrendBar(it.shortLabel(), it.averageDailySpendMinor, it.period.id == selected.period.id) },
@@ -299,11 +302,11 @@ private fun perDayHeadline(amount: String): AnnotatedString = buildAnnotatedStri
 }
 
 @Composable
-private fun DeltaChip(text: AnnotatedString, spoken: String) {
+private fun DeltaChip(text: AnnotatedString, spoken: String, modifier: Modifier = Modifier) {
     Surface(
         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
         shape = MaterialTheme.shapes.small,
-        modifier = Modifier.clearAndSetSemantics { contentDescription = spoken },
+        modifier = modifier.clearAndSetSemantics { contentDescription = spoken },
     ) {
         Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
     }
@@ -321,8 +324,10 @@ private fun PocketSection(analysis: SpendingAnalysis, currency: SupportedCurrenc
     val selectedLabel = labels.last()
     val previousLabel = labels.getOrNull(labels.lastIndex - 1)
     val drawLines = labels.size >= MIN_LINE_PERIODS
-    val (quiet, active) = analysis.pocketTrends.partition { trend -> trend.averageDailyByPeriodMinor.all { (it ?: 0) <= 0 } }
-    val total = active.sumOf { (it.averageDailyByPeriodMinor.last() ?: 0).coerceAtLeast(0) }
+    // Only Pockets with no movement at all are quiet; one whose refunds outweigh its spending keeps its negative amounts.
+    val (quiet, active) = analysis.pocketTrends.partition { trend -> trend.averageDailyByPeriodMinor.all { (it ?: 0) == 0L } }
+    // Shares are of the net total, as refunds reduce net spending everywhere else in the app.
+    val netTotal = active.sumOf { it.averageDailyByPeriodMinor.last() ?: 0 }
     Muted(
         when {
             drawLines -> "Promedio al día en los últimos ${labels.size} periodos. La línea discontinua es lo habitual de cada Pocket."
@@ -330,7 +335,9 @@ private fun PocketSection(analysis: SpendingAnalysis, currency: SupportedCurrenc
             else -> "Promedio al día."
         },
     )
-    if (drawLines) PeriodLabels(labels, selectedIndex = labels.lastIndex, modifier = Modifier.padding(start = ROW_INDENT))
+    if (drawLines) {
+        PeriodLabels(labels, selectedIndex = labels.lastIndex, modifier = Modifier.fillMaxWidth().padding(start = ROW_INDENT))
+    }
     active.forEach { trend ->
         val values = trend.averageDailyByPeriodMinor
         val current = values.last()
@@ -342,11 +349,11 @@ private fun PocketSection(analysis: SpendingAnalysis, currency: SupportedCurrenc
                 change = null
                 spokenChange = null
             }
-            current <= 0 && previous > 0 -> {
-                spokenChange = "Sin gasto · antes ${money(previous)}"
+            current == 0L -> {
+                spokenChange = if (previous != 0L) "Sin gasto · antes ${money(previous)}" else "Sin gasto en $selectedLabel"
                 change = AnnotatedString(spokenChange)
             }
-            previous <= 0 && current > 0 -> {
+            previous == 0L && current > 0 -> {
                 spokenChange = "Nuevo en $selectedLabel"
                 change = AnnotatedString(spokenChange)
             }
@@ -355,7 +362,12 @@ private fun PocketSection(analysis: SpendingAnalysis, currency: SupportedCurrenc
                 spokenChange = changeSpoken(current - previous, previous, currency, than = "que $previousLabel")
             }
         }
-        val share = if (current != null && current > 0 && total > 0) "${(current * 100 + total / 2) / total}% del gasto" else null
+        val share = when {
+            current == null -> null
+            current < 0 -> "Devolución neta"
+            current > 0 -> sharePercent(current, netTotal)?.let { "$it% del gasto" }
+            else -> null
+        }
         val spoken = buildString {
             append("${trend.pocket.name}: ${current?.let { "${money(it)} al día" } ?: "sin días"}")
             spokenChange?.let { append(". $it") }
@@ -365,10 +377,22 @@ private fun PocketSection(analysis: SpendingAnalysis, currency: SupportedCurrenc
                 append(labels.zip(values).joinToString(", ") { (label, value) -> "$label ${value?.let(::money) ?: "sin días"}" })
             }
         }
-        PocketTrendRow(trend.pocket, current?.let(::money) ?: "—", values.takeIf { drawLines }, change, share, spoken)
+        PocketTrendRow(
+            pocket = trend.pocket,
+            value = current?.let(::money) ?: "—",
+            lineValues = values.takeIf { drawLines },
+            change = change,
+            share = share,
+            spokenDescription = spoken,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
     if (quiet.isNotEmpty()) {
-        val period = if (drawLines) "estos periodos" else selectedLabel
+        val period = when {
+            drawLines -> "estos periodos"
+            previousLabel != null -> "$selectedLabel ni $previousLabel"
+            else -> selectedLabel
+        }
         Muted("Sin gasto en $period: ${quiet.joinToString(", ") { it.pocket.name }}.")
     }
 }
@@ -381,10 +405,10 @@ private fun PocketTrendRow(
     change: AnnotatedString?,
     share: String?,
     spokenDescription: String,
+    modifier: Modifier = Modifier,
 ) {
     Column(
-        Modifier
-            .fillMaxWidth()
+        modifier
             .padding(vertical = 6.dp)
             .clearAndSetSemantics { contentDescription = spokenDescription },
         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -402,8 +426,8 @@ private fun PocketTrendRow(
 
 /** A Pocket's plate, name and amount: the first line of every per-Pocket row. */
 @Composable
-private fun PocketHeading(pocket: Pocket, value: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+private fun PocketHeading(pocket: Pocket, value: String, modifier: Modifier = Modifier) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         PocketArtworkPlate(pocket.iconKey, plateSize = 32.dp)
         NameValueRow(pocket.name, value, Modifier.weight(1f))
     }
@@ -438,33 +462,41 @@ private fun RecurringSection(
     }
 }
 
-/** "media SAR 45.83 · ▲ SAR 62.00 frente al anterior", the arrow tinted like every other change in the screen. */
+/** A merchant's supporting line as shown, with arrows, and as spoken, in words only. */
+private class MerchantSupporting(val shown: AnnotatedString, val spoken: String)
+
+/** "media SAR 45.83 · ▲ SAR 62.00 más que el anterior (+16%)", the change in the same words as every other one. */
 @Composable
-private fun merchantSupporting(merchant: MerchantSpend, currency: SupportedCurrency): AnnotatedString {
-    val parts = mutableListOf<AnnotatedString>()
-    merchant.averageExpenseMinor?.let { parts += AnnotatedString("media ${MoneyText.unbroken(it, currency)}") }
+private fun merchantSupporting(merchant: MerchantSpend, currency: SupportedCurrency): MerchantSupporting {
+    val shown = mutableListOf<AnnotatedString>()
+    val spoken = mutableListOf<String>()
+    merchant.averageExpenseMinor?.let {
+        "media ${MoneyText.unbroken(it, currency)}".let { average ->
+            shown += AnnotatedString(average)
+            spoken += average
+        }
+    }
     merchant.previousNetSpendMinor?.let { previous ->
         val delta = merchant.netSpendMinor - previous
-        parts += when {
-            previous == 0L -> AnnotatedString("nuevo este periodo")
-            delta == 0L -> AnnotatedString("igual que el periodo anterior")
-            else -> {
-                val more = delta > 0
-                val arrowColor = if (more) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
-                buildAnnotatedString {
-                    withStyle(SpanStyle(color = arrowColor)) { append(if (more) "▲" else "▼") }
-                    // A no-break space keeps the arrow on the same line as the amount it describes.
-                    append(" ${MoneyText.unbroken(abs(delta), currency)} frente al anterior")
-                }
+        if (previous == 0L) {
+            shown += AnnotatedString("nuevo este periodo")
+            spoken += "nuevo este periodo"
+        } else {
+            val than = "que el anterior"
+            val unchanged = "igual que el periodo anterior"
+            shown += changeText(delta, previous, currency, than = than, unchanged = unchanged)
+            spoken += changeSpoken(delta, previous, currency, than = than, unchanged = unchanged)
+        }
+    }
+    return MerchantSupporting(
+        shown = buildAnnotatedString {
+            shown.forEachIndexed { index, part ->
+                if (index > 0) append(" · ")
+                append(part)
             }
-        }
-    }
-    return buildAnnotatedString {
-        parts.forEachIndexed { index, part ->
-            if (index > 0) append(" · ")
-            append(part)
-        }
-    }
+        },
+        spoken = spoken.joinToString(" · "),
+    )
 }
 
 @Composable
@@ -475,10 +507,12 @@ private fun MerchantSection(analysis: SpendingAnalysis, currency: SupportedCurre
     }
     var showAll by rememberSaveable { mutableStateOf(false) }
     val shown = if (showAll) analysis.merchants else analysis.merchants.take(TOP_MERCHANTS)
-    // Shares are of all the period's spending, including Movements without a merchant, so they match the total.
+    // Shares are of all the period's net spending, including Movements without a merchant, so they match the total.
     val total = analysis.merchants.sumOf { it.netSpendMinor } + analysis.unnamedNetSpendMinor
     val largest = analysis.merchants.maxOf { it.netSpendMinor }.coerceAtLeast(1)
-    val shares = shown.map { if (total > 0 && it.netSpendMinor > 0) "${(it.netSpendMinor * 100 + total / 2) / total}%" else "—" }
+    val shares = shown.map { merchant ->
+        merchant.netSpendMinor.takeIf { it > 0 }?.let { sharePercent(it, total) }?.let { "$it%" } ?: "—"
+    }
     val shareWidth = widestTextWidth(shares, MaterialTheme.typography.labelMedium)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         shown.forEachIndexed { index, merchant ->
@@ -499,8 +533,14 @@ private fun MerchantSection(analysis: SpendingAnalysis, currency: SupportedCurre
                     valueWidth = shareWidth,
                 )
                 val supporting = merchantSupporting(merchant, currency)
-                if (supporting.isNotEmpty()) {
-                    Text(supporting, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (supporting.shown.isNotEmpty()) {
+                    Text(
+                        supporting.shown,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        // Screen readers hear the change in words instead of the arrow.
+                        modifier = Modifier.clearAndSetSemantics { text = AnnotatedString(supporting.spoken) },
+                    )
                 }
             }
         }
@@ -635,10 +675,10 @@ private fun ForeignCurrencySection(analysis: SpendingAnalysis, currency: Support
 @Composable
 private fun RolloverSection(analysis: SpendingAnalysis, currency: SupportedCurrency) {
     fun money(minor: Long) = MoneyText.unbroken(minor, currency)
-    val (quiet, active) = analysis.rollover.partition { it.rolloverByPeriodMinor.last() <= 0 && it.carriesForwardMinor <= 0 }
-    val scale = active.maxOfOrNull { maxOf(it.rolloverByPeriodMinor.last(), it.carriesForwardMinor) }?.coerceAtLeast(1) ?: 1
-    if (active.isNotEmpty()) RolloverLegend()
-    active.forEach { pocket ->
+    val pockets = analysis.rollover
+    val scale = pockets.maxOfOrNull { maxOf(it.rolloverByPeriodMinor.last(), it.carriesForwardMinor) }?.coerceAtLeast(1) ?: 1
+    RolloverLegend()
+    pockets.forEach { pocket ->
         val start = pocket.rolloverByPeriodMinor.last().coerceAtLeast(0)
         val now = pocket.carriesForwardMinor
         val (shown, spoken) = when {
@@ -667,7 +707,6 @@ private fun RolloverSection(analysis: SpendingAnalysis, currency: SupportedCurre
             "La cifra es lo que pasó al siguiente periodo."
         },
     )
-    if (quiet.isNotEmpty()) Muted("Sin rollover en este periodo: ${quiet.joinToString(", ") { it.pocket.name }}.")
 }
 
 /**

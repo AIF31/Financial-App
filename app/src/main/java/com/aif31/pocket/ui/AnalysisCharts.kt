@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -156,8 +157,9 @@ internal fun TrendBars(
                 }
                 drawPath(path, if (bar.selected) barColor else barColor.copy(alpha = UNSELECTED_BAR_ALPHA))
             }
-            reference?.let {
-                val y = topOf(it.valueMinor)
+            val referenceY = reference?.let { topOf(it.valueMinor) }
+            if (reference != null && referenceY != null) {
+                val y = referenceY
                 drawLine(
                     referenceColor,
                     Offset(0f, y),
@@ -165,7 +167,7 @@ internal fun TrendBars(
                     strokeWidth = 1.5.dp.toPx(),
                     pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx())),
                 )
-                val text = measurer.measure(it.label, referenceStyle, maxLines = 1, softWrap = false)
+                val text = measurer.measure(reference.label, referenceStyle, maxLines = 1, softWrap = false)
                 val textTop = (y - text.size.height - 2.dp.toPx()).coerceAtLeast(0f)
                 // A patch of the card behind the label keeps it readable where it crosses a bar.
                 drawRect(surfaceColor, Offset(0f, textTop), Size(text.size.width + 4.dp.toPx(), text.size.height.toFloat()))
@@ -175,12 +177,16 @@ internal fun TrendBars(
                 val label = labels[index] ?: return@forEachIndexed
                 if (!everyLabelFits && !bar.selected) return@forEachIndexed
                 val x = (index * slot + slot / 2 - label.size.width / 2f).coerceIn(0f, (size.width - label.size.width).coerceAtLeast(0f))
-                val top = topOf(bar.valueMinor ?: 0)
-                drawText(label, color = if (bar.selected) selectedValueColor else valueColor, topLeft = Offset(x, top - labelGap - label.size.height))
+                val labelTop = topOf(bar.valueMinor ?: 0) - labelGap - label.size.height
+                // Where the reference line runs through a value, a patch of the card keeps the value readable.
+                if (referenceY != null && referenceY in labelTop..(labelTop + label.size.height)) {
+                    drawRect(surfaceColor, Offset(x - 2.dp.toPx(), labelTop), Size(label.size.width + 4.dp.toPx(), label.size.height.toFloat()))
+                }
+                drawText(label, color = if (bar.selected) selectedValueColor else valueColor, topLeft = Offset(x, labelTop))
             }
             drawLine(baselineColor, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 1.dp.toPx())
         }
-        PeriodLabels(bars.map { it.label }, selectedIndex = bars.indexOfFirst { it.selected })
+        PeriodLabels(bars.map { it.label }, selectedIndex = bars.indexOfFirst { it.selected }, modifier = Modifier.fillMaxWidth())
     }
 }
 
@@ -190,7 +196,7 @@ private const val UNSELECTED_BAR_ALPHA = 0.55f
 /** One label per period, centred under its slot; the selected period's label is emphasized. Decorative. */
 @Composable
 internal fun PeriodLabels(labels: List<String>, selectedIndex: Int, modifier: Modifier = Modifier) {
-    Row(modifier.fillMaxWidth().clearAndSetSemantics { }) {
+    Row(modifier.clearAndSetSemantics { }) {
         labels.forEachIndexed { index, label ->
             val selected = index == selectedIndex
             Text(
@@ -349,8 +355,8 @@ internal fun ComparisonLegend(fillLabel: String, markerLabel: String, modifier: 
 }
 
 @Composable
-private fun LegendKey(label: String, swatch: @Composable () -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+private fun LegendKey(label: String, modifier: Modifier = Modifier, swatch: @Composable () -> Unit) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         swatch()
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -430,8 +436,8 @@ internal fun RolloverLegend(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun Swatch(draw: androidx.compose.ui.graphics.drawscope.DrawScope.() -> Unit) {
-    Canvas(Modifier.width(14.dp).height(10.dp), onDraw = draw)
+private fun Swatch(modifier: Modifier = Modifier, draw: DrawScope.() -> Unit) {
+    Canvas(modifier.width(14.dp).height(10.dp), onDraw = draw)
 }
 
 /** The width of the widest of [texts] in [style]: a column of values this wide ends at one edge in every row. */

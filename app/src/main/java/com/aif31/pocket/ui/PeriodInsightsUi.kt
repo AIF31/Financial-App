@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -90,7 +91,10 @@ internal fun spendDeltaText(deltaMinor: Long, deltaPercent: Int?, currency: Supp
     return "$arrow ${MoneyText.format(abs(deltaMinor), currency)} $direction al día$percent"
 }
 
-/** Label/value row used by the dashboard details, period cards, and the comparison screen. */
+/**
+ * Label/value row used by the dashboard details, period cards, and the comparison screen. At a large font scale the
+ * value moves under the label, so neither is squeezed into a narrow column.
+ */
 @Composable
 internal fun MetricRow(
     label: String,
@@ -100,8 +104,17 @@ internal fun MetricRow(
     color: Color = Color.Unspecified,
     supportingColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
+    val rowModifier = modifier.fillMaxWidth().padding(vertical = 6.dp).semantics(mergeDescendants = true) {}
+    if (LocalDensity.current.fontScale > LARGE_FONT_SCALE) {
+        Column(rowModifier) {
+            Text(label, color = color, style = MaterialTheme.typography.bodyLarge)
+            Text(value, color = color, style = MaterialTheme.typography.titleMedium)
+            supporting?.let { Text(it, color = supportingColor, style = MaterialTheme.typography.bodySmall) }
+        }
+        return
+    }
     Row(
-        modifier = modifier.fillMaxWidth().padding(vertical = 6.dp).semantics(mergeDescendants = true) {},
+        modifier = rowModifier,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.Top,
     ) {

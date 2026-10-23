@@ -78,11 +78,12 @@ class AnalysisScreenTest {
         }
         val list = compose.onNodeWithTag("analysis_list")
 
-        list.performScrollToNode(hasText("SAR 10.00 al día"))
+        list.performScrollToNode(hasText("SAR\u00A010.00 al día"))
         list.performScrollToNode(
             hasContentDescription("Gasto diario promedio por periodo. 25 ene – 24 feb 2026: SAR 1.00. 25 feb – 24 mar 2026: SAR 10.00, en curso"),
         )
-        list.performScrollToNode(hasText("media SAR\u00A050.00 · ▲\u00A0SAR\u00A019.00 frente al anterior"))
+        // The change is spoken in words; the arrow is only shown.
+        list.performScrollToNode(hasText("media SAR\u00A050.00 · SAR\u00A019.00 más que el anterior, un 61% más"))
         list.performScrollToNode(hasText("Gastas más los sábados: SAR 50.00 de media"))
         list.performScrollToNode(hasText("Tarjeta"))
         list.performScrollToNode(hasText("33% del gasto neto se registró en otra moneda"))
@@ -185,6 +186,39 @@ class AnalysisScreenTest {
         )
     }
 
+    @Test
+    fun a_refund_pocket_keeps_its_negative_amount_and_a_pocket_without_movements_is_named_once() {
+        val gifts = Pocket("gifts", "Regalos", PocketIconKey.forName("Regalos"), 1, false, false)
+        val travel = Pocket("travel", "Viajes", PocketIconKey.forName("Viajes"), 2, false, false)
+        val state = LedgerState(
+            periods = listOf(february, march),
+            currentPeriod = march,
+            pocketCatalog = listOf(market, gifts, travel),
+            pocketSummariesByPeriod = mapOf(
+                february.id to listOf(spend(3_100)),
+                march.id to listOf(spend(9_000), spend(-900, gifts), spend(0, travel)),
+            ),
+            unallocatedMinorByPeriod = mapOf(february.id to 0L, march.id to 0L),
+            movements = listOf(
+                movement("feb", february, LocalDate.of(2026, 2, 1), 3_100, merchant = "Tamimi"),
+                movement("a", march, LocalDate.of(2026, 2, 28), 9_000, merchant = "Tamimi"),
+                movement("r", march, LocalDate.of(2026, 3, 1), 900, merchant = "Jarir", pocket = gifts, type = MovementType.REFUND),
+            ),
+            elapsedDays = 9,
+            totalDays = 28,
+            currentLocalDate = LocalDate.of(2026, 3, 5),
+        )
+        compose.setContent { PocketTheme { AnalysisScreen(state, march.id, onPeriodChange = {}, onBack = {}) } }
+        val list = compose.onNodeWithTag("analysis_list")
+
+        // Net spend is SAR 9.00 a day: SAR 10.00 in Supermercado less SAR 1.00 refunded in Regalos.
+        list.performScrollToNode(hasContentDescription("Supermercado: SAR\u00A010.00 al día", substring = true))
+        compose.onNode(hasContentDescription("111% del gasto", substring = true)).assertExists()
+        list.performScrollToNode(hasContentDescription("Regalos: SAR\u00A0-1.00 al día", substring = true))
+        compose.onNode(hasContentDescription("Devolución neta", substring = true)).assertExists()
+        list.performScrollToNode(hasText("Sin gasto en mar ni feb: Viajes."))
+    }
+
     private fun threePeriodState(january: Period) = LedgerState(
         periods = listOf(january, february, march),
         currentPeriod = march,
@@ -205,8 +239,8 @@ class AnalysisScreenTest {
         currentLocalDate = LocalDate.of(2026, 3, 5),
     )
 
-    private fun spend(expense: Long) = PocketPeriodSummary(
-        pocket = market,
+    private fun spend(expense: Long, pocket: Pocket = market) = PocketPeriodSummary(
+        pocket = pocket,
         budgetMinor = 30_000,
         rolloverMinor = 0,
         expenseMinor = expense,
@@ -226,8 +260,10 @@ class AnalysisScreenTest {
         merchant: String,
         method: Pair<String, String>? = null,
         original: Pair<Long, SupportedCurrency>? = null,
+        pocket: Pocket = market,
+        type: MovementType = MovementType.EXPENSE,
     ) = Movement(
-        id = id, pocketId = market.id, pocketName = market.name, periodId = period.id, type = MovementType.EXPENSE,
+        id = id, pocketId = pocket.id, pocketName = pocket.name, periodId = period.id, type = type,
         accountingAmountMinor = amount, occurredAtUtcMillis = 0, localDate = date, zoneId = "Asia/Riyadh",
         merchant = merchant, note = null, paymentMethodId = method?.first, paymentMethodName = method?.second,
         originalAmountMinor = original?.first, originalCurrencyCode = (original?.second ?: period.accountingCurrency).name,

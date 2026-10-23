@@ -141,6 +141,21 @@ class SpendingAnalysisTest {
     }
 
     @Test
+    fun a_pocket_of_this_period_without_spending_is_still_listed_after_the_others() {
+        val state = state(
+            summaries = mapOf(
+                february.id to listOf(summary(market, expense = 6_200)),
+                march.id to listOf(summary(travel, expense = 0), summary(market, expense = 1_800)),
+            ),
+        )
+
+        val trends = SpendingAnalysis.of(state, march.id)!!.pocketTrends
+
+        assertEquals(listOf(market.id, travel.id), trends.map { it.pocket.id })
+        assertEquals(listOf(0L, 0L), trends.last().averageDailyByPeriodMinor)
+    }
+
+    @Test
     fun rollover_history_lists_received_rollover_and_what_would_carry_forward() {
         val state = state(
             summaries = mapOf(
@@ -192,7 +207,8 @@ class SpendingAnalysisTest {
         assertTrue(empty.paymentMethods.isEmpty())
         assertTrue(empty.foreignCurrencies.isEmpty())
         assertNull(empty.foreignSharePercent)
-        assertTrue(empty.pocketTrends.isEmpty())
+        // The period's Pockets are still listed, with no spending, so the screen can name them.
+        assertTrue(empty.pocketTrends.all { trend -> trend.averageDailyByPeriodMinor.all { it == 0L } })
         assertTrue(empty.rollover.single().rolloverByPeriodMinor.all { it == 0L })
     }
 
