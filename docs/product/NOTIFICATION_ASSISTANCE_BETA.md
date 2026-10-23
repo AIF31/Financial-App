@@ -32,6 +32,8 @@ The Movement uses the default payment method and is labelled **Detectado** in Mo
 
 With the alert on, a newly detected payment from the last 15 minutes shows a heads-up notification such as `Gasto registrado · SAR 8.00` / `Tamimi-Market → Supermercado · Messages`, or `Gasto detectado · SAR 23.05` / `TAMIMI MARKET · Elige un Pocket para registrarlo`. Tapping it opens Movements. The lock screen shows only `Pocket leyó un movimiento`. Older messages found when access is first granted are captured silently.
 
+With **Aviso de ritmo de Pockets** on (the default), an auto-recorded payment that leaves a Pocket forecast to run out, at 80% of its budget, or without availability posts one notification per level, such as `Supermercado lleva el 85%` / `Quedan SAR 15.00 de SAR 100.00 en este periodo.` A worse level replaces the Pocket's earlier alert. Levels reached while Pocket is open count as seen, and the first check after updating records existing levels silently. The lock screen shows only `Aviso de un Pocket`.
+
 No notification is treated as a complete transaction feed. The parser makes no bank-support claim and may miss valid notifications, so the person remains responsible for reviewing Movements.
 
 ## Stored data and retention

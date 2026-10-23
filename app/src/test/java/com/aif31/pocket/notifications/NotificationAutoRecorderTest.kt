@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.aif31.pocket.data.FinanceDatabase
 import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
+import com.aif31.pocket.data.MerchantMemory
 import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.PocketLedger
 import com.aif31.pocket.data.RoomPocketLedger
@@ -81,6 +82,99 @@ class NotificationAutoRecorderTest {
         assertEquals(remembered.id, movement.pocketId)
         assertEquals(2_305L, movement.accountingAmountMinor)
         assertTrue(confirmations.isEmpty())
+    }
+
+    @Test fun memory_and_the_auto_recorder_choose_the_same_latest_expense_pocket() = runTest {
+        val pockets = ledger.state.first().pocketCatalog
+        recordManually(pockets[0].id, "K.F.C", minutesAgo = 60)
+        recordManually(pockets[1].id, "KFC", minutesAgo = 30)
+        val entry = MerchantMemory.entries(ledger.state.first()).single()
+        val suggestionId = detect("shared-resolution", ParsedPayment(2_000, SupportedCurrency.SAR, "k.f.c"))
+
+        assertEquals(
+            AutoRecordOutcome.Recorded(autoRecordedMovementId(suggestionId), entry.pocket.name),
+            NotificationAutoRecorder(ledger, zone).record(suggestionId),
+        )
+        assertEquals(entry.pocket.id, ledger.state.first().movements.single { isAutoRecordedMovement(it.id) }.pocketId)
+    }
+
+    @Test fun reassign_moves_only_the_latest_expense_and_the_next_payment_uses_its_new_pocket() = runTest {
+        val pockets = ledger.state.first().pocketCatalog
+        recordManually(pockets[0].id, "Tamimi", minutesAgo = 60)
+        recordManually(pockets[0].id, "TAMIMI", minutesAgo = 30)
+        val before = ledger.state.first()
+        val latest = MerchantMemory.entries(before).single().latestExpense
+
+        assertEquals(LedgerResult.Success, ledger.execute(MerchantMemory.reassign(before, "tamimi", pockets[1].id)))
+
+        val after = ledger.state.first()
+        assertEquals(before.movements.size, after.movements.size)
+        assertEquals(latest.copy(pocketId = pockets[1].id, pocketName = pockets[1].name), after.movements.single { it.id == latest.id })
+        assertEquals(before.movements.single { it.id != latest.id }, after.movements.single { it.id != latest.id })
+        val suggestionId = detect("after-reassign", ParsedPayment(2_000, SupportedCurrency.SAR, "Tamimi"))
+        assertEquals(
+            AutoRecordOutcome.Recorded(autoRecordedMovementId(suggestionId), pockets[1].name),
+            NotificationAutoRecorder(ledger, zone).record(suggestionId),
+        )
+    }
+
+    @Test fun a_prepared_reassignment_rejects_a_newer_auto_recorded_expense() = runTest {
+        val pockets = ledger.state.first().pocketCatalog
+        recordManually(pockets[0].id, "Tamimi", minutesAgo = 30)
+        val command = MerchantMemory.reassign(ledger.state.first(), "tamimi", pockets[1].id)
+        val suggestionId = detect("during-reassignment", ParsedPayment(2_000, SupportedCurrency.SAR, "TAMIMI"))
+        assertTrue(NotificationAutoRecorder(ledger, zone).record(suggestionId) is AutoRecordOutcome.Recorded)
+        val before = ledger.state.first().movements
+
+        assertEquals(
+            LedgerResult.Rejected("El comercio tiene un gasto más reciente. Revisa sus datos antes de confirmar."),
+            ledger.execute(command),
+        )
+        assertEquals(before, ledger.state.first().movements)
+    }
+
+    @Test fun reassign_preserves_a_foreign_expenses_conversion_metadata_payment_method_and_original_zone() = runTest {
+        val before = ledger.state.first()
+        val pockets = before.pocketCatalog
+        val originalZone = ZoneId.of("America/Mexico_City")
+        val otherZoneLedger = RoomPocketLedger(database, clock, originalZone)
+        val method = before.paymentMethods.first()
+        assertEquals(LedgerResult.Success, otherZoneLedger.execute(LedgerCommand.AddMovement(
+            id = "foreign", pocketId = pockets[0].id, type = MovementType.EXPENSE,
+            accountingAmountMinor = 1_875, occurredAtUtcMillis = instant.minusSeconds(3600).toEpochMilli(),
+            localDate = LocalDate.of(2026, 9, 5), merchant = "Foreign shop", note = "Keep this note",
+            paymentMethodId = method.id, originalAmountMinor = 500, originalCurrencyCode = "USD",
+            conversionStatus = com.aif31.pocket.data.ConversionStatus.ESTIMATED, rate = "3.75",
+            conversionEffectiveDate = LocalDate.of(2026, 9, 4), conversionSource = "Provider",
+        )))
+        val original = ledger.state.first().movements.single()
+        assertEquals(originalZone.id, original.zoneId)
+
+        assertEquals(LedgerResult.Success, ledger.execute(MerchantMemory.reassign(ledger.state.first(), "foreignshop", pockets[1].id)))
+
+        assertEquals(original.copy(pocketId = pockets[1].id, pocketName = pockets[1].name), ledger.state.first().movements.single())
+    }
+
+    @Test fun a_prepared_reassignment_cannot_overwrite_a_later_conversion_confirmation() = runTest {
+        val pockets = ledger.state.first().pocketCatalog
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.AddMovement(
+            id = "estimate", pocketId = pockets[0].id, type = MovementType.EXPENSE,
+            accountingAmountMinor = 1_875, occurredAtUtcMillis = instant.toEpochMilli(),
+            localDate = LocalDate.of(2026, 9, 5), merchant = "Foreign shop",
+            originalAmountMinor = 500, originalCurrencyCode = "USD",
+            conversionStatus = com.aif31.pocket.data.ConversionStatus.ESTIMATED, rate = "3.75",
+            conversionEffectiveDate = LocalDate.of(2026, 9, 4), conversionSource = "Provider",
+        )))
+        val before = ledger.state.first()
+        val command = MerchantMemory.reassign(before, "foreignshop", pockets[1].id)
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ConfirmConversion(
+            estimate = before.movements.single(), accountingAmountMinor = 1_900, rate = "3.8",
+            effectiveDate = LocalDate.of(2026, 9, 5), source = "Final provider",
+        )))
+        val confirmed = ledger.state.first().movements.single()
+
+        assertEquals(LedgerResult.Rejected("El gasto cambió. Revisa sus datos antes de confirmar."), ledger.execute(command))
+        assertEquals(confirmed, ledger.state.first().movements.single())
     }
 
     @Test fun an_auto_recorded_movement_is_identified_by_its_full_suggestion_identity() = runTest {

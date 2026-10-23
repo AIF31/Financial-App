@@ -58,6 +58,7 @@ internal fun PocketsScreen(
     var selectedPeriodId by rememberSaveable(state.currentPeriod?.id) { mutableStateOf(state.currentPeriod?.id) }
     var editing by remember { mutableStateOf<PocketPeriodSummary?>(null) }
     var creating by rememberSaveable { mutableStateOf(false) }
+    var reviewingSuggestions by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val selectedPeriod = state.periods.firstOrNull { it.id == selectedPeriodId } ?: state.currentPeriod
     val selectedCurrency = selectedPeriod?.accountingCurrency ?: SupportedCurrency.SAR
@@ -109,6 +110,12 @@ internal fun PocketsScreen(
                     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text("Revisa el presupuesto de este periodo", style = MaterialTheme.typography.titleMedium)
                         Text("Comprueba las asignaciones y el rollover antes de continuar.")
+                        val suggestions = remember(state, selectedPeriod.id) { BudgetSuggestions.plan(state, selectedPeriod.id).changes }
+                        if (suggestions.isNotEmpty()) {
+                            OutlinedButton(onClick = { reviewingSuggestions = true }, modifier = Modifier.testTag("review_suggested_budgets")) {
+                                Text("Aplicar presupuestos sugeridos")
+                            }
+                        }
                         Button(onClick = {
                             scope.launch { ledger.execute(LedgerCommand.MarkPeriodReviewed(selectedPeriod.id)) }
                         }) {
@@ -366,6 +373,76 @@ internal fun PocketsScreen(
     if (creating || editing != null) {
         PocketEditorDialog(editing, ledger) { creating = false; editing = null }
     }
+    if (reviewingSuggestions && selectedPeriod != null) {
+        SuggestedBudgetsDialog(state, selectedPeriod.id, ledger, selectedCurrency) { reviewingSuggestions = false }
+    }
+}
+
+/**
+ * Confirms replacing budgets with their suggestions in one step. Pockets without a suggestion keep their budget, and
+ * the change is offered only when the new total fits the period's new funds.
+ */
+@Composable
+private fun SuggestedBudgetsDialog(
+    state: LedgerState,
+    periodId: String,
+    ledger: PocketLedger,
+    currency: SupportedCurrency,
+    onDismiss: () -> Unit,
+) {
+    fun money(minor: Long) = MoneyText.format(minor, currency)
+    val plan = remember(state, periodId) { BudgetSuggestions.plan(state, periodId) }
+    val changes = plan.changes
+    val newFunds = state.periods.firstOrNull { it.id == periodId }?.newFundsMinor ?: 0
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Presupuestos sugeridos") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Según lo que gastó cada Pocket en sus periodos recientes, ajustado a la duración de este periodo.")
+                changes.forEach { (summary, suggestion) ->
+                    MetricRow(
+                        label = summary.pocket.name,
+                        value = money(suggestion.suggestedMinor),
+                        supporting = "Ahora ${money(summary.budgetMinor)}" + suggestion.fit.description(suggestion.basedOnPeriods)?.let { " · $it" }.orEmpty(),
+                    )
+                }
+                Text("Total asignado: ${plan.totalMinor?.let(::money) ?: "fuera del límite permitido"} de ${money(newFunds)}", style = MaterialTheme.typography.titleSmall)
+                if (!plan.canApply) {
+                    Text(
+                        "Las sugerencias superan los fondos del periodo. Ajusta los fondos o aplica cada sugerencia desde su Pocket.",
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = plan.canApply,
+                onClick = {
+                    scope.launch {
+                        val amounts = changes.associate { (summary, suggestion) -> summary.pocket.id to suggestion.suggestedMinor }
+                        when (val result = ledger.execute(LedgerCommand.SetAllocations(periodId, amounts))) {
+                            LedgerResult.Success -> onDismiss()
+                            is LedgerResult.Rejected -> error = result.message
+                            is LedgerResult.Deleted -> Unit
+                        }
+                    }
+                },
+                modifier = Modifier.testTag("apply_suggested_budgets"),
+            ) { Text("Aplicar") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
+}
+
+private fun BudgetFit?.description(periods: Int): String? = when (this) {
+    BudgetFit.OVER -> "se pasó en los últimos $periods periodos"
+    BudgetFit.UNDER -> "usó menos de la mitad en los últimos $periods periodos"
+    null -> null
 }
 
 @Composable
@@ -573,6 +650,20 @@ private fun PocketManagementDialog(
         )
         return
     }
+    var covering by rememberSaveable(summary.pocket.id, periodId) { mutableStateOf(false) }
+    val reassignment = remember(state, periodId, summary.pocket.id) { BudgetReassignment.of(state, periodId, summary.pocket.id) }
+    if (covering) {
+        BudgetReassignmentDialog(
+            state = state,
+            periodId = periodId,
+            targetPocketId = summary.pocket.id,
+            ledger = ledger,
+            currency = currency,
+            onDismiss = { covering = false },
+            onCovered = onDismiss,
+        )
+        return
+    }
     val initialAmount = if (summary.budgetMinor == 0L) "" else minorNumber(summary.budgetMinor)
     var amount by rememberSaveable(summary.pocket.id, periodId, stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(initialAmount))
@@ -596,6 +687,12 @@ private fun PocketManagementDialog(
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Gestiona el presupuesto y las opciones de este Pocket sin saturar la vista general.")
+                if (reassignment != null) {
+                    OutlinedButton(
+                        onClick = { covering = true },
+                        modifier = Modifier.fillMaxWidth().testTag("cover_pocket"),
+                    ) { Text("Cubrir con otro Pocket") }
+                }
                 OutlinedTextField(
                     value = amount,
                     onValueChange = { amount = it; error = null },
@@ -609,6 +706,28 @@ private fun PocketManagementDialog(
                         }
                         .testTag("allocation_amount"),
                 )
+                val suggestion = remember(state, periodId) { BudgetSuggestions.of(state, periodId)[summary.pocket.id] }
+                suggestion?.let {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Sugerido: ${money(it.suggestedMinor)}", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "Según lo gastado en ${counted(it.basedOnPeriods, "periodo reciente", "periodos recientes")}" +
+                                    it.fit.description(it.basedOnPeriods)?.let { fit -> "; $fit" }.orEmpty(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                val text = minorNumber(it.suggestedMinor)
+                                amount = TextFieldValue(text, TextRange(text.length))
+                                error = null
+                            },
+                            modifier = Modifier.testTag("use_suggested_budget"),
+                        ) { Text("Usar") }
+                    }
+                }
                 Text("Fondos del periodo: ${money(state.periods.firstOrNull { it.id == periodId }?.newFundsMinor ?: 0)}")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(

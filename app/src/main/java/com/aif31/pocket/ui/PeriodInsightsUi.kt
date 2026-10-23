@@ -151,6 +151,7 @@ internal fun SpendPaceMetrics(
     supportingColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     barColor: Color = MaterialTheme.colorScheme.primary,
     trackColor: Color = MaterialTheme.colorScheme.surfaceVariant,
+    afterProjectionContent: (@Composable () -> Unit)? = null,
 ) {
     fun money(minor: Long) = MoneyText.format(minor, insights.accountingCurrency)
     Column(modifier) {
@@ -173,6 +174,7 @@ internal fun SpendPaceMetrics(
         insights.projectedSpendMinor?.let {
             MetricRow("Proyección estimada", money(it), supporting = "Si mantienes el ritmo actual", color = color, supportingColor = supportingColor)
         }
+        afterProjectionContent?.invoke()
         Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             insights.budgetUsedPercent?.let { LabeledBar("Presupuesto + rollover usado", it, barColor, trackColor, color) }
             LabeledBar("Periodo transcurrido", insights.periodElapsedPercent, barColor.copy(alpha = 0.55f), trackColor, color)

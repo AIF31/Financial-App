@@ -32,6 +32,10 @@ _Avoid_: Live rate, reversible rate, unlabeled conversion
 The portion of a period's new funds assigned to a Pocket. Pocket budgets across a period cannot exceed its new funds.
 _Avoid_: Expense, transfer
 
+**Budget reassignment**:
+An increase to one Pocket's budget covered by a decrease to another Pocket's budget or by unassigned funds in the same budget period. A giving Pocket must be active, with availability left, and neither exhausted, at risk nor forecast to run out. It can give at most the lesser of its availability and budget. Reassignment changes neither Movements nor rollover.
+_Avoid_: Transfer
+
 **Rollover**:
 Positive availability carried from an opted-in Pocket into the next period. Negative availability never rolls over.
 _Avoid_: Funds, income
@@ -69,8 +73,24 @@ Turning a Movement suggestion into a Movement without review, only when its merc
 _Avoid_: Bank sync, automatic categorization
 
 **Merchant memory**:
-The Pocket of the most recent expense whose merchant matches after ignoring case and punctuation. It is derived from existing Movements and is not stored separately.
+The Pocket of the most recent expense whose merchant matches after ignoring case and punctuation. It is derived from existing Movements and is not stored separately. Changing a merchant’s Pocket in Settings moves its most recent expense to that Pocket, which also directs future automatic records there.
 _Avoid_: Rule, category mapping
+
+**Recurring charge**:
+A detected expectation of a merchant's next expense, derived from regular dates and stable amounts in existing Movements using the same accounting currency. A consistent monthly date follows calendar months, clamping to shorter months; other regular schedules follow their median day interval. Each expected occurrence is overdue for at most half a cadence, then drops from the list; later occurrences remain expected. After two consecutive expected occurrences pass that window without a charge, the merchant is treated as ended and no occurrences are listed. It is not stored and never records a Movement automatically. It is distinct from `RecurringTemplate`, a shortcut that prefills a movement form.
+_Avoid_: Subscription billing, scheduled expense, Recurring template
+
+**Budget suggestion**:
+A proposed Pocket budget: the median net spend of up to three recent ended periods in the same accounting currency, each scaled to the target period's length and rounded up to a whole unit. A Pocket with no spending to go on gets no suggestion. Applying suggestions replaces the chosen budgets in one step and only when their total fits the period's new funds.
+_Avoid_: Automatic budget, forecast
+
+**Pace alert**:
+A notification that a Pocket is forecast to run out before the period ends, has reached 80% of its budget, or has no availability left. Each level alerts once per Pocket and period, and only after auto-recording; levels reached through changes made in the app count as seen. When a payment is auto-recorded while the app is open, the alert may or may not post, depending on which check runs first.
+_Avoid_: Budget warning, reminder
+
+**Rate alert**:
+An opt-in notification of the latest Banxico FIX for one chosen pair of MXN against USD or SAR, with SAR derived through the SAMA peg. It also gives the change from the previous FIX and the average of every FIX dated in the seven days ending on the latest one. It posts daily, weekly on a chosen day, or only for a FIX not yet alerted, at a chosen `Asia/Riyadh` time, and requires online conversion. An optional minimum rate holds it back until 1 unit of the first currency buys at least that much of the second. It never changes a Movement or a currency boundary quote.
+_Avoid_: Live rate, rate tracker, Pace alert
 
 **Experimental notification parser**:
 An opt-in beta parser for English and Spanish notifications from user-selected apps. It is generic, is tested with synthetic notifications, and makes no claim of supporting a particular bank.

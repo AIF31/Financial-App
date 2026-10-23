@@ -22,6 +22,11 @@ interface BanxicoRateSource {
     suspend fun fetchUsdToMxn(requestedDate: LocalDate): FxQuote
 }
 
+/** Every Banxico FIX published from [startDate] through [endDate], oldest first. */
+fun interface BanxicoHistorySource {
+    suspend fun fetchUsdToMxnHistory(startDate: LocalDate, endDate: LocalDate): List<FxObservation>
+}
+
 fun interface BanxicoTransport {
     suspend fun get(startDate: LocalDate, endDate: LocalDate, token: String): String
 }
@@ -29,12 +34,25 @@ fun interface BanxicoTransport {
 class HttpsBanxicoClient(
     private val token: String,
     private val transport: BanxicoTransport = UrlConnectionBanxicoTransport(),
-) : BanxicoRateSource {
-    override suspend fun fetchUsdToMxn(requestedDate: LocalDate): FxQuote {
+) : BanxicoRateSource, BanxicoHistorySource {
+    override suspend fun fetchUsdToMxn(requestedDate: LocalDate): FxQuote = guarded {
+        val startDate = requestedDate.minusDays(FxQuote.MAX_QUOTE_AGE_DAYS)
+        parseBanxicoUsdToMxn(transport.get(startDate, requestedDate, token), requestedDate)
+    }
+
+    override suspend fun fetchUsdToMxnHistory(startDate: LocalDate, endDate: LocalDate): List<FxObservation> {
+        require(!startDate.isAfter(endDate)) { "Rango de fechas no válido" }
+        return guarded { history(startDate, endDate) }
+    }
+
+    private suspend fun history(startDate: LocalDate, endDate: LocalDate): List<FxObservation> =
+        parseBanxicoUsdToMxnObservations(transport.get(startDate, endDate, token))
+            .filter { !it.date.isBefore(startDate) && !it.date.isAfter(endDate) }
+
+    private suspend fun <T> guarded(block: suspend () -> T): T {
         if (token.isBlank()) throw QuoteFailure.ConfigurationUnavailable()
         return try {
-            val startDate = requestedDate.minusDays(FxQuote.MAX_QUOTE_AGE_DAYS)
-            parseBanxicoUsdToMxn(transport.get(startDate, requestedDate, token), requestedDate)
+            block()
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (known: QuoteFailure) {
@@ -94,34 +112,40 @@ internal fun readBounded(input: InputStream, maximumBytes: Int): String {
 }
 
 internal fun parseBanxicoUsdToMxn(payload: String, requestedDate: LocalDate): FxQuote {
+    val lowerBound = requestedDate.minusDays(FxQuote.MAX_QUOTE_AGE_DAYS)
+    val observation = parseBanxicoUsdToMxnObservations(payload)
+        .lastOrNull { !it.date.isAfter(requestedDate) && !it.date.isBefore(lowerBound) }
+        ?: throw QuoteFailure.Unavailable()
+    return FxQuote(
+        requestedDate = requestedDate,
+        effectiveDate = observation.date,
+        base = SupportedCurrency.USD,
+        quote = SupportedCurrency.MXN,
+        rate = canonicalRate(observation.usdToMxn),
+        source = "BANXICO_FIX_SF43718",
+    )
+}
+
+/** The payload's valid FIX observations, oldest first; non-numeric values such as "N/E" are skipped. */
+internal fun parseBanxicoUsdToMxnObservations(payload: String): List<FxObservation> {
     val response = try {
         BANXICO_JSON.decodeFromString<BanxicoResponse>(payload)
     } catch (_: Exception) {
         throw QuoteFailure.Unavailable()
     }
-    val lowerBound = requestedDate.minusDays(FxQuote.MAX_QUOTE_AGE_DAYS)
-    val observation = response.bmx.series
+    return response.bmx.series
         .firstOrNull { it.id == SERIES_ID }
         ?.data
         .orEmpty()
         .mapNotNull { value ->
             val date = runCatching { LocalDate.parse(value.date, BANXICO_DATE) }.getOrNull() ?: return@mapNotNull null
-            if (date.isAfter(requestedDate) || date.isBefore(lowerBound)) return@mapNotNull null
             val rate = runCatching { BigDecimal(value.value) }.getOrNull()
                 ?.takeIf { it > BigDecimal.ZERO }
                 ?: return@mapNotNull null
-            date to rate
+            FxObservation(date, rate)
         }
-        .maxByOrNull { it.first }
-        ?: throw QuoteFailure.Unavailable()
-    return FxQuote(
-        requestedDate = requestedDate,
-        effectiveDate = observation.first,
-        base = SupportedCurrency.USD,
-        quote = SupportedCurrency.MXN,
-        rate = canonicalRate(observation.second),
-        source = "BANXICO_FIX_SF43718",
-    )
+        .distinctBy { it.date }
+        .sortedBy { it.date }
 }
 
 private val BANXICO_JSON = Json { ignoreUnknownKeys = true }

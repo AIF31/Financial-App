@@ -35,6 +35,10 @@ class PocketNotificationListener : NotificationListenerService() {
         })
     }
     private val notifier by lazy { DetectedMovementNotifier(this) }
+    private val paceAlerts by lazy {
+        val paceNotifier = PaceAlertNotifier(this)
+        PaceAlertCoordinator(pocketApplication.preferences, paceNotifier::show)
+    }
 
     override fun onNotificationPosted(notification: StatusBarNotification) {
         val notificationIdentity = lifecycleIdentities.identityForPosted(
@@ -56,12 +60,14 @@ class PocketNotificationListener : NotificationListenerService() {
                         messages = notificationMessages(notification, notificationIdentity),
                         dollarCurrency = dollarCurrency,
                     )
+                    var recorded = false
                     captured.filter { it.outcome != IngestOutcome.IGNORED }.forEach { payment ->
                         val outcome = if (preferences.notificationAutoRecord) {
                             autoRecorder.record(payment.suggestionId)
                         } else {
                             AutoRecordOutcome.NeedsReview(ReviewReason.UNAVAILABLE)
                         }
+                        if (outcome is AutoRecordOutcome.Recorded) recorded = true
                         val isFresh = System.currentTimeMillis() - payment.effectiveAtUtcMillis <= ALERT_FRESHNESS_MILLIS
                         if (preferences.notificationDetectionAlerts && payment.outcome == IngestOutcome.CREATED && isFresh) {
                             notifier.show(
@@ -70,6 +76,8 @@ class PocketNotificationListener : NotificationListenerService() {
                             )
                         }
                     }
+                    // A payment recorded while Pocket was closed may have pushed a Pocket past a pace level.
+                    if (recorded) paceAlerts.notifyNew(pocketApplication.ledger.state.first())
                 }
             } catch (error: CancellationException) {
                 throw error

@@ -30,7 +30,7 @@ Auto-recording and the detection alert are separate settings, both on by default
 ## Consequences
 
 - The Movement definition in `CONTEXT.md` now includes Movements recorded from a known merchant's notification.
-- A wrong merchant memory records a wrong Pocket until the person edits the Movement. The alert and the "Detectado" label keep these records visible.
+- A wrong merchant memory records a wrong Pocket until the person edits the Movement. The alert and the "Detectado" label keep these records visible. The **Memoria de comercios** Settings screen mitigates this downside by moving the merchant’s latest expense to a chosen Pocket; memory remains derived, without separate storage.
 - Deleting an auto-recorded Movement does not re-create it; the tombstone blocks the same message until it expires after 30 days.
 - The raw notification text is still never stored. Only a one-way identity hash and normalized fields are kept.
 

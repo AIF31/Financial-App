@@ -37,6 +37,12 @@ data class FxQuote(
     }
 }
 
+/** One published Banxico FIX: Mexican pesos per US dollar on [date]. */
+data class FxObservation(val date: LocalDate, val usdToMxn: BigDecimal)
+
+/** Saudi riyals per US dollar under the SAMA peg. */
+internal val SAMA_SAR_PER_USD: BigDecimal = BigDecimal("3.75")
+
 interface ExchangeRateRepository {
     suspend fun quote(
         requestedDate: LocalDate,

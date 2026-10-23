@@ -76,6 +76,41 @@ class BanxicoClientTest {
     }
 
     @Test
+    fun `history returns numeric FIX observations in the requested range, oldest first`() = runTest {
+        var requestedRange: Pair<LocalDate, LocalDate>? = null
+        val client = HttpsBanxicoClient(
+            token = "configured",
+            transport = BanxicoTransport { start, end, _ -> requestedRange = start to end; fixture("fix_numeric.json") },
+        )
+
+        val history = client.fetchUsdToMxnHistory(LocalDate.of(2026, 8, 29), LocalDate.of(2026, 8, 31))
+
+        assertEquals(LocalDate.of(2026, 8, 29) to LocalDate.of(2026, 8, 31), requestedRange)
+        assertEquals(listOf(FxObservation(LocalDate.of(2026, 8, 29), java.math.BigDecimal("17.2500"))), history)
+        assertEquals(
+            listOf(LocalDate.of(2026, 8, 28), LocalDate.of(2026, 8, 29)),
+            parseBanxicoUsdToMxnObservations(fixture("fix_numeric.json")).map { it.date },
+        )
+    }
+
+    @Test
+    fun `history refuses empty configuration and maps transport errors to a safe failure`() = runTest {
+        var calls = 0
+        val unconfigured = HttpsBanxicoClient(token = "", transport = BanxicoTransport { _, _, _ -> calls += 1; "" })
+        assertTrue(
+            runCatching { unconfigured.fetchUsdToMxnHistory(requested.minusDays(20), requested) }.exceptionOrNull()
+                is QuoteFailure.ConfigurationUnavailable,
+        )
+        assertEquals(0, calls)
+
+        val failing = HttpsBanxicoClient(token = "configured", transport = BanxicoTransport { _, _, _ -> throw IOException("down") })
+        assertTrue(
+            runCatching { failing.fetchUsdToMxnHistory(requested.minusDays(20), requested) }.exceptionOrNull()
+                is QuoteFailure.Unavailable,
+        )
+    }
+
+    @Test
     fun `bounded response reader accepts the limit and rejects one extra byte`() {
         assertEquals("1234", readBounded(ByteArrayInputStream("1234".encodeToByteArray()), 4))
         assertThrows(IOException::class.java) {

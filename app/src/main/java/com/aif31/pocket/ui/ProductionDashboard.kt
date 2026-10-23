@@ -26,11 +26,14 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.Savings
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -72,6 +75,8 @@ import com.aif31.pocket.data.PocketBudgetStatus
 import com.aif31.pocket.data.budgetStatusAt
 import com.aif31.pocket.data.PeriodComparison
 import com.aif31.pocket.data.PeriodInsights
+import com.aif31.pocket.data.PeriodRecap
+import com.aif31.pocket.data.RecurringCharges
 import com.aif31.pocket.data.PocketPeriodSummary
 import com.aif31.pocket.domain.SupportedCurrency
 
@@ -83,10 +88,18 @@ internal fun ActionableDashboardContent(
     modifier: Modifier = Modifier,
     onRecordExpenseIn: (pocketId: String) -> Unit = {},
     onComparePeriods: () -> Unit = {},
-    onOpenAnalysis: () -> Unit = {},
+    onOpenAnalysis: (periodId: String) -> Unit = {},
+    recapDismissedPeriodId: String? = null,
+    onDismissRecap: (periodId: String) -> Unit = {},
 ) {
     val period = state.currentPeriod
     val insights = remember(state) { period?.let { PeriodInsights.of(state, it.id) } }
+    val recap = remember(state) { PeriodRecap.forCurrentPeriod(state) }
+    // Hidden at once on tap, before the stored preference catches up.
+    var recapClosedHere by rememberSaveable { mutableStateOf<String?>(null) }
+    val shownRecap = recap?.takeIf {
+        state.elapsedDays <= RECAP_DAYS && it.insights.period.id != recapDismissedPeriodId && it.insights.period.id != recapClosedHere
+    }
     val activePockets = state.pockets
         .filterNot { it.pocket.archived || it.retiredThisPeriod }
         .sortedBy { summary -> summary.budgetStatusAt(insights).ordinal }
@@ -172,6 +185,7 @@ internal fun ActionableDashboardContent(
                 comparison = comparison,
                 accountingCurrency = accountingCurrency,
                 onComparePeriods = onComparePeriods,
+                onOpenAnalysis = onOpenAnalysis,
                 modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
             )
         }
@@ -181,9 +195,23 @@ internal fun ActionableDashboardContent(
                 modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
             )
         }
+        // Below the hero, so the available amount stays the first figure on screen.
+        shownRecap?.let { recap ->
+            item(key = "recap") {
+                PeriodRecapCard(
+                    recap = recap,
+                    onOpenAnalysis = { onOpenAnalysis(recap.insights.period.id) },
+                    onDismiss = {
+                        recapClosedHere = recap.insights.period.id
+                        onDismissRecap(recap.insights.period.id)
+                    },
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
+                )
+            }
+        }
         if (insights != null) {
             item {
-                AnalysisEntry(onClick = onOpenAnalysis, modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp))
+                AnalysisEntry(onClick = { onOpenAnalysis(insights.period.id) }, modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp))
             }
         }
         item {
@@ -248,6 +276,7 @@ private fun AvailabilityHero(
     comparison: PeriodComparison?,
     accountingCurrency: SupportedCurrency,
     onComparePeriods: () -> Unit,
+    onOpenAnalysis: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var detailsExpanded by rememberSaveable { mutableStateOf(false) }
@@ -296,7 +325,7 @@ private fun AvailabilityHero(
                     enter = expandVertically() + fadeIn(),
                     exit = shrinkVertically() + fadeOut(),
                 ) {
-                    HeroDetails(state, insights, comparison, onComparePeriods)
+                    HeroDetails(state, insights, comparison, onComparePeriods, onOpenAnalysis)
                 }
             }
         }
@@ -309,11 +338,13 @@ private fun HeroDetails(
     insights: PeriodInsights,
     comparison: PeriodComparison?,
     onComparePeriods: () -> Unit,
+    onOpenAnalysis: (String) -> Unit,
 ) {
     val currency = insights.accountingCurrency
     fun money(minor: Long) = MoneyText.format(minor, currency)
     val onPrimary = MaterialTheme.colorScheme.onPrimary
     val muted = onPrimary.copy(alpha = 0.8f)
+    val recurring = remember(state, insights.period.id) { RecurringCharges.of(state, insights.period.id) }
     Column(Modifier.padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("Ritmo de gasto", style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
         SpendPaceMetrics(
@@ -322,6 +353,20 @@ private fun HeroDetails(
             supportingColor = muted,
             barColor = onPrimary,
             trackColor = onPrimary.copy(alpha = 0.2f),
+            afterProjectionContent = {
+                val recurringTotal = recurring.totalExpectedMinor
+                if (recurring.items.isNotEmpty() && recurringTotal != null) {
+                    Text(
+                        "Cargos recurrentes pendientes: ${money(recurringTotal)} (${recurring.items.size})",
+                        color = onPrimary,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                            .clip(MaterialTheme.shapes.small)
+                            .clickable(onClickLabel = "Ver análisis del periodo", role = Role.Button) { onOpenAnalysis(insights.period.id) }
+                            .padding(vertical = 8.dp),
+                    )
+                }
+            },
         )
         Spacer(Modifier.height(4.dp))
         Text("Frente al periodo anterior", style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
@@ -411,6 +456,72 @@ private fun CompactMetric(label: String, value: String, valueStyle: TextStyle, m
             Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(value, style = valueStyle)
         }
+    }
+}
+
+/** The recap shows during the first week of a new period, until it is closed. */
+private const val RECAP_DAYS = 7
+
+/** How the previous period closed: spending against plan, overspent and best Pockets, top merchant, and rollover. */
+@Composable
+private fun PeriodRecapCard(recap: PeriodRecap, onOpenAnalysis: () -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    val insights = recap.insights
+    fun money(minor: Long) = MoneyText.format(minor, insights.accountingCurrency)
+    val onContainer = MaterialTheme.colorScheme.onSecondaryContainer
+    Card(
+        modifier = modifier.testTag("period_recap"),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = onContainer),
+    ) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.semantics(mergeDescendants = true) { heading() }) {
+                Text("Así cerró tu periodo anterior", style = MaterialTheme.typography.titleMedium)
+                Text(formatPeriodRange(insights.period.start, insights.period.endExclusive), style = MaterialTheme.typography.bodySmall)
+            }
+            Text(
+                buildString {
+                    append("Gastaste ${money(insights.netSpendMinor)}")
+                    if (insights.availableBudgetMinor > 0) {
+                        append(" de ${money(insights.availableBudgetMinor)}")
+                        insights.budgetUsedPercent?.let { append(" ($it%)") }
+                    }
+                },
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            RecapLine(
+                icon = if (recap.overspentPockets.isEmpty()) Icons.Default.CheckCircle else Icons.Default.Warning,
+                text = if (recap.overspentPockets.isEmpty()) {
+                    "Ningún Pocket se pasó de su presupuesto"
+                } else {
+                    "Te pasaste en " + recap.overspentPockets.joinToString(", ") {
+                        "${it.pocket.name} (${money(-it.availabilityMinor)})"
+                    }
+                },
+            )
+            recap.bestPocket?.let { RecapLine(Icons.Default.Savings, "Mejor control: ${it.pocket.name}, usaste el ${it.consumedPercent}%") }
+            recap.topMerchant?.let { RecapLine(Icons.Default.Storefront, "Donde más gastaste: ${it.name}, ${money(it.netSpendMinor)}") }
+            if (recap.rolloverCarriedMinor > 0) {
+                RecapLine(
+                    Icons.AutoMirrored.Filled.Redo,
+                    "Pasaron ${MoneyText.format(recap.rolloverCarriedMinor, recap.carriedCurrency)} a este periodo como rollover",
+                )
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onDismiss, modifier = Modifier.testTag("dismiss_recap")) { Text("Cerrar", color = onContainer) }
+                Button(onClick = onOpenAnalysis, modifier = Modifier.testTag("recap_analysis")) { Text("Ver análisis") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecapLine(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
+    Row(
+        Modifier.semantics(mergeDescendants = true) {},
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        Text(text, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

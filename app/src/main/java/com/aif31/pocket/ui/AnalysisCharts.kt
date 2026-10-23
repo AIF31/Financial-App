@@ -3,6 +3,7 @@ package com.aif31.pocket.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,9 +36,12 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -202,6 +206,8 @@ internal fun SpendCalendar(
     dailyNetSpendMinor: List<Long>,
     currency: SupportedCurrency,
     modifier: Modifier = Modifier,
+    /** Called for an elapsed day with spending. */
+    onDayClick: (LocalDate) -> Unit = {},
 ) {
     val hue = MaterialTheme.colorScheme.primary
     val emptyColor = MaterialTheme.colorScheme.surfaceVariant
@@ -220,8 +226,9 @@ internal fun SpendCalendar(
         }
     }
     fun shade(spend: Long): Float = if (spend <= 0) 0f else 0.25f + 0.75f * spend / maxSpend
-    Column(modifier.clearAndSetSemantics { contentDescription = description }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // The weekday header carries the calendar's spoken summary; each day with spending is its own button.
+        Row(Modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = description }, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             DayOfWeek.entries.forEach {
                 Text(
                     it.shortSpanish().take(2),
@@ -244,11 +251,25 @@ internal fun SpendCalendar(
                     val spend = dailyNetSpendMinor.getOrNull(day)
                     val intensity = spend?.let(::shade) ?: 0f
                     val cellShape = RoundedCornerShape(4.dp)
+                    val tappable = spend != null && spend != 0L
                     Box(
                         Modifier
                             .weight(1f)
                             .aspectRatio(1f)
                             .clip(cellShape)
+                            .then(
+                                if (tappable) {
+                                    Modifier
+                                        .clickable(onClickLabel = "Ver movimientos", role = Role.Button) { onDayClick(date) }
+                                        .clearAndSetSemantics {
+                                            contentDescription = "${date.dayOfMonth}: ${MoneyText.format(spend, currency)}"
+                                            role = Role.Button
+                                            onClick("Ver movimientos") { onDayClick(date); true }
+                                        }
+                                } else {
+                                    Modifier.clearAndSetSemantics { }
+                                },
+                            )
                             .then(
                                 when {
                                     spend == null -> Modifier.border(1.dp, outline, cellShape)
@@ -268,7 +289,7 @@ internal fun SpendCalendar(
             }
         }
         Row(
-            Modifier.padding(top = 4.dp),
+            Modifier.padding(top = 4.dp).clearAndSetSemantics { },
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

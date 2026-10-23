@@ -52,7 +52,7 @@ internal enum class SettingsSection(
     ),
     CURRENCY(
         "Moneda y conversión",
-        "Moneda contable, cotizaciones y moneda predeterminada para gastos",
+        "Moneda contable, cotizaciones, moneda de gastos y aviso diario del tipo de cambio",
         Icons.Default.CurrencyExchange,
     ),
     REMINDERS(
@@ -64,6 +64,11 @@ internal enum class SettingsSection(
         "Captura desde notificaciones",
         "Registra gastos leídos de tu banco o SMS · Experimental",
         Icons.Default.NotificationsActive,
+    ),
+    MERCHANT_MEMORY(
+        "Memoria de comercios",
+        "A qué Pocket van los pagos registrados automáticamente",
+        Icons.Default.AccountBalanceWallet,
     ),
     PAYMENT_METHODS(
         "Métodos de pago",

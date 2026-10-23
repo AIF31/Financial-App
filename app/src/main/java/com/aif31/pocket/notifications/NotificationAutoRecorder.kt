@@ -9,6 +9,7 @@ import com.aif31.pocket.data.MovementType
 import com.aif31.pocket.data.Period
 import com.aif31.pocket.data.PocketLedger
 import com.aif31.pocket.data.RejectionKind
+import com.aif31.pocket.data.latestExpenseForMerchant
 import com.aif31.pocket.data.likelyDuplicateOf
 import com.aif31.pocket.data.merchantKey
 import java.time.Instant
@@ -53,9 +54,7 @@ internal class NotificationAutoRecorder(
         if (suggestion.likelyDuplicateIn(state) != null) {
             return AutoRecordOutcome.NeedsReview(ReviewReason.POSSIBLE_DUPLICATE)
         }
-        val latest = state.movements
-            .filter { it.type == MovementType.EXPENSE && merchantKey(it.merchant) == key }
-            .maxByOrNull { it.occurredAtUtcMillis }
+        val latest = state.movements.latestExpenseForMerchant(key)
             ?: return AutoRecordOutcome.NeedsReview(ReviewReason.NEW_MERCHANT)
         // Only the newest expense decides; falling back to an older Pocket would be a guess.
         val pocket = state.pocketCatalog.firstOrNull { it.id == latest.pocketId && !it.archived }

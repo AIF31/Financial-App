@@ -47,6 +47,75 @@ class AppPreferencesTest {
     }
 
     @Test
+    fun `pace alerts start on without a baseline and recap dismissal and sent levels round trip`() = runTest {
+        val store = DataStorePreferences(newDataStore("pace.preferences_pb", backgroundScope))
+        val initial = store.state.first()
+        assertTrue(initial.paceAlertsEnabled)
+        assertEquals(null, initial.paceAlertsSent)
+        assertEquals(null, initial.recapDismissedPeriodId)
+
+        store.setPaceAlertsEnabled(false)
+        store.updatePaceAlertsSent { sent -> sent.orEmpty() + "p1/market/AT_RISK" }
+        store.updatePaceAlertsSent { sent -> sent.orEmpty() + "p1/food/RUN_OUT" }
+        store.dismissRecap("p0")
+
+        val updated = store.state.first()
+        assertFalse(updated.paceAlertsEnabled)
+        assertEquals(setOf("p1/market/AT_RISK", "p1/food/RUN_OUT"), updated.paceAlertsSent)
+        assertEquals("p0", updated.recapDismissedPeriodId)
+    }
+
+    @Test
+    fun `rate alert defaults to an off daily SAR to MXN alert and its settings round trip`() = runTest {
+        val store = DataStorePreferences(newDataStore("fx-alert.preferences_pb", backgroundScope))
+        assertEquals(FxRateAlertSettings(), store.state.first().fxRateAlert)
+        assertEquals(SupportedCurrency.SAR to SupportedCurrency.MXN, store.state.first().fxRateAlert.let { it.base to it.quote })
+        assertEquals(FxRateAlertFrequency.DAILY, store.state.first().fxRateAlert.frequency)
+
+        val configured = FxRateAlertSettings(
+            enabled = true,
+            time = LocalTime.of(21, 30),
+            base = SupportedCurrency.MXN,
+            quote = SupportedCurrency.USD,
+            frequency = FxRateAlertFrequency.WEEKLY,
+            weekday = java.time.DayOfWeek.FRIDAY,
+            minimumRate = java.math.BigDecimal("0.0525"),
+        )
+        store.setFxRateAlert(configured)
+        assertEquals(configured, store.state.first().fxRateAlert)
+
+        store.setFxRateAlert(configured.copy(minimumRate = null))
+        assertEquals(null, store.state.first().fxRateAlert.minimumRate)
+    }
+
+    @Test
+    fun `unreadable rate alert values fall back to defaults`() = runTest {
+        val dataStore = newDataStore("fx-alert-bad.preferences_pb", backgroundScope)
+        dataStore.edit { values ->
+            values[stringPreferencesKey("fx_rate_alert_base")] = "USD"
+            values[stringPreferencesKey("fx_rate_alert_quote")] = "SAR"
+            values[stringPreferencesKey("fx_rate_alert_frequency")] = "HOURLY"
+            values[stringPreferencesKey("fx_rate_alert_minimum")] = "-1"
+        }
+
+        assertEquals(FxRateAlertSettings(), DataStorePreferences(dataStore).state.first().fxRateAlert)
+    }
+
+    @Test
+    fun `a rate alert is claimed once per family value and can be released`() = runTest {
+        val store = DataStorePreferences(newDataStore("fx-slot.preferences_pb", backgroundScope))
+
+        assertTrue(store.claimFxRateAlert("day", "2026-10-21"))
+        assertFalse(store.claimFxRateAlert("day", "2026-10-21"))
+        assertTrue(store.claimFxRateAlert("fix/SAR-MXN", "2026-10-20"))
+        assertTrue(store.claimFxRateAlert("day", "2026-10-22"))
+        assertEquals(setOf("day=2026-10-22", "fix/SAR-MXN=2026-10-20"), store.state.first().fxRateAlertSent)
+
+        store.releaseFxRateAlert("day", "2026-10-22")
+        assertTrue(store.claimFxRateAlert("day", "2026-10-22"))
+    }
+
+    @Test
     fun `missing upgrade keys default to disabled online FX and SAR input`() = runTest {
         val store = DataStorePreferences(newDataStore("upgrade.preferences_pb", backgroundScope))
 
