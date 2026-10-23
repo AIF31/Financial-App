@@ -2,6 +2,7 @@ package com.aif31.pocket
 
 import android.content.Context
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.hasClickAction
@@ -11,6 +12,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -140,8 +142,14 @@ class AnalysisActionsHostFlowTest {
 
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasTestTag("period_recap"))
         compose.onNodeWithText("Donde más gastaste: Tamimi, SAR 280.00").assertExists()
-        compose.onNodeWithTag("dismiss_recap").performClick()
-        compose.onNodeWithTag("period_recap").assertDoesNotExist()
+        val dashboard = compose.onNodeWithTag("dashboard_list")
+        val dismiss = compose.onNodeWithTag("dismiss_recap")
+        // Scroll helpers do not account for the navigation bar covering the list's lower edge.
+        val scrollDistance = (dismiss.fetchSemanticsNode().boundsInRoot.bottom -
+            dashboard.fetchSemanticsNode().boundsInRoot.center.y).coerceAtLeast(0f)
+        dashboard.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, scrollDistance) }
+        dismiss.performClick()
+        compose.waitUntilDoesNotExist(hasTestTag("period_recap"), 5_000)
 
         compose.onNode(hasText("Pockets") and hasClickAction()).performClick()
         compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("review_suggested_budgets"))
