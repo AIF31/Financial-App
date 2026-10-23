@@ -2,6 +2,14 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-10-23
+
+### PR #46 verification
+
+- Consolidating the stacked features into one PR retains `1.0.11` (`versionCode` 12), exactly one increment above `main`, as required by the version policy. The intermediate `1.0.12` / 13 declaration caused Android CI's version check to fail before any Gradle tasks ran. The version gate and its self-check pass with the corrected metadata.
+- The independent Standards review found an unnamed rate-alert switch and budget calculations in the suggestions dialog; the Spec review found that a concurrent auto-recorded expense could make merchant reassignment report success without changing memory. The switch now has an accessible name, final replacement totals and affordability live in `BudgetSuggestions`, and merchant reassignment checks the latest expense inside the transaction. All three regressions failed before the fixes and passed afterward (29 targeted tests). The merchant-memory host flow also waits for the updated row after the dialog closes, matching the ledger's asynchronous UI delivery. Details are in [the review record](../docs/audits/2026-10-23-pr46-review.md).
+- The requested Claude Opus 5.5 high-effort adversarial review found that median-day projection could move a first-of-month subscription into the wrong budget period. Consistent monthly histories now retain their calendar date across shorter months; rolling day-interval schedules keep their prior behavior. The regression failed with November 30 instead of November 1, then passed with February, month-end and period-boundary cases (20 recurring-charge tests).
+
 ## 2026-10-21
 
 ### Rate alerts

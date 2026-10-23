@@ -35,6 +35,33 @@ class RecurringChargesTest {
     }
 
     @Test
+    fun calendar_monthly_charges_stay_on_their_day_and_in_the_correct_period() {
+        val cases = listOf(
+            listOf("2026-08-01", "2026-09-01", "2026-10-01") to "2026-11-01",
+            listOf("2026-01-01", "2026-02-01", "2026-03-01") to "2026-04-01",
+            listOf("2025-12-31", "2026-01-31", "2026-02-28") to "2026-03-31",
+            listOf("2026-02-28", "2026-03-31", "2026-04-30") to "2026-05-31",
+        )
+        cases.forEach { (days, expectedDay) ->
+            val expected = date(expectedDay)
+            val period = current.copy(start = expected.withDayOfMonth(1), endExclusive = expected.withDayOfMonth(1).plusMonths(1))
+            val prior = history.copy(start = date(days.first()).withDayOfMonth(1), endExclusive = period.start)
+            val charges = days.map { charge(it).copy(periodId = prior.id) }
+            val ledger = state(charges, period.start.toString()).copy(periods = listOf(prior, period), currentPeriod = period)
+            assertEquals(expectedDay, listOf(expected), RecurringCharges.of(ledger, period.id).items.map { it.expectedDate })
+
+            val preceding = period.copy(start = period.start.minusMonths(1), endExclusive = period.start)
+            val before = ledger.copy(
+                periods = listOf(prior.copy(endExclusive = preceding.start), preceding),
+                currentPeriod = preceding,
+                currentLocalDate = preceding.endExclusive.minusDays(1),
+                movements = charges.map { it.copy(periodId = if (it.localDate < preceding.start) prior.id else preceding.id) },
+            )
+            assertTrue(expectedDay, RecurringCharges.of(before, preceding.id).items.isEmpty())
+        }
+    }
+
+    @Test
     fun weekly_charges_list_every_remaining_occurrence_before_the_exclusive_period_end() {
         val result = RecurringCharges.of(state(weekly(), today = "2026-03-01"), current.id)
 

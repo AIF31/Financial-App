@@ -1,5 +1,6 @@
 package com.aif31.pocket.data
 
+import com.aif31.pocket.domain.sumMoneyExact
 import java.math.BigDecimal
 import java.math.RoundingMode
 
@@ -15,6 +16,12 @@ data class BudgetSuggestion(
     val fit: BudgetFit?,
 )
 
+internal data class SuggestedBudgetPlan(
+    val changes: List<Pair<PocketPeriodSummary, BudgetSuggestion>>,
+    val totalMinor: Long?,
+    val canApply: Boolean,
+)
+
 /**
  * Suggests each Pocket's budget from what it actually spent. Recent periods are those that have ended, up to
  * [LOOKBACK], in the target period's accounting currency and without crossing a currency change. Each period's net
@@ -24,6 +31,20 @@ data class BudgetSuggestion(
  */
 object BudgetSuggestions {
     const val LOOKBACK = 3
+
+    internal fun plan(state: LedgerState, periodId: String): SuggestedBudgetPlan {
+        val suggestions = of(state, periodId)
+        val summaries = state.pocketSummariesByPeriod[periodId].orEmpty()
+        val changes = summaries.filterNot { it.pocket.archived || it.retiredThisPeriod }.mapNotNull { summary ->
+            suggestions[summary.pocket.id]?.takeIf { it.suggestedMinor != summary.budgetMinor }?.let { summary to it }
+        }
+        val replacements = changes.associate { (summary, suggestion) -> summary.pocket.id to suggestion.suggestedMinor }
+        val total = runCatching {
+            summaries.map { replacements[it.pocket.id] ?: it.budgetMinor }.sumMoneyExact()
+        }.getOrNull()
+        val newFunds = state.periods.firstOrNull { it.id == periodId }?.newFundsMinor ?: 0
+        return SuggestedBudgetPlan(changes, total, changes.isNotEmpty() && total != null && total <= newFunds)
+    }
 
     fun of(state: LedgerState, periodId: String): Map<String, BudgetSuggestion> {
         val target = state.periods.firstOrNull { it.id == periodId } ?: return emptyMap()

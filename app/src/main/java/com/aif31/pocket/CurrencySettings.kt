@@ -25,6 +25,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.CurrencyBoundary
@@ -221,7 +223,7 @@ private fun FxRateAlertCard(
                     onCheckedChange = { onChange(settings.copy(enabled = it)) },
                     // Turning it off stays possible after online conversion is withdrawn.
                     enabled = onlineFxEnabled || settings.enabled,
-                    modifier = Modifier.testTag("fx_rate_alert_switch"),
+                    modifier = Modifier.testTag("fx_rate_alert_switch").semantics { contentDescription = "Aviso de tipo de cambio" },
                 )
             }
             Text(

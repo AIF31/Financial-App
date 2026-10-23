@@ -44,9 +44,21 @@ data class RecurringCharges(val items: List<RecurringCharge>) {
                 if (amounts.any { (it - medianAmount).abs() * BigInteger.TEN > medianAmount }) return@flatMap emptyList()
                 val gap = medianMinor(gaps)!!
                 val latest = ordered.last()
-                var expected = latest.localDate.plusDays(gap)
+                val monthDay = ordered.maxOf { it.localDate.dayOfMonth }
+                fun calendarDate(index: Long): LocalDate {
+                    val month = ordered.first().localDate.plusMonths(index)
+                    return month.withDayOfMonth(minOf(monthDay, month.lengthOfMonth()))
+                }
+                // shortcut: shifted monthly dates use median-day estimates; add tolerance when supporting posting-date drift.
+                val calendarMonthly = cadence == RecurringCadence.MONTHLY && ordered.withIndex().all { (index, charge) ->
+                    charge.localDate == calendarDate(index.toLong())
+                }
+                fun expectedDate(occurrence: Long): LocalDate =
+                    if (calendarMonthly) calendarDate(ordered.lastIndex + occurrence) else latest.localDate.plusDays(gap * occurrence)
+                var occurrence = 1L
+                var expected = expectedDate(occurrence)
                 // Two consecutive expired expectations indicate the merchant has ended.
-                if (ChronoUnit.DAYS.between(expected.plusDays(gap), state.currentLocalDate) > gap / 2) return@flatMap emptyList()
+                if (ChronoUnit.DAYS.between(expectedDate(2), state.currentLocalDate) > gap / 2) return@flatMap emptyList()
                 buildList {
                     while (expected < period.endExclusive) {
                         if (expected >= period.start && ChronoUnit.DAYS.between(expected, state.currentLocalDate) <= gap / 2) {
@@ -55,7 +67,7 @@ data class RecurringCharges(val items: List<RecurringCharge>) {
                                 cadence, charges.size, expected < state.currentLocalDate,
                             ))
                         }
-                        expected = expected.plusDays(gap)
+                        expected = expectedDate(++occurrence)
                     }
                 }
             }

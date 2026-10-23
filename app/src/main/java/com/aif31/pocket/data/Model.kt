@@ -207,7 +207,7 @@ sealed interface LedgerCommand {
         val conversionSource: String? = null,
         val accountingCurrency: SupportedCurrency? = null,
         val createOnly: Boolean = false,
-        /** Reject a stale edit inside the write transaction, preserving intervening changes or deletion. */
+        /** Reject a stale merchant-memory edit if the expense changed or is no longer the merchant's latest. */
         val expectedMovement: Movement? = null,
     ) : LedgerCommand
     /**

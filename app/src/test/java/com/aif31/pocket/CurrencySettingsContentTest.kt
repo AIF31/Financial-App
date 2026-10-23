@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.assertIsEnabled
@@ -137,7 +138,9 @@ class CurrencySettingsContentTest {
         }
 
         compose.onNodeWithTag("currency_settings_list").performScrollToNode(hasTestTag("fx_rate_alert_switch"))
-        compose.onNodeWithTag("fx_rate_alert_switch").assertIsNotEnabled()
+        compose.onNodeWithTag("fx_rate_alert_switch")
+            .assertIsNotEnabled()
+            .assertContentDescriptionEquals("Aviso de tipo de cambio")
         compose.onNodeWithText("Requiere la conversión en línea").assertIsDisplayed()
     }
 

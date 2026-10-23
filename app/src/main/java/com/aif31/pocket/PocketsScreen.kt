@@ -110,7 +110,7 @@ internal fun PocketsScreen(
                     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text("Revisa el presupuesto de este periodo", style = MaterialTheme.typography.titleMedium)
                         Text("Comprueba las asignaciones y el rollover antes de continuar.")
-                        val suggestions = remember(state, selectedPeriod.id) { suggestedChanges(state, selectedPeriod.id) }
+                        val suggestions = remember(state, selectedPeriod.id) { BudgetSuggestions.plan(state, selectedPeriod.id).changes }
                         if (suggestions.isNotEmpty()) {
                             OutlinedButton(onClick = { reviewingSuggestions = true }, modifier = Modifier.testTag("review_suggested_budgets")) {
                                 Text("Aplicar presupuestos sugeridos")
@@ -378,14 +378,6 @@ internal fun PocketsScreen(
     }
 }
 
-/** Pockets whose suggested budget differs from their current one, with that suggestion. */
-private fun suggestedChanges(state: LedgerState, periodId: String): List<Pair<PocketPeriodSummary, BudgetSuggestion>> {
-    val suggestions = BudgetSuggestions.of(state, periodId)
-    return state.pocketSummariesByPeriod[periodId].orEmpty()
-        .filterNot { it.pocket.archived || it.retiredThisPeriod }
-        .mapNotNull { summary -> suggestions[summary.pocket.id]?.takeIf { it.suggestedMinor != summary.budgetMinor }?.let { summary to it } }
-}
-
 /**
  * Confirms replacing budgets with their suggestions in one step. Pockets without a suggestion keep their budget, and
  * the change is offered only when the new total fits the period's new funds.
@@ -399,11 +391,9 @@ private fun SuggestedBudgetsDialog(
     onDismiss: () -> Unit,
 ) {
     fun money(minor: Long) = MoneyText.format(minor, currency)
-    val changes = remember(state, periodId) { suggestedChanges(state, periodId) }
+    val plan = remember(state, periodId) { BudgetSuggestions.plan(state, periodId) }
+    val changes = plan.changes
     val newFunds = state.periods.firstOrNull { it.id == periodId }?.newFundsMinor ?: 0
-    val total = changes.fold(state.pocketSummariesByPeriod[periodId].orEmpty().map { it.budgetMinor }.sumMoneyExact()) { sum, (summary, suggestion) ->
-        Math.addExact(sum, Math.subtractExact(suggestion.suggestedMinor, summary.budgetMinor))
-    }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     AlertDialog(
@@ -419,8 +409,8 @@ private fun SuggestedBudgetsDialog(
                         supporting = "Ahora ${money(summary.budgetMinor)}" + suggestion.fit.description(suggestion.basedOnPeriods)?.let { " · $it" }.orEmpty(),
                     )
                 }
-                Text("Total asignado: ${money(total)} de ${money(newFunds)}", style = MaterialTheme.typography.titleSmall)
-                if (total > newFunds) {
+                Text("Total asignado: ${plan.totalMinor?.let(::money) ?: "fuera del límite permitido"} de ${money(newFunds)}", style = MaterialTheme.typography.titleSmall)
+                if (!plan.canApply) {
                     Text(
                         "Las sugerencias superan los fondos del periodo. Ajusta los fondos o aplica cada sugerencia desde su Pocket.",
                         color = MaterialTheme.colorScheme.error,
@@ -431,7 +421,7 @@ private fun SuggestedBudgetsDialog(
         },
         confirmButton = {
             Button(
-                enabled = total <= newFunds && changes.isNotEmpty(),
+                enabled = plan.canApply,
                 onClick = {
                     scope.launch {
                         val amounts = changes.associate { (summary, suggestion) -> summary.pocket.id to suggestion.suggestedMinor }

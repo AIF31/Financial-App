@@ -91,6 +91,7 @@ class MerchantMemoryHostFlowTest {
             .performClick()
         compose.onNodeWithTag("merchant_memory_confirm").performClick()
         compose.waitUntilDoesNotExist(hasTestTag("merchant_memory_confirm"), 5_000)
+        compose.waitUntilExactlyOneExists(hasTestTag("merchant_memory_tamimi") and hasText(pockets[1].name, substring = true), 5_000)
         compose.onNodeWithTag("merchant_memory_tamimi").assertTextContains(pockets[1].name)
         assertEquals(pockets[1].id, runBlocking { ledger.state.first().movements.single().pocketId })
     }

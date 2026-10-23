@@ -406,8 +406,15 @@ class RoomPocketLedger(
             }
         }
         val existing = command.id?.let { dao.movement(it) }
+        val storedMovements = dao.movements()
         command.expectedMovement?.let { expected ->
             require(existing == expected.toEntity()) { "El gasto cambió. Revisa sus datos antes de confirmar." }
+            val pocketsById = dao.pockets().associateBy { it.id }
+            val methodsById = dao.paymentMethods().associateBy { it.id }
+            val key = requireNotNull(merchantKey(expected.merchant))
+            require(storedMovements.map { it.toModel(pocketsById, methodsById) }.latestExpenseForMerchant(key)?.id == expected.id) {
+                "El comercio tiene un gasto más reciente. Revisa sus datos antes de confirmar."
+            }
         }
         val pocket = requireNotNull(dao.pockets().firstOrNull { it.id == command.pocketId }) { "Pocket inexistente" }
         val editsSamePocket = existing?.pocketId == pocket.id
@@ -415,7 +422,7 @@ class RoomPocketLedger(
         val snapshot = dao.periodPockets().firstOrNull { it.periodId == period.id && it.pocketId == command.pocketId }
         require(snapshot != null && (!snapshot.retired || editsSamePocket)) { "El Pocket no está activo en este periodo" }
         val updated = command.toEntity(period.id, existing?.zoneId ?: zoneId.id, originalCurrency.name)
-        val movements = dao.movements().filterNot { it.id == updated.id } + updated
+        val movements = storedMovements.filterNot { it.id == updated.id } + updated
         val allocations = dao.allocations()
         val releases = dao.rolloverReleases()
         val sourcePeriodId = listOfNotNull(existing?.periodId, period.id)

@@ -118,6 +118,21 @@ class NotificationAutoRecorderTest {
         )
     }
 
+    @Test fun a_prepared_reassignment_rejects_a_newer_auto_recorded_expense() = runTest {
+        val pockets = ledger.state.first().pocketCatalog
+        recordManually(pockets[0].id, "Tamimi", minutesAgo = 30)
+        val command = MerchantMemory.reassign(ledger.state.first(), "tamimi", pockets[1].id)
+        val suggestionId = detect("during-reassignment", ParsedPayment(2_000, SupportedCurrency.SAR, "TAMIMI"))
+        assertTrue(NotificationAutoRecorder(ledger, zone).record(suggestionId) is AutoRecordOutcome.Recorded)
+        val before = ledger.state.first().movements
+
+        assertEquals(
+            LedgerResult.Rejected("El comercio tiene un gasto más reciente. Revisa sus datos antes de confirmar."),
+            ledger.execute(command),
+        )
+        assertEquals(before, ledger.state.first().movements)
+    }
+
     @Test fun reassign_preserves_a_foreign_expenses_conversion_metadata_payment_method_and_original_zone() = runTest {
         val before = ledger.state.first()
         val pockets = before.pocketCatalog

@@ -1,7 +1,9 @@
 package com.aif31.pocket
 
 import android.content.Context
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -88,6 +90,39 @@ class AnalysisActionsHostFlowTest {
         compose.waitUntilExactlyOneExists(hasTestTag("movement_save"), 5_000)
         compose.onNodeWithTag("movement_save").performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("drill_summary"), 5_000)
+    }
+
+    @Test
+    fun suggested_budgets_use_the_final_total_when_increases_precede_reductions() {
+        val old = ledgerAt("2026-03-05T09:00:00Z")
+        runBlocking {
+            old.execute(LedgerCommand.Initialize(200_000))
+            old.spend("Supermercado", 100, LocalDate.of(2026, 3, 1), "Tamimi")
+            old.spend("Restaurantes/café", 100, LocalDate.of(2026, 3, 1), "Cafe")
+        }
+        val ledger = ledgerAt("2026-03-26T09:00:00Z")
+        runBlocking { ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay = 25)) }
+        val before = runBlocking { ledger.state.first() }
+        val period = before.currentPeriod!!.copy(newFundsMinor = Long.MAX_VALUE)
+        val pockets = before.pockets.map { summary ->
+            val budget = when (summary.pocket.name) {
+                "Supermercado" -> 100L
+                "Restaurantes/café" -> Long.MAX_VALUE - 100
+                else -> 0L
+            }
+            summary.copy(budgetMinor = budget, availabilityMinor = budget)
+        }
+        val state = before.copy(
+            periods = before.periods.map { if (it.id == period.id) period else it },
+            currentPeriod = period,
+            pockets = pockets,
+            pocketSummariesByPeriod = before.pocketSummariesByPeriod + (period.id to pockets),
+        )
+        compose.setContent { PocketsScreen(state, ledger, PaddingValues()) }
+        compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("review_suggested_budgets"))
+        compose.onNodeWithTag("review_suggested_budgets").performClick()
+        compose.onNodeWithTag("apply_suggested_budgets").assertIsEnabled()
+        compose.onNodeWithText("Total asignado: SAR 4.00 de SAR 92,233,720,368,547,758.07").assertExists()
     }
 
     @Test

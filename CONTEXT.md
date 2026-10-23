@@ -77,7 +77,7 @@ The Pocket of the most recent expense whose merchant matches after ignoring case
 _Avoid_: Rule, category mapping
 
 **Recurring charge**:
-A detected expectation of a merchant's next expense, derived from regular dates and stable amounts in existing Movements using the same accounting currency. Each expected occurrence is overdue for at most half a cadence, then drops from the list; later occurrences remain expected. After two consecutive expected occurrences pass that window without a charge, the merchant is treated as ended and no occurrences are listed. It is not stored and never records a Movement automatically. It is distinct from `RecurringTemplate`, a shortcut that prefills a movement form.
+A detected expectation of a merchant's next expense, derived from regular dates and stable amounts in existing Movements using the same accounting currency. A consistent monthly date follows calendar months, clamping to shorter months; other regular schedules follow their median day interval. Each expected occurrence is overdue for at most half a cadence, then drops from the list; later occurrences remain expected. After two consecutive expected occurrences pass that window without a charge, the merchant is treated as ended and no occurrences are listed. It is not stored and never records a Movement automatically. It is distinct from `RecurringTemplate`, a shortcut that prefills a movement form.
 _Avoid_: Subscription billing, scheduled expense, Recurring template
 
 **Budget suggestion**:
