@@ -32,9 +32,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -54,6 +57,7 @@ import com.aif31.pocket.ui.formatPeriodRange
 import com.aif31.pocket.ui.merchantOrPocket
 import androidx.compose.foundation.layout.Spacer
 import com.aif31.pocket.ui.spendDeltaText
+import com.aif31.pocket.ui.spendDeltaWords
 
 /**
  * Focused comparison task: two periods side by side, compared by average daily spending so a period in
@@ -132,9 +136,12 @@ internal fun ComparisonScreen(
                                     Text("Periodo comparado: ${MoneyText.format(it, currency)} al día")
                                 }
                                 baseline.averageDailyDeltaMinor?.let {
+                                    val spoken = spendDeltaWords(it, baseline.averageDailyDeltaPercent, currency)
                                     Text(
                                         spendDeltaText(it, baseline.averageDailyDeltaPercent, currency),
                                         style = MaterialTheme.typography.titleMedium,
+                                        // Screen readers hear the change in words instead of the arrow.
+                                        modifier = Modifier.clearAndSetSemantics { text = AnnotatedString(spoken) },
                                     )
                                 }
                             }

@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
@@ -84,10 +85,10 @@ class AnalysisScreenTest {
         )
         // The change is spoken in words; the arrow is only shown.
         list.performScrollToNode(hasText("media SAR\u00A050.00 · SAR\u00A019.00 más que el anterior, un 61% más"))
-        list.performScrollToNode(hasText("Gastas más los sábados: SAR 50.00 de media"))
+        list.performScrollToNode(hasText("Gastas más los sábados: SAR\u00A050.00 de media"))
         list.performScrollToNode(hasText("Tarjeta"))
         list.performScrollToNode(hasText("33% del gasto neto se registró en otra moneda"))
-        list.performScrollToNode(hasText("Original MXN 150.00 · 1 movimiento"))
+        list.performScrollToNode(hasText("Original MXN\u00A0150.00 · 1 movimiento"))
 
         list.performScrollToNode(
             hasContentDescription("Supermercado: SAR\u00A010.00 al día. SAR\u00A09.00 más que feb, un 900% más. 100% del gasto"),
@@ -190,19 +191,22 @@ class AnalysisScreenTest {
     fun a_refund_pocket_keeps_its_negative_amount_and_a_pocket_without_movements_is_named_once() {
         val gifts = Pocket("gifts", "Regalos", PocketIconKey.forName("Regalos"), 1, false, false)
         val travel = Pocket("travel", "Viajes", PocketIconKey.forName("Viajes"), 2, false, false)
+        val leisure = Pocket("leisure", "Ocio", PocketIconKey.forName("Ocio"), 3, false, false)
         val state = LedgerState(
             periods = listOf(february, march),
             currentPeriod = march,
-            pocketCatalog = listOf(market, gifts, travel),
+            pocketCatalog = listOf(market, gifts, travel, leisure),
             pocketSummariesByPeriod = mapOf(
                 february.id to listOf(spend(3_100)),
-                march.id to listOf(spend(9_000), spend(-900, gifts), spend(0, travel)),
+                march.id to listOf(spend(9_000), spend(-900, gifts), spend(0, travel), spend(-1, leisure)),
             ),
             unallocatedMinorByPeriod = mapOf(february.id to 0L, march.id to 0L),
             movements = listOf(
                 movement("feb", february, LocalDate.of(2026, 2, 1), 3_100, merchant = "Tamimi"),
                 movement("a", march, LocalDate.of(2026, 2, 28), 9_000, merchant = "Tamimi"),
                 movement("r", march, LocalDate.of(2026, 3, 1), 900, merchant = "Jarir", pocket = gifts, type = MovementType.REFUND),
+                // One cent refunded over nine days averages to zero a day, but it is still movement, not "no spending".
+                movement("c", march, LocalDate.of(2026, 3, 1), 1, merchant = "Jarir", pocket = leisure, type = MovementType.REFUND),
             ),
             elapsedDays = 9,
             totalDays = 28,
@@ -211,11 +215,15 @@ class AnalysisScreenTest {
         compose.setContent { PocketTheme { AnalysisScreen(state, march.id, onPeriodChange = {}, onBack = {}) } }
         val list = compose.onNodeWithTag("analysis_list")
 
-        // Net spend is SAR 9.00 a day: SAR 10.00 in Supermercado less SAR 1.00 refunded in Regalos.
+        // March nets 8,099 minor units (9,000 spent, 900 and 1 refunded), so Supermercado's 9,000 is 111% of it.
         list.performScrollToNode(hasContentDescription("Supermercado: SAR\u00A010.00 al día", substring = true))
         compose.onNode(hasContentDescription("111% del gasto", substring = true)).assertExists()
+        list.performScrollToNode(hasContentDescription("Ocio: SAR\u00A00.00 al día", substring = true))
+        compose.onNode(hasContentDescription("Ocio: SAR\u00A00.00 al día", substring = true))
+            .assert(hasContentDescription("Ocio: SAR\u00A00.00 al día. Devolución neta"))
         list.performScrollToNode(hasContentDescription("Regalos: SAR\u00A0-1.00 al día", substring = true))
-        compose.onNode(hasContentDescription("Devolución neta", substring = true)).assertExists()
+        compose.onNode(hasContentDescription("Regalos: SAR\u00A0-1.00 al día", substring = true))
+            .assert(hasContentDescription("Devolución neta", substring = true))
         list.performScrollToNode(hasText("Sin gasto en mar ni feb: Viajes."))
     }
 

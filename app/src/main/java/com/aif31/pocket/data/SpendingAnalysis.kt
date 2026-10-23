@@ -48,8 +48,11 @@ data class ForeignCurrencySpend(
     val estimatedAccountingNetMinor: Long,
 )
 
-/** A Pocket's average daily spending in each [SpendingAnalysis.trend] period, aligned with that list. */
-data class PocketTrend(val pocket: Pocket, val averageDailyByPeriodMinor: List<Long?>)
+/**
+ * A Pocket's average daily spending in each [SpendingAnalysis.trend] period, aligned with that list, and its net spend
+ * through today in each, unrounded, for deciding whether it moved at all and for its share of the total.
+ */
+data class PocketTrend(val pocket: Pocket, val averageDailyByPeriodMinor: List<Long?>, val netSpendByPeriodMinor: List<Long>)
 
 /** Rollover a Pocket received in each [SpendingAnalysis.trend] period, aligned with that list. */
 data class PocketRolloverTrend(
@@ -225,6 +228,7 @@ data class SpendingAnalysis(
                         averageDailyByPeriodMinor = trend.map { insights ->
                             insights.elapsedDays.takeIf { it > 0 }?.let { insights.pocketNetSpendThroughTodayMinor(pocket.id) / it }
                         },
+                        netSpendByPeriodMinor = trend.map { it.pocketNetSpendThroughTodayMinor(pocket.id) },
                     )
                 }
         }

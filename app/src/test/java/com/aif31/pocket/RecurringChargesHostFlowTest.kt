@@ -85,8 +85,8 @@ class RecurringChargesHostFlowTest {
 
         compose.waitUntilExactlyOneExists(hasTestTag("analysis_list"), 5_000)
         compose.onNodeWithTag("analysis_list").performScrollToNode(hasText("Cargos recurrentes"))
-        compose.onNodeWithText("Faltan por cobrarse: SAR 10.99").assertExists()
-        compose.onNodeWithText("Esperado el 15 mar · SAR 10.99").assertExists()
+        compose.onNodeWithText("Faltan por cobrarse: SAR\u00A010.99").assertExists()
+        compose.onNodeWithText("Esperado el 15 mar · SAR\u00A010.99").assertExists()
         compose.onNode(hasText("Stream") and hasText("Ocio")).assertExists()
         compose.onNodeWithText("Vencido").assertExists()
         compose.onNodeWithText("Stream").performSemanticsAction(SemanticsActions.OnClick)
@@ -102,7 +102,7 @@ class RecurringChargesHostFlowTest {
         var periodId by mutableStateOf(state.currentPeriod!!.id)
         compose.setContent { AnalysisScreen(state, periodId, onPeriodChange = { periodId = it }, onBack = {}) }
         compose.onNodeWithTag("analysis_list").performScrollToNode(hasText("Cargos recurrentes"))
-        compose.onNodeWithText("Faltan por cobrarse: SAR 10.99").assertExists()
+        compose.onNodeWithText("Faltan por cobrarse: SAR\u00A010.99").assertExists()
         compose.runOnIdle { periodId = state.periods.first { it.id != state.currentPeriod.id }.id }
         compose.onNodeWithText("Cargos recurrentes").assertDoesNotExist()
     }

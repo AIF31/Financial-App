@@ -21,7 +21,6 @@ import com.aif31.pocket.domain.SupportedCurrency
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.roundToLong
 
 private const val NO_BREAK_SPACE = '\u00A0'
 private val monthLabel = DateTimeFormatter.ofPattern("MMM", Locale.forLanguageTag("es"))
@@ -34,9 +33,12 @@ internal fun MoneyText.unbroken(minor: Long, currency: SupportedCurrency): Strin
 internal fun PeriodInsights.shortLabel(): String =
     period.start.plusDays(totalDays / 2L).format(monthLabel).trimEnd('.')
 
-/** The change from [baseMinor] as a whole percentage, or null when there is no base or the value fell to zero. */
-private fun changePercent(deltaMinor: Long, baseMinor: Long): Long? =
-    if (baseMinor > 0 && baseMinor + deltaMinor > 0) (deltaMinor * 100.0 / baseMinor).roundToLong() else null
+/**
+ * The change from [baseMinor] as a whole percentage rounded toward zero, as in the comparison summary; null when there
+ * is no base, the value fell to zero or below, or the change rounds to 0%, which would read as no change.
+ */
+private fun changePercent(deltaMinor: Long, baseMinor: Long): Int? =
+    if (baseMinor > 0 && baseMinor + deltaMinor > 0) PocketMath.percent(deltaMinor, baseMinor)?.takeIf { it != 0 } else null
 
 /**
  * "▲ SAR 6.17 más al día (+15%)": the change from [baseMinor], with its direction in the arrow and in the words, so it
@@ -74,7 +76,8 @@ internal fun changeSpoken(
     unchanged: String = "Sin cambio",
 ): String {
     if (deltaMinor == 0L) return unchanged
-    val percent = changePercent(deltaMinor, baseMinor)?.let { ", un ${abs(it)}% ${if (it > 0) "más" else "menos"}" }.orEmpty()
+    // The direction comes from the change itself, never from its rounded percentage.
+    val percent = changePercent(deltaMinor, baseMinor)?.let { ", un ${abs(it)}% ${if (deltaMinor > 0) "más" else "menos"}" }.orEmpty()
     return changeWords(deltaMinor, currency, unit, than) + percent
 }
 

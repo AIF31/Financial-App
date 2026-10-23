@@ -324,10 +324,11 @@ private fun PocketSection(analysis: SpendingAnalysis, currency: SupportedCurrenc
     val selectedLabel = labels.last()
     val previousLabel = labels.getOrNull(labels.lastIndex - 1)
     val drawLines = labels.size >= MIN_LINE_PERIODS
-    // Only Pockets with no movement at all are quiet; one whose refunds outweigh its spending keeps its negative amounts.
-    val (quiet, active) = analysis.pocketTrends.partition { trend -> trend.averageDailyByPeriodMinor.all { (it ?: 0) == 0L } }
+    // Only Pockets with no net movement at all are quiet; one whose refunds outweigh its spending keeps its negative
+    // amounts. Both decisions use unrounded net spend, so a few cents never vanish into a rounded daily average of zero.
+    val (quiet, active) = analysis.pocketTrends.partition { trend -> trend.netSpendByPeriodMinor.all { it == 0L } }
     // Shares are of the net total, as refunds reduce net spending everywhere else in the app.
-    val netTotal = active.sumOf { it.averageDailyByPeriodMinor.last() ?: 0 }
+    val netTotal = active.sumOf { it.netSpendByPeriodMinor.last() }
     Muted(
         when {
             drawLines -> "Promedio al día en los últimos ${labels.size} periodos. La línea discontinua es lo habitual de cada Pocket."
@@ -342,6 +343,9 @@ private fun PocketSection(analysis: SpendingAnalysis, currency: SupportedCurrenc
         val values = trend.averageDailyByPeriodMinor
         val current = values.last()
         val previous = if (previousLabel != null) values[values.lastIndex - 1] else null
+        // Whether a period had any spending is read from its unrounded net, not from a daily average that rounds to zero.
+        val currentNet = trend.netSpendByPeriodMinor.last()
+        val previousNet = trend.netSpendByPeriodMinor.getOrNull(trend.netSpendByPeriodMinor.lastIndex - 1)
         val change: AnnotatedString?
         val spokenChange: String?
         when {
@@ -349,13 +353,14 @@ private fun PocketSection(analysis: SpendingAnalysis, currency: SupportedCurrenc
                 change = null
                 spokenChange = null
             }
-            current == 0L -> {
-                spokenChange = if (previous != 0L) "Sin gasto · antes ${money(previous)}" else "Sin gasto en $selectedLabel"
+            currentNet == 0L -> {
+                spokenChange = if (previousNet != 0L) "Sin gasto · antes ${money(previous)}" else "Sin gasto en $selectedLabel"
                 change = AnnotatedString(spokenChange)
             }
-            previous == 0L && current > 0 -> {
-                spokenChange = "Nuevo en $selectedLabel"
-                change = AnnotatedString(spokenChange)
+            // From nothing, spending is new; a refund needs no change line, as its share already says "Devolución neta".
+            previousNet == 0L -> {
+                spokenChange = if (currentNet > 0) "Nuevo en $selectedLabel" else null
+                change = spokenChange?.let(::AnnotatedString)
             }
             else -> {
                 change = changeText(current - previous, previous, currency)
@@ -363,9 +368,8 @@ private fun PocketSection(analysis: SpendingAnalysis, currency: SupportedCurrenc
             }
         }
         val share = when {
-            current == null -> null
-            current < 0 -> "Devolución neta"
-            current > 0 -> sharePercent(current, netTotal)?.let { "$it% del gasto" }
+            currentNet < 0 -> "Devolución neta"
+            currentNet > 0 -> sharePercent(currentNet, netTotal)?.let { "$it% del gasto" }
             else -> null
         }
         val spoken = buildString {
@@ -451,14 +455,14 @@ private fun RecurringSection(
             Text(charge.merchantName, style = MaterialTheme.typography.bodyLarge)
             Muted(charge.pocketName)
             Text(
-                "Esperado el ${charge.expectedDate.format(recurringDate)} · ${MoneyText.format(charge.expectedAmountMinor, currency)}",
+                "Esperado el ${charge.expectedDate.format(recurringDate)} · ${MoneyText.unbroken(charge.expectedAmountMinor, currency)}",
                 style = MaterialTheme.typography.bodyMedium,
             )
             if (charge.overdue) Text("Vencido", style = MaterialTheme.typography.labelMedium)
         }
     }
     charges.totalExpectedMinor?.takeIf { charges.items.isNotEmpty() }?.let { total ->
-        Text("Faltan por cobrarse: ${MoneyText.format(total, currency)}", style = MaterialTheme.typography.titleSmall)
+        Text("Faltan por cobrarse: ${MoneyText.unbroken(total, currency)}", style = MaterialTheme.typography.titleSmall)
     }
 }
 
@@ -524,7 +528,7 @@ private fun MerchantSection(analysis: SpendingAnalysis, currency: SupportedCurre
                     .padding(vertical = 2.dp),
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                NameValueRow(merchant.name, MoneyText.format(merchant.netSpendMinor, currency), Modifier.fillMaxWidth())
+                NameValueRow(merchant.name, MoneyText.unbroken(merchant.netSpendMinor, currency), Modifier.fillMaxWidth())
                 ValueBar(
                     label = counted(merchant.expenseCount, "compra", "compras"),
                     fraction = merchant.netSpendMinor.coerceAtLeast(0).toFloat() / largest,
@@ -554,7 +558,7 @@ private fun MerchantSection(analysis: SpendingAnalysis, currency: SupportedCurre
         )
     }
     if (analysis.unnamedNetSpendMinor != 0L) {
-        Muted("Sin comercio registrado: ${MoneyText.format(analysis.unnamedNetSpendMinor, currency)}.")
+        Muted("Sin comercio registrado: ${MoneyText.unbroken(analysis.unnamedNetSpendMinor, currency)}.")
     }
 }
 
@@ -567,13 +571,13 @@ private fun WhenSection(analysis: SpendingAnalysis, currency: SupportedCurrency,
     }
     val busiest = analysis.weekdays.filter { (it.averagePerDayMinor ?: 0) > 0 }.maxByOrNull { it.averagePerDayMinor!! }
     Text(
-        busiest?.let { "Gastas más ${it.dayOfWeek.recurringSpanish()}: ${MoneyText.format(it.averagePerDayMinor!!, currency)} de media" }
+        busiest?.let { "Gastas más ${it.dayOfWeek.recurringSpanish()}: ${MoneyText.unbroken(it.averagePerDayMinor!!, currency)} de media" }
             ?: "Aún no hay gasto hasta hoy.",
         style = MaterialTheme.typography.bodyLarge,
     )
     Text("Promedio por día de la semana", style = MaterialTheme.typography.titleSmall)
     val maxAverage = analysis.weekdays.maxOf { it.averagePerDayMinor ?: 0 }.coerceAtLeast(1)
-    val values = analysis.weekdays.map { day -> day.averagePerDayMinor?.let { MoneyText.format(it, currency) } ?: "—" }
+    val values = analysis.weekdays.map { day -> day.averagePerDayMinor?.let { MoneyText.unbroken(it, currency) } ?: "—" }
     // One value column for every weekday, so each track is the same length and the bars compare.
     val valueWidth = widestTextWidth(values, MaterialTheme.typography.labelMedium)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -603,7 +607,7 @@ private fun WhenSection(analysis: SpendingAnalysis, currency: SupportedCurrency,
         modifier = Modifier.widthIn(max = 420.dp),
     )
     if (insights.netSpendAfterTodayMinor != 0L) {
-        Muted("No incluye ${MoneyText.format(insights.netSpendAfterTodayMinor, currency)} netos con fecha posterior a hoy.")
+        Muted("No incluye ${MoneyText.unbroken(insights.netSpendAfterTodayMinor, currency)} netos con fecha posterior a hoy.")
     }
 }
 
@@ -625,7 +629,7 @@ private fun PaymentMethodSection(analysis: SpendingAnalysis, currency: Supported
                     .semantics(mergeDescendants = true) {},
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                NameValueRow(label, MoneyText.format(method.netSpendMinor, currency), Modifier.fillMaxWidth())
+                NameValueRow(label, MoneyText.unbroken(method.netSpendMinor, currency), Modifier.fillMaxWidth())
                 ValueBar(
                     label = counted(method.movementCount, "mov.", "mov."),
                     fraction = (method.sharePercent ?: 0) / 100f,
@@ -653,14 +657,14 @@ private fun ForeignCurrencySection(analysis: SpendingAnalysis, currency: Support
     analysis.foreignCurrencies.forEach { foreign ->
         MetricRow(
             label = foreign.currency.name,
-            value = MoneyText.format(foreign.accountingNetMinor, currency),
+            value = MoneyText.unbroken(foreign.accountingNetMinor, currency),
             supporting = buildString {
-                append("Original ${MoneyText.format(foreign.originalNetMinor, foreign.currency)}")
+                append("Original ${MoneyText.unbroken(foreign.originalNetMinor, foreign.currency)}")
                 append(" · ${counted(foreign.movementCount, "movimiento", "movimientos")}")
                 if (foreign.estimatedCount > 0) {
                     append(
                         " · ${counted(foreign.estimatedCount, "estimado", "estimados")} " +
-                            "(${MoneyText.format(foreign.estimatedAccountingNetMinor, currency)}) hasta el tipo final",
+                            "(${MoneyText.unbroken(foreign.estimatedAccountingNetMinor, currency)}) hasta el tipo final",
                     )
                 }
             },

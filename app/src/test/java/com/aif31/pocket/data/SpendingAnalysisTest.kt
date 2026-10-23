@@ -153,6 +153,7 @@ class SpendingAnalysisTest {
 
         assertEquals(listOf(market.id, travel.id), trends.map { it.pocket.id })
         assertEquals(listOf(0L, 0L), trends.last().averageDailyByPeriodMinor)
+        assertEquals(listOf(6_200L, 1_800L), trends.first().netSpendByPeriodMinor)
     }
 
     @Test

@@ -25,6 +25,31 @@ class AnalysisTextTest {
     }
 
     @Test
+    fun a_change_too_small_for_a_whole_percent_keeps_its_direction_and_drops_the_percentage() {
+        assertEquals("SAR\u00A00.01 más", changeSpoken(1, 1_000, sar))
+        assertEquals("SAR\u00A00.01 menos", changeSpoken(-1, 1_000, sar))
+    }
+
+    @Test
+    fun a_percentage_rounds_toward_zero_like_the_comparison_summary() {
+        // 2 of 3 is 66.6…%, shown as 66% everywhere in the app.
+        assertEquals("SAR\u00A00.02 más, un 66% más", changeSpoken(2, 3, sar))
+    }
+
+    @Test
+    fun a_refund_line_is_widened_by_its_magnitude_too() {
+        val (low, high) = relativeRange(listOf(-10_000, -10_001))
+        assertEquals(1_000.1, high - low, 0.001)
+    }
+
+    @Test
+    fun the_comparison_delta_is_shown_with_an_arrow_and_spoken_without_one() {
+        assertEquals("▲ SAR 9.00 más al día (+900%)", spendDeltaText(900, 900, sar))
+        assertEquals("SAR 9.00 más al día (+900%)", spendDeltaWords(900, 900, sar))
+        assertEquals("Sin cambio en el promedio diario", spendDeltaText(0, 0, sar))
+    }
+
+    @Test
     fun no_change_reads_as_the_unchanged_wording() {
         assertEquals("Igual que sept", changeSpoken(0, 1_000, sar, than = "que sept", unchanged = "Igual que sept"))
     }

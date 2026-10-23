@@ -83,12 +83,17 @@ internal val Movement.merchantOrPocket: String
  * Describes a daily-average change in words and arrows so meaning never depends on color. The deltas come
  * precomputed from [com.aif31.pocket.data.PeriodComparison].
  */
-internal fun spendDeltaText(deltaMinor: Long, deltaPercent: Int?, currency: SupportedCurrency): String {
+internal fun spendDeltaText(deltaMinor: Long, deltaPercent: Int?, currency: SupportedCurrency): String =
+    spendDeltaWords(deltaMinor, deltaPercent, currency).let { words ->
+        if (deltaMinor == 0L) words else "${if (deltaMinor > 0) "▲" else "▼"} $words"
+    }
+
+/** [spendDeltaText] without the arrow, for screen readers: the words already say which way it went. */
+internal fun spendDeltaWords(deltaMinor: Long, deltaPercent: Int?, currency: SupportedCurrency): String {
     if (deltaMinor == 0L) return "Sin cambio en el promedio diario"
-    val arrow = if (deltaMinor > 0) "▲" else "▼"
     val direction = if (deltaMinor > 0) "más" else "menos"
     val percent = deltaPercent?.let { " (${if (it > 0) "+" else ""}$it%)" }.orEmpty()
-    return "$arrow ${MoneyText.format(abs(deltaMinor), currency)} $direction al día$percent"
+    return "${MoneyText.format(abs(deltaMinor), currency)} $direction al día$percent"
 }
 
 /**

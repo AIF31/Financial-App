@@ -62,6 +62,7 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.TextStyle as DateTextStyle
 import java.util.Locale
+import kotlin.math.abs
 
 private val spanish = Locale.forLanguageTag("es")
 
@@ -213,13 +214,14 @@ internal fun PeriodLabels(labels: List<String>, selectedIndex: Int, modifier: Mo
 }
 
 /**
- * The range a relative line spans: from the lowest to the highest of [values], widened evenly to at least 10% of
- * the highest so a nearly flat series stays nearly flat instead of turning cents into swings.
+ * The range a relative line spans: from the lowest to the highest of [values], widened evenly to at least 10% of the
+ * largest magnitude among them, so a nearly flat series, refunds included, stays nearly flat instead of turning cents
+ * into swings.
  */
 internal fun relativeRange(values: List<Long>): Pair<Double, Double> {
     val low = values.minOrNull()?.toDouble() ?: 0.0
     val high = values.maxOrNull()?.toDouble() ?: 0.0
-    val floor = (high * 0.1).coerceAtLeast(1.0)
+    val floor = (maxOf(abs(low), abs(high)) * 0.1).coerceAtLeast(1.0)
     if (high - low >= floor) return low to high
     val pad = (floor - (high - low)) / 2
     return low - pad to high + pad
