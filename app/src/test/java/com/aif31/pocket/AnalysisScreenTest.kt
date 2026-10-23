@@ -6,6 +6,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
@@ -33,6 +35,7 @@ import com.aif31.pocket.ui.TrendBar
 import com.aif31.pocket.ui.TrendBars
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -75,17 +78,19 @@ class AnalysisScreenTest {
         }
         val list = compose.onNodeWithTag("analysis_list")
 
-        list.performScrollToNode(hasText("SAR 10.00 al día en el periodo elegido"))
+        list.performScrollToNode(hasText("SAR 10.00 al día"))
         list.performScrollToNode(
             hasContentDescription("Gasto diario promedio por periodo. 25 ene – 24 feb 2026: SAR 1.00. 25 feb – 24 mar 2026: SAR 10.00, en curso"),
         )
-        list.performScrollToNode(hasText("1 compra · media SAR 50.00 · ▲\u00A0SAR 19.00 frente al anterior"))
+        list.performScrollToNode(hasText("media SAR\u00A050.00 · ▲\u00A0SAR\u00A019.00 frente al anterior"))
         list.performScrollToNode(hasText("Gastas más los sábados: SAR 50.00 de media"))
         list.performScrollToNode(hasText("Tarjeta"))
         list.performScrollToNode(hasText("33% del gasto neto se registró en otra moneda"))
         list.performScrollToNode(hasText("Original MXN 150.00 · 1 movimiento"))
 
-        list.performScrollToNode(hasContentDescription("Supermercado: promedio diario por periodo, SAR 1.00, SAR 10.00", substring = true))
+        list.performScrollToNode(
+            hasContentDescription("Supermercado: SAR\u00A010.00 al día. SAR\u00A09.00 más que feb, un 900% más. 100% del gasto"),
+        )
         list.performScrollToNode(hasTestTag("trend_bars"))
         compose.onNodeWithTag("trend_bars").performTouchInput { click(Offset(width * 0.25f, height - 1f)) }
         assertEquals(february.id, selected)
@@ -129,6 +134,76 @@ class AnalysisScreenTest {
         actions[1].action()
         assertEquals("p1", selected)
     }
+
+    @Test
+    fun from_three_periods_each_pocket_speaks_its_values_per_period() {
+        val january = Period("p0", LocalDate.of(2025, 12, 25), LocalDate.of(2026, 1, 25), 30_000, 25)
+        val state = threePeriodState(january)
+        compose.setContent { PocketTheme { AnalysisScreen(state, march.id, onPeriodChange = {}, onBack = {}) } }
+
+        compose.onNodeWithTag("analysis_list").performScrollToNode(
+            hasContentDescription("Últimos 3 periodos: ene SAR\u00A02.00, feb SAR\u00A01.00, mar SAR\u00A010.00", substring = true),
+        )
+    }
+
+    @Test
+    @Config(qualifiers = "w411dp-h1400dp")
+    fun sections_follow_the_chosen_order_and_the_sheet_reports_each_move() {
+        val january = Period("p0", LocalDate.of(2025, 12, 25), LocalDate.of(2026, 1, 25), 30_000, 25)
+        val state = threePeriodState(january)
+        val chosen = listOf(AnalysisSection.MERCHANTS) + AnalysisSection.entries.filterNot { it == AnalysisSection.MERCHANTS }
+        val changes = mutableListOf<List<AnalysisSection>>()
+        compose.setContent {
+            PocketTheme {
+                AnalysisScreen(
+                    state,
+                    march.id,
+                    onPeriodChange = {},
+                    onBack = {},
+                    sectionOrder = chosen,
+                    onSectionOrderChange = { changes += it },
+                )
+            }
+        }
+
+        val merchantsTop = compose.onNodeWithText("Comercios principales").fetchSemanticsNode().boundsInRoot.top
+        val trendTop = compose.onNodeWithText("Tendencia del gasto diario").fetchSemanticsNode().boundsInRoot.top
+        assertTrue("Merchants come first when chosen first", merchantsTop < trendTop)
+
+        compose.onNodeWithContentDescription("Organizar secciones").performClick()
+        compose.onNodeWithTag("section_order_sheet").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Subir Comercios principales").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Bajar Comercios principales").performClick()
+        compose.onNodeWithText("Restablecer").performClick()
+
+        assertEquals(
+            listOf(
+                listOf(AnalysisSection.TREND, AnalysisSection.MERCHANTS) + chosen.drop(2),
+                AnalysisSection.entries,
+            ),
+            changes,
+        )
+    }
+
+    private fun threePeriodState(january: Period) = LedgerState(
+        periods = listOf(january, february, march),
+        currentPeriod = march,
+        pocketCatalog = listOf(market),
+        pocketSummariesByPeriod = mapOf(
+            january.id to listOf(spend(6_200)),
+            february.id to listOf(spend(3_100)),
+            march.id to listOf(spend(9_000)),
+        ),
+        unallocatedMinorByPeriod = mapOf(january.id to 0L, february.id to 0L, march.id to 0L),
+        movements = listOf(
+            movement("jan", january, LocalDate.of(2026, 1, 2), 6_200, merchant = "Tamimi"),
+            movement("feb", february, LocalDate.of(2026, 2, 1), 3_100, merchant = "Tamimi"),
+            movement("a", march, LocalDate.of(2026, 2, 28), 9_000, merchant = "Tamimi"),
+        ),
+        elapsedDays = 9,
+        totalDays = 28,
+        currentLocalDate = LocalDate.of(2026, 3, 5),
+    )
 
     private fun spend(expense: Long) = PocketPeriodSummary(
         pocket = market,

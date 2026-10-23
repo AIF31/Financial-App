@@ -66,6 +66,16 @@ class AppPreferencesTest {
     }
 
     @Test
+    fun `the analysis section order keeps its sequence and starts empty`() = runTest {
+        val store = DataStorePreferences(newDataStore("analysis-order.preferences_pb", backgroundScope))
+        assertEquals(emptyList<String>(), store.state.first().analysisSectionOrder)
+
+        store.setAnalysisSectionOrder(listOf("ROLLOVER", "TREND", "MERCHANTS"))
+
+        assertEquals(listOf("ROLLOVER", "TREND", "MERCHANTS"), store.state.first().analysisSectionOrder)
+    }
+
+    @Test
     fun `rate alert defaults to an off daily SAR to MXN alert and its settings round trip`() = runTest {
         val store = DataStorePreferences(newDataStore("fx-alert.preferences_pb", backgroundScope))
         assertEquals(FxRateAlertSettings(), store.state.first().fxRateAlert)

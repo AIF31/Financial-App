@@ -3,7 +3,7 @@ package com.aif31.pocket.ui
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import com.aif31.pocket.domain.SupportedCurrency
 import java.math.BigDecimal
@@ -24,8 +24,8 @@ internal object MoneyText {
         BigDecimal.valueOf(minor).movePointLeft(2).toPlainString()
 }
 
-/** "SAR 1,234.00 disponibles" with only the amount in the monospace face, so rows wrap less. */
+/** "SAR 1,234.00 disponibles" with the amount in a heavier weight than the words after it. */
 internal fun availableText(minor: Long, currency: SupportedCurrency): AnnotatedString = buildAnnotatedString {
-    withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) { append(MoneyText.format(minor, currency)) }
+    withStyle(SpanStyle(fontWeight = FontWeight.Medium)) { append(MoneyText.format(minor, currency)) }
     append(" disponibles")
 }

@@ -93,7 +93,7 @@ data class SpendingAnalysis(
     val period: Period get() = insights.period
 
     companion object {
-        const val TREND_PERIODS = 12
+        const val TREND_PERIODS = 8
 
         fun of(state: LedgerState, periodId: String): SpendingAnalysis? {
             val insights = PeriodInsights.of(state, periodId) ?: return null

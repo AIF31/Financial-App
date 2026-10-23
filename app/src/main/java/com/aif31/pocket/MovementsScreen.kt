@@ -73,7 +73,6 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.ConversionStatus
@@ -476,7 +475,6 @@ private fun SuggestionCard(
             Text(
                 "- " + MoneyText.format(suggestion.amountMinor, suggestion.currency),
                 style = MaterialTheme.typography.titleMedium,
-                fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
             )
         }
@@ -554,7 +552,6 @@ private fun MovementCard(
                 Text(
                     (if (isRefund) "+ " else "- ") + MoneyText.format(movement.accountingAmountMinor, accountingCurrency),
                     style = MaterialTheme.typography.titleMedium,
-                    fontFamily = FontFamily.Monospace,
                     color = amountColor,
                 )
                 when {
@@ -615,7 +612,6 @@ private fun MovementDetailDialog(
                 Text(
                     "${if (isRefund) "Devolución" else "Gasto"} ${MoneyText.format(movement.accountingAmountMinor, accountingCurrency)}",
                     style = MaterialTheme.typography.titleLarge,
-                    fontFamily = FontFamily.Monospace,
                 )
                 DetailLine("Fecha", zoned.format(DateTimeFormatter.ofPattern("EEEE d 'de' MMMM yyyy · HH:mm", Locale.forLanguageTag("es"))))
                 movement.merchant?.takeIf(String::isNotBlank)?.let { DetailLine("Comercio", it) }

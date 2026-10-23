@@ -1,5 +1,6 @@
 package com.aif31.pocket.ui
 
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -26,6 +27,7 @@ internal fun PocketTopAppBar(
     modifier: Modifier = Modifier,
     navigationLabel: String = "Atrás",
     windowInsets: WindowInsets = TopAppBarDefaults.windowInsets,
+    actions: @Composable RowScope.() -> Unit = {},
 ) {
     TopAppBar(
         title = { Text(title) },
@@ -34,6 +36,7 @@ internal fun PocketTopAppBar(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = navigationLabel)
             }
         },
+        actions = actions,
         windowInsets = windowInsets,
         modifier = modifier,
     )

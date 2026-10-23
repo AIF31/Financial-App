@@ -36,6 +36,8 @@ data class AppPreferences(
     val fxRateAlert: FxRateAlertSettings = FxRateAlertSettings(),
     /** The latest rate alert sent per family, as `family=value`, so one day or one pair's FIX never alerts twice. */
     val fxRateAlertSent: Set<String> = emptySet(),
+    /** Análisis sections by name, in the order the person chose; empty keeps the default order. */
+    val analysisSectionOrder: List<String> = emptyList(),
 )
 
 interface PreferencesStore {
@@ -72,6 +74,8 @@ interface PreferencesStore {
 
     /** Forgets [family]'s claim of [value], when its alert could not be shown. */
     suspend fun releaseFxRateAlert(family: String, value: String) {}
+
+    suspend fun setAnalysisSectionOrder(order: List<String>) {}
 }
 private val Context.pocketPreferences by preferencesDataStore("pocket_preferences")
 
@@ -99,6 +103,7 @@ class DataStorePreferences internal constructor(
             recapDismissedPeriodId = values[RECAP_DISMISSED_PERIOD],
             fxRateAlert = fxRateAlertSettings(values),
             fxRateAlertSent = values[FX_RATE_ALERT_SENT] ?: emptySet(),
+            analysisSectionOrder = values[ANALYSIS_SECTION_ORDER]?.split(',')?.filter(String::isNotBlank) ?: emptyList(),
         )
     }
 
@@ -201,6 +206,11 @@ class DataStorePreferences internal constructor(
         }
     }
 
+    override suspend fun setAnalysisSectionOrder(order: List<String>) {
+        require(order.none { ',' in it })
+        dataStore.edit { it[ANALYSIS_SECTION_ORDER] = order.joinToString(",") }
+    }
+
     /** Stored alert settings; any unreadable value falls back to its default. */
     private fun fxRateAlertSettings(values: Preferences): FxRateAlertSettings {
         val defaults = FxRateAlertSettings()
@@ -248,5 +258,8 @@ class DataStorePreferences internal constructor(
         val FX_RATE_ALERT_MINIMUM = stringPreferencesKey("fx_rate_alert_minimum")
         val FX_RATE_ALERT_SENT = androidx.datastore.preferences.core.stringSetPreferencesKey("fx_rate_alert_sent")
         val NOTIFICATION_SOURCE_PACKAGES = androidx.datastore.preferences.core.stringSetPreferencesKey("notification_source_packages")
+
+        // A string set would lose the order, so the names are stored comma-separated.
+        val ANALYSIS_SECTION_ORDER = stringPreferencesKey("analysis_section_order")
     }
 }

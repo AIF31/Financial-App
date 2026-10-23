@@ -495,6 +495,8 @@ fun PocketApp(
             onPeriodChange = { backStack[backStack.lastIndex] = AnalysisRoute(it) },
             onOpenMovements = { drill, title -> backStack.add(MovementDrillRoute(drill, title)) },
             onBack = { backStack.removeLastOrNull() },
+            sectionOrder = AnalysisSection.ordered(preferenceState.analysisSectionOrder),
+            onSectionOrderChange = { order -> appScope.launch { preferences?.setAnalysisSectionOrder(order.map { it.name }) } },
         )
         return
     }

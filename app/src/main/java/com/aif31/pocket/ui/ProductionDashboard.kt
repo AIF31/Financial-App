@@ -62,7 +62,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -420,7 +419,7 @@ private fun HeroDetails(
  */
 @Composable
 private fun CompactMetrics(metrics: List<Pair<String, String>>, modifier: Modifier = Modifier) {
-    val valueStyle = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace)
+    val valueStyle = MaterialTheme.typography.titleMedium
     val measurer = rememberTextMeasurer()
     BoxWithConstraints(modifier) {
         val spacing = 12.dp
