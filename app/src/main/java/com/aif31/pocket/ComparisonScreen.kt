@@ -32,11 +32,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -47,12 +50,14 @@ import com.aif31.pocket.data.PeriodInsights
 import com.aif31.pocket.ui.CumulativeSpendChart
 import com.aif31.pocket.ui.MoneyText
 import com.aif31.pocket.ui.PocketComparisonBars
+import com.aif31.pocket.ui.shortLabel
 import com.aif31.pocket.ui.PocketTopAppBar
 import com.aif31.pocket.ui.chartCutoffNote
 import com.aif31.pocket.ui.formatPeriodRange
 import com.aif31.pocket.ui.merchantOrPocket
 import androidx.compose.foundation.layout.Spacer
 import com.aif31.pocket.ui.spendDeltaText
+import com.aif31.pocket.ui.spendDeltaWords
 
 /**
  * Focused comparison task: two periods side by side, compared by average daily spending so a period in
@@ -131,9 +136,12 @@ internal fun ComparisonScreen(
                                     Text("Periodo comparado: ${MoneyText.format(it, currency)} al día")
                                 }
                                 baseline.averageDailyDeltaMinor?.let {
+                                    val spoken = spendDeltaWords(it, baseline.averageDailyDeltaPercent, currency)
                                     Text(
                                         spendDeltaText(it, baseline.averageDailyDeltaPercent, currency),
                                         style = MaterialTheme.typography.titleMedium,
+                                        // Screen readers hear the change in words instead of the arrow.
+                                        modifier = Modifier.clearAndSetSemantics { text = AnnotatedString(spoken) },
                                     )
                                 }
                             }
@@ -171,7 +179,7 @@ internal fun ComparisonScreen(
                     Card(bounded) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text("Gasto diario promedio por Pocket", style = MaterialTheme.typography.titleMedium)
-                            PocketComparisonBars(it.pockets, currency)
+                            PocketComparisonBars(it.pockets, currency, currentLabel = insights.shortLabel(), baselineLabel = it.baseline.shortLabel())
                         }
                     }
                 }
@@ -180,7 +188,7 @@ internal fun ComparisonScreen(
     }
 }
 
-/** One summary line; [amount] rows use the tabular monospace face, counts do not. */
+/** One summary line; [amount] rows are set in a heavier weight than counts. */
 private class SummaryRow(val label: String, val amount: Boolean, val value: (PeriodInsights) -> String)
 
 @Composable
@@ -214,7 +222,7 @@ private fun ComparisonTable(current: PeriodInsights, baseline: PeriodInsights?) 
         val widestNumber = rows.filter { it.amount }
             .flatMap { row -> listOfNotNull(row.value(current), baseline?.let(row.value)) }
             .flatMap { it.split(' ') }
-            .maxOf { measurer.measure(it, style.copy(fontFamily = FontFamily.Monospace)).size.width }
+            .maxOf { measurer.measure(it, style.copy(fontWeight = FontWeight.Medium)).size.width }
         val stacked = widestNumber > besideLabelWidth
         Column {
             TableHeader(currentName, baselineName, stacked)
@@ -227,7 +235,7 @@ private fun ComparisonTable(current: PeriodInsights, baseline: PeriodInsights?) 
                     append("${row.label}. $currentName: $currentValue")
                     if (baselineName != null && baselineValue != null) append(". $baselineName: $baselineValue")
                 }
-                TableRow(row.label, currentValue, baselineValue, if (row.amount) FontFamily.Monospace else null, spoken, stacked)
+                TableRow(row.label, currentValue, baselineValue, if (row.amount) FontWeight.Medium else null, spoken, stacked)
             }
             current.largestExpense?.let { movement ->
                 Text(
@@ -262,7 +270,7 @@ private fun TableRow(
     label: String,
     current: String,
     baseline: String?,
-    valueFont: FontFamily?,
+    valueWeight: FontWeight?,
     spokenDescription: String,
     stacked: Boolean,
 ) {
@@ -272,7 +280,7 @@ private fun TableRow(
     if (stacked) {
         Column(Modifier.fillMaxWidth().padding(vertical = 8.dp).then(rowSemantics)) {
             Text(label, style = style, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = CoveredByRowDescription)
-            Row(Modifier.fillMaxWidth()) { TableValues(label, current, baseline, valueFont, style) }
+            Row(Modifier.fillMaxWidth()) { TableValues(label, current, baseline, valueWeight, style) }
         }
         return
     }
@@ -281,18 +289,18 @@ private fun TableRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, style = style, modifier = CoveredByRowDescription.weight(LABEL_WEIGHT), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        TableValues(label, current, baseline, valueFont, style)
+        TableValues(label, current, baseline, valueWeight, style)
     }
 }
 
 @Composable
-private fun RowScope.TableValues(label: String, current: String, baseline: String?, valueFont: FontFamily?, style: TextStyle) {
+private fun RowScope.TableValues(label: String, current: String, baseline: String?, valueWeight: FontWeight?, style: TextStyle) {
     Text(
         current,
         style = style,
         modifier = CoveredByRowDescription.weight(1f).testTag("comparison_value_current_$label"),
         textAlign = TextAlign.End,
-        fontFamily = valueFont,
+        fontWeight = valueWeight,
     )
     if (baseline != null) {
         Text(
@@ -300,7 +308,7 @@ private fun RowScope.TableValues(label: String, current: String, baseline: Strin
             style = style,
             modifier = CoveredByRowDescription.weight(1f).testTag("comparison_value_baseline_$label"),
             textAlign = TextAlign.End,
-            fontFamily = valueFont,
+            fontWeight = valueWeight,
         )
     }
 }

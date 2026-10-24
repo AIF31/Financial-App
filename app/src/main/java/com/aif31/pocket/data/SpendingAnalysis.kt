@@ -48,8 +48,11 @@ data class ForeignCurrencySpend(
     val estimatedAccountingNetMinor: Long,
 )
 
-/** A Pocket's average daily spending in each [SpendingAnalysis.trend] period, aligned with that list. */
-data class PocketTrend(val pocket: Pocket, val averageDailyByPeriodMinor: List<Long?>)
+/**
+ * A Pocket's average daily spending in each [SpendingAnalysis.trend] period, aligned with that list, and its net spend
+ * through today in each, unrounded, for deciding whether it moved at all and for its share of the total.
+ */
+data class PocketTrend(val pocket: Pocket, val averageDailyByPeriodMinor: List<Long?>, val netSpendByPeriodMinor: List<Long>)
 
 /** Rollover a Pocket received in each [SpendingAnalysis.trend] period, aligned with that list. */
 data class PocketRolloverTrend(
@@ -85,7 +88,10 @@ data class SpendingAnalysis(
      */
     val trend: List<PeriodInsights>,
     val earlierPeriodsInOtherCurrency: Boolean,
-    /** Pockets with spending in any trend period, largest net spend in this period first. */
+    /**
+     * This period's Pockets and any other with spending in a trend period, largest net spend in this period first, so
+     * a Pocket with no spending at all is still listed and can be named as such.
+     */
     val pocketTrends: List<PocketTrend>,
     /** Pockets opted into rollover now, eligible to carry it from this period, or that received it in a trend period. */
     val rollover: List<PocketRolloverTrend>,
@@ -93,7 +99,7 @@ data class SpendingAnalysis(
     val period: Period get() = insights.period
 
     companion object {
-        const val TREND_PERIODS = 12
+        const val TREND_PERIODS = 8
 
         fun of(state: LedgerState, periodId: String): SpendingAnalysis? {
             val insights = PeriodInsights.of(state, periodId) ?: return null
@@ -212,9 +218,8 @@ data class SpendingAnalysis(
 
         private fun pocketTrends(state: LedgerState, trend: List<PeriodInsights>): List<PocketTrend> {
             val selected = trend.lastOrNull() ?: return emptyList()
-            return trend.flatMap { it.pockets }
-                .filter { it.netSpendMinor != 0L }
-                .map { it.pocket }
+            val withSpending = trend.flatMap { it.pockets }.filter { it.netSpendMinor != 0L }.map { it.pocket }
+            return (withSpending + selected.pockets.map { it.pocket })
                 .distinctBy { it.id }
                 .sortedByDescending { pocket -> selected.pockets.firstOrNull { it.pocket.id == pocket.id }?.netSpendMinor ?: 0 }
                 .map { pocket ->
@@ -223,6 +228,7 @@ data class SpendingAnalysis(
                         averageDailyByPeriodMinor = trend.map { insights ->
                             insights.elapsedDays.takeIf { it > 0 }?.let { insights.pocketNetSpendThroughTodayMinor(pocket.id) / it }
                         },
+                        netSpendByPeriodMinor = trend.map { it.pocketNetSpendThroughTodayMinor(pocket.id) },
                     )
                 }
         }

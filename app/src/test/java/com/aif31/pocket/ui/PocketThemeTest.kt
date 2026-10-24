@@ -2,6 +2,7 @@ package com.aif31.pocket.ui
 
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -15,6 +16,23 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class PocketThemeTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test
+    @Config(qualifiers = "notnight")
+    fun the_app_stays_dark_when_the_phone_uses_a_light_theme() {
+        var contentColor = Color.Unspecified
+        var background = Color.Unspecified
+        compose.setContent {
+            PocketTheme {
+                contentColor = LocalContentColor.current
+                background = MaterialTheme.colorScheme.background
+            }
+        }
+
+        compose.waitForIdle()
+        assertEquals(Color(0xFFE6F0ED), contentColor)
+        assertEquals(Color(0xFF0E1616), background)
+    }
 
     @Test
     @Config(qualifiers = "night")

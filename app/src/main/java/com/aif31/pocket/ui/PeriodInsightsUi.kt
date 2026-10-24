@@ -5,14 +5,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -31,12 +29,13 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.Movement
@@ -84,15 +83,23 @@ internal val Movement.merchantOrPocket: String
  * Describes a daily-average change in words and arrows so meaning never depends on color. The deltas come
  * precomputed from [com.aif31.pocket.data.PeriodComparison].
  */
-internal fun spendDeltaText(deltaMinor: Long, deltaPercent: Int?, currency: SupportedCurrency): String {
+internal fun spendDeltaText(deltaMinor: Long, deltaPercent: Int?, currency: SupportedCurrency): String =
+    spendDeltaWords(deltaMinor, deltaPercent, currency).let { words ->
+        if (deltaMinor == 0L) words else "${if (deltaMinor > 0) "▲" else "▼"} $words"
+    }
+
+/** [spendDeltaText] without the arrow, for screen readers: the words already say which way it went. */
+internal fun spendDeltaWords(deltaMinor: Long, deltaPercent: Int?, currency: SupportedCurrency): String {
     if (deltaMinor == 0L) return "Sin cambio en el promedio diario"
-    val arrow = if (deltaMinor > 0) "▲" else "▼"
     val direction = if (deltaMinor > 0) "más" else "menos"
     val percent = deltaPercent?.let { " (${if (it > 0) "+" else ""}$it%)" }.orEmpty()
-    return "$arrow ${MoneyText.format(abs(deltaMinor), currency)} $direction al día$percent"
+    return "${MoneyText.format(abs(deltaMinor), currency)} $direction al día$percent"
 }
 
-/** Label/value row used by the dashboard details, period cards, and the comparison screen. */
+/**
+ * Label/value row used by the dashboard details, period cards, and the comparison screen. At a large font scale the
+ * value moves under the label, so neither is squeezed into a narrow column.
+ */
 @Composable
 internal fun MetricRow(
     label: String,
@@ -102,8 +109,17 @@ internal fun MetricRow(
     color: Color = Color.Unspecified,
     supportingColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
+    val rowModifier = modifier.fillMaxWidth().padding(vertical = 6.dp).semantics(mergeDescendants = true) {}
+    if (LocalDensity.current.fontScale > LARGE_FONT_SCALE) {
+        Column(rowModifier) {
+            Text(label, color = color, style = MaterialTheme.typography.bodyLarge)
+            Text(value, color = color, style = MaterialTheme.typography.titleMedium)
+            supporting?.let { Text(it, color = supportingColor, style = MaterialTheme.typography.bodySmall) }
+        }
+        return
+    }
     Row(
-        modifier = modifier.fillMaxWidth().padding(vertical = 6.dp).semantics(mergeDescendants = true) {},
+        modifier = rowModifier,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.Top,
     ) {
@@ -111,7 +127,7 @@ internal fun MetricRow(
             Text(label, color = color, style = MaterialTheme.typography.bodyLarge)
             supporting?.let { Text(it, color = supportingColor, style = MaterialTheme.typography.bodySmall) }
         }
-        Text(value, color = color, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.End)
+        Text(value, color = color, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.End)
     }
 }
 
@@ -323,52 +339,55 @@ private fun LegendItem(label: String, color: Color, style: LineStyle) {
     }
 }
 
-/** Paired horizontal bars per Pocket: the chosen period (filled) against the comparison period (outlined tone). */
+/**
+ * Each Pocket's average daily spend in the chosen period as a filled track, with a tick at the comparison period's
+ * value. All tracks share one scale, so Pockets compare with each other as well as with themselves. [currentLabel] and
+ * [baselineLabel] name the two periods, as in "oct" and "sept".
+ */
 @Composable
 internal fun PocketComparisonBars(
     rows: List<PocketComparisonRow>,
     currency: SupportedCurrency,
+    currentLabel: String,
+    baselineLabel: String,
     modifier: Modifier = Modifier,
 ) {
+    fun perDay(minor: Long) = "${MoneyText.unbroken(minor, currency)}/día"
     val maxValue = rows.maxOfOrNull { maxOf(it.currentAverageDailyMinor ?: 0, it.baselineAverageDailyMinor ?: 0) }?.coerceAtLeast(1) ?: 1
+    fun fractionOf(minor: Long) = minor.coerceAtLeast(0).toFloat() / maxValue
     Column(modifier, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        ComparisonLegend(fillLabel = "$currentLabel, elegido", markerLabel = "$baselineLabel, comparado")
         rows.forEach { row ->
-            Column(Modifier.semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val current = row.currentAverageDailyMinor
+            val baseline = row.baselineAverageDailyMinor
+            val delta = row.averageDailyDeltaMinor
+            val spoken = buildString {
+                append("${row.pocket.name}: ${current?.let(::perDay) ?: "sin días"} en $currentLabel")
+                baseline?.let { append(". $baselineLabel: ${perDay(it)}") }
+                if (delta != null && baseline != null) append(". ${changeSpoken(delta, baseline, currency, unit = "al día")}")
+            }
+            Column(
+                Modifier.clearAndSetSemantics { contentDescription = spoken },
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     PocketArtworkPlate(row.pocket.iconKey, plateSize = 32.dp)
-                    Text(row.pocket.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                    Text(
-                        row.averageDailyDeltaMinor?.let { spendDeltaText(it, row.averageDailyDeltaPercent, currency) } ?: "Sin comparación",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    NameValueRow(row.pocket.name, current?.let(::perDay) ?: "—", Modifier.weight(1f))
                 }
-                ComparisonBar("Elegido", row.currentAverageDailyMinor ?: 0, maxValue, MaterialTheme.colorScheme.primary, currency)
-                row.baselineAverageDailyMinor?.let { ComparisonBar("Comparado", it, maxValue, MaterialTheme.colorScheme.outline, currency) }
+                ComparisonTrack(
+                    fraction = fractionOf(current ?: 0),
+                    markerFraction = baseline?.let(::fractionOf),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    buildAnnotatedString {
+                        if (delta != null && baseline != null) append(changeText(delta, baseline, currency, unit = "al día")) else append("Sin comparación")
+                        baseline?.let { append(" · $baselineLabel ${perDay(it)}") }
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
-    }
-}
-
-@Composable
-private fun ComparisonBar(label: String, value: Long, maxValue: Long, color: Color, currency: SupportedCurrency) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(label, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(72.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Canvas(
-            Modifier
-                .weight(1f)
-                .height(12.dp)
-                .clip(RoundedCornerShape(6.dp)),
-        ) {
-            drawRect(color.copy(alpha = 0.14f))
-            val fraction = (value.coerceAtLeast(0).toFloat() / maxValue).coerceIn(0f, 1f)
-            drawRect(color, size = size.copy(width = size.width * fraction))
-        }
-        Spacer(Modifier.width(4.dp))
-        Text(
-            "${MoneyText.format(value, currency)}/día",
-            style = MaterialTheme.typography.labelMedium,
-            fontFamily = FontFamily.Monospace,
-        )
     }
 }

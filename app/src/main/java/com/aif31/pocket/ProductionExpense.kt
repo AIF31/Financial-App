@@ -89,7 +89,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.ConversionStatus
@@ -400,7 +399,7 @@ internal fun ProductionMovementScreen(
                     },
                     isError = amountIsInvalid || error == "Escribe un importe válido",
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.displaySmall.copy(fontFamily = FontFamily.Monospace),
+                    textStyle = MaterialTheme.typography.displaySmall,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                     shape = MaterialTheme.shapes.extraLarge,
