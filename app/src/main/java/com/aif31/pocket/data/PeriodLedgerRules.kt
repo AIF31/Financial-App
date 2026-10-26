@@ -292,43 +292,94 @@ internal object PeriodLedgerRules {
             periodOrder,
             reverted.newFundsMinor,
         )
-        val inverse = boundary.inverseValue()
-        val reversalSource = "${period.priorBoundarySource} · INVERSA"
-        val revertedMovements = movements.map { movement ->
-            val original = movement.originalAmountMinor
-            if (movement.originalCurrencyCode == restored.name && original != null) {
-                movement.copy(
-                    accountingAmountMinor = original,
-                    originalAmountMinor = null,
-                    conversionStatus = ConversionStatus.CONFIRMED.name,
-                    rate = null,
-                    conversionEffectiveEpochDay = null,
-                    conversionSource = null,
-                )
-            } else {
-                val originalMinor = original ?: movement.accountingAmountMinor
-                val accountingMinor = boundary.revertMinor(movement.accountingAmountMinor).coerceAtLeast(1)
-                // Same-currency Movements have an implicit rate of 1 into the boundary's currency.
-                val originalRate = if (original == null) BigDecimal.ONE else movement.rate?.toBigDecimalOrNull()
-                val rate = originalRate?.multiply(inverse, MathContext.DECIMAL64)
-                    ?: BigDecimal.valueOf(accountingMinor).divide(BigDecimal.valueOf(originalMinor), MathContext.DECIMAL64)
-                // A provider estimate dated on the Movement itself, so the reconciler or the expense form replaces
-                // it with the final rate of that date.
-                movement.copy(
-                    accountingAmountMinor = accountingMinor,
-                    originalAmountMinor = originalMinor,
-                    conversionStatus = ConversionStatus.ESTIMATED.name,
-                    rate = canonicalRate(rate),
-                    conversionEffectiveEpochDay = movement.localEpochDay,
-                    conversionSource = reversalSource,
-                )
-            }
-        }
         return RevertedPeriod(
             period = reverted,
             allocations = allocations.map { it.copy(budgetMinor = budgets.getValue(it.pocketId), rolloverMinor = 0) },
-            movements = revertedMovements,
+            movements = convertMovements(
+                movements, restored, { boundary.revertMinor(it) }, boundary.inverseValue(), "${period.priorBoundarySource} · INVERSA",
+            ),
         )
+    }
+
+    /**
+     * Converts [period], which has no currency boundary of its own, into [rate]'s target currency. New funds, budgets
+     * and Movements convert at [rate] as in [revertCurrencyBoundary]. With [recordBoundary] the rate becomes the
+     * period's currency boundary quote, effective from its start; rollover is left for the caller to recompute.
+     */
+    fun applyCurrencyBoundary(
+        period: PeriodEntity,
+        rate: FrozenRate,
+        source: String,
+        quoteEffectiveEpochDay: Long?,
+        recordBoundary: Boolean,
+        allocations: List<AllocationEntity>,
+        movements: List<MovementEntity>,
+        pockets: List<PocketEntity>,
+    ): RevertedPeriod {
+        require(period.priorBoundaryRate == null) { "Este periodo ya cambió de moneda" }
+        require(rate.from == SupportedCurrency.fromCode(period.accountingCurrencyCode)) { "La moneda de origen no coincide" }
+        val converted = period.copy(
+            newFundsMinor = rate.convertMinor(period.newFundsMinor),
+            accountingCurrencyCode = rate.to.name,
+            priorBoundaryFromCurrencyCode = rate.from.name.takeIf { recordBoundary },
+            priorBoundaryRate = rate.value.takeIf { recordBoundary },
+            priorBoundaryEffectiveEpochDay = period.startEpochDay.takeIf { recordBoundary },
+            priorBoundarySource = source.takeIf { recordBoundary },
+            priorBoundaryQuoteEffectiveEpochDay = quoteEffectiveEpochDay.takeIf { recordBoundary },
+        )
+        val allocated = allocations.mapTo(mutableSetOf()) { it.pocketId }
+        val periodOrder = pockets.sortedWith(compareBy<PocketEntity> { it.sortOrder }.thenBy { it.id })
+            .map { it.id }.filter { it in allocated }
+        val budgets = fitBudgetsToFunds(
+            allocations.associate { it.pocketId to rate.convertMinor(it.budgetMinor) },
+            periodOrder,
+            converted.newFundsMinor,
+        )
+        return RevertedPeriod(
+            period = converted,
+            allocations = allocations.map { it.copy(budgetMinor = budgets.getValue(it.pocketId), rolloverMinor = 0) },
+            movements = convertMovements(movements, rate.to, rate::convertMinor, BigDecimal(rate.value), source),
+        )
+    }
+
+    /**
+     * Moves [movements] into [target]. Movements entered in [target] regain their entered amount; any other becomes
+     * an estimate converted with [convert], dated on the Movement itself so the reconciler or the expense form replaces
+     * it with the final rate of that date.
+     */
+    private fun convertMovements(
+        movements: List<MovementEntity>,
+        target: SupportedCurrency,
+        convert: (Long) -> Long,
+        rateIntoTarget: BigDecimal,
+        source: String,
+    ): List<MovementEntity> = movements.map { movement ->
+        val original = movement.originalAmountMinor
+        if (movement.originalCurrencyCode == target.name && original != null) {
+            movement.copy(
+                accountingAmountMinor = original,
+                originalAmountMinor = null,
+                conversionStatus = ConversionStatus.CONFIRMED.name,
+                rate = null,
+                conversionEffectiveEpochDay = null,
+                conversionSource = null,
+            )
+        } else {
+            val originalMinor = original ?: movement.accountingAmountMinor
+            val accountingMinor = convert(movement.accountingAmountMinor).coerceAtLeast(1)
+            // Same-currency Movements have an implicit rate of 1 into the period's former currency.
+            val originalRate = if (original == null) BigDecimal.ONE else movement.rate?.toBigDecimalOrNull()
+            val rate = originalRate?.multiply(rateIntoTarget, MathContext.DECIMAL64)
+                ?: BigDecimal.valueOf(accountingMinor).divide(BigDecimal.valueOf(originalMinor), MathContext.DECIMAL64)
+            movement.copy(
+                accountingAmountMinor = accountingMinor,
+                originalAmountMinor = originalMinor,
+                conversionStatus = ConversionStatus.ESTIMATED.name,
+                rate = canonicalRate(rate),
+                conversionEffectiveEpochDay = movement.localEpochDay,
+                conversionSource = source,
+            )
+        }
     }
 
     fun catchUp(

@@ -150,7 +150,39 @@ class PocketAppHostFlowTest {
         assertEquals(SupportedCurrency.SAR, reverted.accountingCurrency)
         assertEquals(375_000L, reverted.newFundsMinor)
         compose.onNodeWithTag("period_funds").assertTextContains(MoneyText.editable(375_000L))
-        compose.onNodeWithText("Este periodo vuelve a estar en SAR").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Este periodo ahora está en SAR").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun period_funds_change_the_current_period_to_a_quoted_third_currency() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000)) }
+        val quotes = object : ExchangeRateRepository {
+            override suspend fun quote(requestedDate: LocalDate, base: SupportedCurrency, quote: SupportedCurrency, forceRefresh: Boolean) =
+                FxQuote(requestedDate, requestedDate, base, quote, "4.8", "BANXICO")
+        }
+        compose.setContent {
+            ledger.state.collectAsState(initial = null).value?.let {
+                SettingsScreen(
+                    state = it, ledger = ledger, preferences = AppPreferences(onlineFxEnabled = true),
+                    preferencesStore = null, reminderScheduler = null, exchangeRates = quotes,
+                    onCreateBackup = {}, onCreateCsv = {}, onPickBackup = {},
+                    onRequestNotificationPermission = {}, padding = PaddingValues(),
+                    section = SettingsSection.PERIOD, onSectionChange = {},
+                )
+            }
+        }
+
+        compose.waitUntilExactlyOneExists(hasText("Fondos nuevos SAR"), 5_000)
+        compose.onNodeWithText("MXN").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Cambiar a MXN"), 5_000)
+        compose.onNodeWithText("Cambiar a MXN").performClick()
+
+        compose.waitUntilExactlyOneExists(hasText("Fondos nuevos MXN"), 5_000)
+        val changed = runBlocking { ledger.state.first().currentPeriod!! }
+        assertEquals(480_000L, changed.newFundsMinor)
+        compose.onNodeWithTag("period_funds").assertTextContains(MoneyText.editable(480_000L))
     }
 
     @Test

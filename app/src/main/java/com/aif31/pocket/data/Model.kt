@@ -245,6 +245,18 @@ sealed interface LedgerCommand {
 
     /** Returns the latest period, opened by a currency change, to its predecessor's accounting currency. */
     data class RevertCurrencyChange(val periodId: String) : LedgerCommand
+
+    /**
+     * Changes the latest period's accounting currency to [targetCurrency]. Back to its predecessor's currency it is a
+     * reversal and needs no rate; otherwise [rate] converts from the currency the period had before any change.
+     */
+    data class ChangePeriodCurrency(
+        val periodId: String,
+        val targetCurrency: SupportedCurrency,
+        val rate: String? = null,
+        val source: String? = null,
+        val quoteEffectiveDate: LocalDate? = null,
+    ) : LedgerCommand
     data class UpsertPaymentMethod(val id: String? = null, val name: String) : LedgerCommand
     data class ArchivePaymentMethod(val id: String, val archived: Boolean = true) : LedgerCommand
     data class SetDefaultPaymentMethod(val id: String?) : LedgerCommand

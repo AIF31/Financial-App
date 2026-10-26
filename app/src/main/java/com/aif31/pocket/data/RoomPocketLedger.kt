@@ -113,6 +113,7 @@ class RoomPocketLedger(
             is LedgerCommand.ScheduleCurrencyChange -> scheduleCurrencyChange(command)
             LedgerCommand.CancelCurrencyChange -> cancelCurrencyChange()
             is LedgerCommand.RevertCurrencyChange -> revertCurrencyChange(command.periodId)
+            is LedgerCommand.ChangePeriodCurrency -> changePeriodCurrency(command)
             is LedgerCommand.UpsertPaymentMethod -> upsertPaymentMethod(command)
             is LedgerCommand.ArchivePaymentMethod -> archivePaymentMethod(command)
             is LedgerCommand.SetDefaultPaymentMethod -> setDefaultPaymentMethod(command)
@@ -652,39 +653,80 @@ class RoomPocketLedger(
     }
 
     private suspend fun revertCurrencyChange(periodId: String): LedgerResult = database.withTransaction {
+        val period = requireNotNull(dao.period(periodId)) { "Periodo inexistente" }
+        val from = requireNotNull(period.priorBoundaryFromCurrencyCode) { "Este periodo no cambió de moneda" }
+        changePeriodCurrency(LedgerCommand.ChangePeriodCurrency(periodId, SupportedCurrency.fromCode(from)))
+    }
+
+    private suspend fun changePeriodCurrency(command: LedgerCommand.ChangePeriodCurrency): LedgerResult = database.withTransaction {
         val periods = dao.periods().sortedBy { it.startEpochDay }
-        val period = requireNotNull(periods.firstOrNull { it.id == periodId }) { "Periodo inexistente" }
+        val period = requireNotNull(periods.firstOrNull { it.id == command.periodId }) { "Periodo inexistente" }
         // A later period inherits this currency and may have converted rollover from it.
-        require(period == periods.last()) { "Solo el último periodo puede volver a su moneda anterior" }
-        val previous = requireNotNull(periods.getOrNull(periods.lastIndex - 1)) { "Este periodo no cambió de moneda" }
-        // A pending change starts from this period's currency, which the reversal replaces. One back to the
-        // restored currency is what the reversal does now, so it is dropped; any other must be cancelled first.
+        require(period == periods.last()) { "Solo el último periodo puede cambiar de moneda" }
+        val target = command.targetCurrency
+        require(target.name != period.accountingCurrencyCode) { "Este periodo ya está en ${target.name}" }
+        val previous = periods.getOrNull(periods.lastIndex - 1)
+        // A pending change starts from this period's currency, which this change replaces. One to the same target is
+        // what this change does now, so it is dropped; any other must be cancelled first.
         val pending = dao.pendingCurrencyChange()
-        require(pending == null || pending.targetCurrencyCode == previous.accountingCurrencyCode) {
+        require(pending == null || pending.targetCurrencyCode == target.name) {
             "Cancela primero el cambio de moneda pendiente"
         }
         val allocations = dao.allocations()
         val movements = dao.movements()
-        val reverted = PeriodLedgerRules.revertCurrencyBoundary(
-            period = period,
-            previous = previous,
-            previousAllocations = allocations.filter { it.periodId == previous.id }.associateBy { it.pocketId },
-            allocations = allocations.filter { it.periodId == period.id },
-            movements = movements.filter { it.periodId == period.id },
-            pockets = dao.pockets(),
+        val pockets = dao.pockets()
+        var changed = RevertedPeriod(
+            period,
+            allocations.filter { it.periodId == period.id },
+            movements.filter { it.periodId == period.id },
         )
-        val revertedById = reverted.movements.associateBy { it.id }
+        // A period opened by a currency change first returns to its predecessor's currency, so the new rate applies
+        // to the amounts the period started with rather than to an earlier conversion.
+        if (period.priorBoundaryRate != null) {
+            val prior = requireNotNull(previous) { "Este periodo no cambió de moneda" }
+            changed = PeriodLedgerRules.revertCurrencyBoundary(
+                period = period,
+                previous = prior,
+                previousAllocations = allocations.filter { it.periodId == prior.id }.associateBy { it.pocketId },
+                allocations = changed.allocations,
+                movements = changed.movements,
+                pockets = pockets,
+            )
+        }
+        if (changed.period.accountingCurrencyCode != target.name) {
+            val rate = FrozenRate(
+                SupportedCurrency.fromCode(changed.period.accountingCurrencyCode),
+                target,
+                requireNotNull(command.rate) { "Falta el tipo de cambio" },
+            )
+            val source = command.source?.trim().orEmpty()
+            require(source.isNotEmpty()) { "Falta la fuente del tipo de cambio" }
+            command.quoteEffectiveDate?.let { observed ->
+                require(!observed.isAfter(LocalDate.ofEpochDay(period.startEpochDay))) { "Cotización posterior al inicio del periodo" }
+            }
+            changed = PeriodLedgerRules.applyCurrencyBoundary(
+                period = changed.period,
+                rate = rate,
+                source = source,
+                quoteEffectiveEpochDay = command.quoteEffectiveDate?.toEpochDay(),
+                recordBoundary = previous != null,
+                allocations = changed.allocations,
+                movements = changed.movements,
+                pockets = pockets,
+            )
+        }
+        val changedById = changed.movements.associateBy { it.id }
         val projection = rolloverProjection(
-            previous.id,
-            periods.dropLast(1) + reverted.period,
+            previous?.id ?: period.id,
+            periods.dropLast(1) + changed.period,
             dao.periodPockets(),
-            movements.map { revertedById[it.id] ?: it },
-            allocations.filterNot { it.periodId == period.id } + reverted.allocations,
+            movements.map { changedById[it.id] ?: it },
+            allocations.filterNot { it.periodId == period.id } + changed.allocations,
             dao.rolloverReleases(),
         )
-        dao.updatePeriod(reverted.period)
-        dao.putAllocations(reverted.allocations)
-        dao.putMovements(reverted.movements)
+        dao.updatePeriod(changed.period)
+        dao.putAllocations(changed.allocations)
+        dao.putMovements(changed.movements)
         apply(projection)
         if (pending != null) dao.clearPendingCurrencyChange()
         LedgerResult.Success

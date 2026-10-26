@@ -29,8 +29,12 @@ A frozen, directed conversion rate from the prior period's accounting currency i
 _Avoid_: Live rate, reversible rate, unlabeled conversion
 
 **Currency change reversal**:
-Returning the latest period, opened by a currency boundary, to its predecessor's accounting currency. New funds and budgets nobody edited regain their prior amounts, edited ones convert back at the frozen rate, and rollover is recomputed. Movements entered in the restored currency regain their entered amount; any other Movement becomes an estimate at the inverse frozen rate until the final rate of its own date replaces it. It requires no pending currency change.
-_Avoid_: Changing the current period's currency, editing the frozen rate
+Returning the latest period, opened by a currency boundary, to its predecessor's accounting currency. New funds and budgets nobody edited regain their prior amounts, edited ones convert back at the frozen rate, and rollover is recomputed. Movements entered in the restored currency regain their entered amount; any other Movement becomes an estimate at the inverse frozen rate until the final rate of its own date replaces it. A pending currency change to the restored currency is dropped; one to any other currency must be cancelled first.
+_Avoid_: Editing the frozen rate
+
+**Period currency change**:
+Changing the current, latest period to any other accounting currency. Back to its predecessor's currency it is a currency change reversal. Otherwise the period first returns to the currency it started with, then converts at a quote dated on its first day, which becomes its currency boundary quote; the first period has no predecessor and keeps no boundary. Amounts convert as in a reversal, and the same pending-change rule applies.
+_Avoid_: Retroactive currency change, changing a past period's currency
 
 **Pocket budget**:
 The portion of a period's new funds assigned to a Pocket. Pocket budgets across a period cannot exceed its new funds.
