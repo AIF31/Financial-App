@@ -71,6 +71,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -1721,10 +1722,16 @@ class PocketAppHostFlowTest {
         compose.onNodeWithText("Ajustes").performClick()
         compose.waitUntilExactlyOneExists(hasText("Moneda y conversión"), 5_000)
         compose.onNodeWithText("Moneda y conversión").performClick()
+        compose.waitUntilAtLeastOneExists(hasText("El próximo periodo seguirá en SAR"), 5_000)
+        compose.onNodeWithTag("next_period_currency_SAR").assertIsSelected()
+        compose.onNodeWithText("Confirmar cambio próximo periodo").assertDoesNotExist()
+        compose.onNodeWithTag("next_period_currency_USD").performClick()
         compose.waitUntilAtLeastOneExists(hasText("1 SAR = 4.6 USD"), 5_000)
         compose.onNodeWithTag("currency_settings_list")
             .performScrollToNode(hasText("Confirmar cambio próximo periodo"))
         compose.onNodeWithText("Confirmar cambio próximo periodo").performClick()
+        assertNull(runBlocking { ledger.state.first().pendingCurrencyChange })
+        compose.onNodeWithText("Cambiar a USD").performClick()
 
         compose.waitUntil(5_000) {
             runBlocking { ledger.state.first().pendingCurrencyChange?.boundary?.to == SupportedCurrency.USD }

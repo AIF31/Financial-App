@@ -140,9 +140,8 @@ private fun CurrencySettingsRoute(
     val activationDate = currentPeriod.endExclusive
     val requestedDate = state.currentLocalDate
     val scope = rememberCoroutineScope()
-    var targetCurrency by rememberSaveable(currentCurrency) {
-        mutableStateOf(SupportedCurrency.entries.first { it != currentCurrency })
-    }
+    // Defaults to the current currency, so nothing is quoted or scheduled until the person picks another one.
+    var targetCurrency by rememberSaveable(currentCurrency) { mutableStateOf(currentCurrency) }
     var quoteState by remember { mutableStateOf<CurrencyQuoteState>(CurrencyQuoteState.Idle) }
     var refreshGeneration by rememberSaveable { mutableIntStateOf(0) }
     var quoteCancelled by rememberSaveable { mutableStateOf(false) }
@@ -196,7 +195,8 @@ private fun CurrencySettingsRoute(
         refreshGeneration,
         quoteCancelled,
     ) {
-        if (!preferences.onlineFxEnabled || state.pendingCurrencyChange != null || quoteCancelled) {
+        val target = targetCurrency
+        if (!preferences.onlineFxEnabled || state.pendingCurrencyChange != null || quoteCancelled || target == currentCurrency) {
             quoteState = CurrencyQuoteState.Idle
             return@LaunchedEffect
         }
@@ -211,7 +211,7 @@ private fun CurrencySettingsRoute(
                 repository.quote(
                     requestedDate = requestedDate,
                     base = currentCurrency,
-                    quote = targetCurrency,
+                    quote = target,
                     forceRefresh = refreshGeneration > 0,
                 )
             )
@@ -234,6 +234,8 @@ private fun CurrencySettingsRoute(
                 targetCurrency = targetCurrency,
                 quoteState = quoteState,
                 pendingChange = state.pendingCurrencyChange?.boundary,
+                revertibleChange = currentPeriod.priorCurrencyBoundary
+                    ?.takeIf { currentPeriod == state.periods.maxByOrNull { it.start } },
                 fxRateAlert = FxRateAlertUiState(settings = preferences.fxRateAlert, status = fxRateAlertStatus),
             ),
             contentPadding = PaddingValues(16.dp),
@@ -268,6 +270,9 @@ private fun CurrencySettingsRoute(
             },
             onCancelPendingTransition = {
                 scope.launch { ledger.execute(LedgerCommand.CancelCurrencyChange) }
+            },
+            onRevertCurrentPeriod = {
+                scope.launch { ledger.execute(LedgerCommand.RevertCurrencyChange(currentPeriod.id)) }
             },
             onFxRateAlertChange = { settings -> applyFxRateAlert(settings) },
             onRetryFxRateAlert = { applyFxRateAlert(preferences.fxRateAlert, reschedule = true) },

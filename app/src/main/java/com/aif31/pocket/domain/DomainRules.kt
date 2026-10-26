@@ -2,6 +2,7 @@ package com.aif31.pocket.domain
 
 import java.math.BigDecimal
 import java.math.BigInteger
+import java.math.MathContext
 import java.math.RoundingMode
 import java.time.LocalDate
 import java.time.YearMonth
@@ -75,6 +76,18 @@ data class FrozenRate(
         require(money.currencyCode == from.name) { "La moneda de origen no coincide con el tipo de cambio" }
         return Money(convertMinor(money.minor), to.name)
     }
+
+    /**
+     * Converts a [to] amount back into [from]. When [original] converts to [converted], it is returned unchanged, so
+     * an amount this rate produced and nobody edited round-trips exactly.
+     */
+    fun revertMinor(converted: Long, original: Long? = null): Long =
+        original?.takeIf { convertMinor(it) == converted } ?: BigDecimal.valueOf(converted)
+            .divide(decimal, 0, RoundingMode.HALF_UP)
+            .longValueExact()
+
+    /** The [to]-to-[from] rate, to 16 significant digits so a stored inverse such as 1/3.75 reads back as 3.75. */
+    fun inverseValue(): BigDecimal = BigDecimal.ONE.divide(decimal, MathContext.DECIMAL64)
 }
 
 data class BudgetPeriodBounds(

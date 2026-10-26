@@ -2,6 +2,16 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-10-26
+
+### Period currency reversal and review-inbox retry (1.0.13)
+
+- A pending SAR→USD change applied at the 2026-10-25 boundary left the current period in USD with no way back: the next-period currency was preselected, its quote loaded on its own and one tap scheduled it. **Moneda y conversión** now lists SAR, USD and MXN for the next period with the current currency selected (no change), quotes only another currency, and asks for confirmation before scheduling.
+- **Volver a SAR en este periodo** (`LedgerCommand.RevertCurrencyChange`) returns the latest period, opened by a currency boundary, to its predecessor's currency. Unedited funds and budgets, including budgets the boundary rounded down, regain their prior amounts; edited ones convert back at the frozen rate; rollover is recomputed. Movements entered in the restored currency regain their entered amount; others become provider estimates (`<source> · INVERSA`) that the reconciler, or saving them in the expense form with online conversion, confirms at the final rate of their own date. Defined as **Currency change reversal** in `CONTEXT.md`. No Room migration or backup-format change.
+- Payments that needed review when their notification arrived were never retried. While Pocket is visible, pending suggestions are retried whenever the ledger, the auto-record preference or the open review forms change, so a merchant's backlog records once its first payment has a Pocket, or once the period's currency matches. Suggestions open in a review form, including one beneath the new-expense shortcut, are skipped; turning auto-recording off cancels a pass in progress.
+- A GPT-6.1-Sol (high) adversarial review found five defects: reverted estimates that could not be confirmed, a retry pass that ignored disabling auto-recording, retries that could discard a review draft, an incomplete retry key, and rounded-down budgets that did not round-trip. All five are fixed with regression tests. Not changed: foreground retries do not post pace alerts, and a boundary followed by further catch-up periods cannot be reverted.
+- Verification: the gradle-run wrapper passed all 447 host tests and lint (zero errors, 26 existing warnings).
+
 ## 2026-10-23
 
 ### Period analysis redesign (1.0.12)

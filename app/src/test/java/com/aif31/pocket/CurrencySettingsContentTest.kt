@@ -18,6 +18,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.aif31.pocket.data.CurrencyBoundary
 import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.settings.FxRateAlertFrequency
 import com.aif31.pocket.settings.FxRateAlertSettings
@@ -122,6 +123,35 @@ class CurrencySettingsContentTest {
         compose.onNodeWithText("Efectiva: 2026-09-23").assertIsDisplayed()
         compose.onNodeWithText("Fuente: SAMA_PARITY + BANXICO_FIX_SF43718").assertIsDisplayed()
         compose.onNodeWithText("Confirmar cambio próximo periodo").assertIsEnabled()
+    }
+
+    @Test
+    fun `current period currency change is reverted only after confirmation`() {
+        var reverts = 0
+        compose.setContent {
+            CurrencySettingsContent(
+                state = CurrencySettingsUiState(
+                    currentCurrency = SupportedCurrency.USD,
+                    onlineFxEnabled = true,
+                    defaultExpenseCurrency = SupportedCurrency.SAR,
+                    revertibleChange = CurrencyBoundary(
+                        SupportedCurrency.SAR,
+                        SupportedCurrency.USD,
+                        "0.2666666666666666666666666666666667",
+                        LocalDate.of(2026, 10, 25),
+                        "SAMA_PARITY",
+                    ),
+                ),
+                contentPadding = PaddingValues(),
+                onRevertCurrentPeriod = { reverts++ },
+            )
+        }
+
+        compose.onNodeWithText("Este periodo cambió de SAR a USD").assertIsDisplayed()
+        compose.onNodeWithText("Volver a SAR en este periodo").performClick()
+        assertEquals(0, reverts)
+        compose.onNodeWithText("Volver a SAR").performClick()
+        assertEquals(1, reverts)
     }
 
     @Test

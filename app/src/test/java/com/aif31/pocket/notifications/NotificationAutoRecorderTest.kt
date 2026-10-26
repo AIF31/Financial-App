@@ -200,6 +200,33 @@ class NotificationAutoRecorderTest {
         assertEquals(1, ledger.state.first().movements.count { isAutoRecordedMovement(it.id) })
     }
 
+    @Test fun a_pending_payment_is_recorded_once_its_merchant_gets_a_pocket() = runTest {
+        val pocket = ledger.state.first().pocketCatalog[2]
+        val recorder = NotificationAutoRecorder(ledger, zone)
+        val first = detect("first", ParsedPayment(2_300, SupportedCurrency.SAR, "Flamingo Mall"))
+        val second = detect("second", ParsedPayment(1_500, SupportedCurrency.SAR, "FLAMINGO MALL"))
+        assertEquals(AutoRecordOutcome.NeedsReview(ReviewReason.NEW_MERCHANT), recorder.record(first))
+        assertEquals(AutoRecordOutcome.NeedsReview(ReviewReason.NEW_MERCHANT), recorder.record(second))
+        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.ConfirmSuggestion(
+            suggestionId = first,
+            movement = LedgerCommand.AddMovement(
+                pocketId = pocket.id,
+                type = MovementType.EXPENSE,
+                accountingAmountMinor = 2_300,
+                occurredAtUtcMillis = instant.toEpochMilli(),
+                localDate = instant.atZone(zone).toLocalDate(),
+                merchant = "Flamingo Mall",
+            ),
+        )))
+
+        assertEquals(0, recorder.recordPending(skip = setOf(second)))
+        assertEquals(1, recorder.recordPending())
+
+        val state = ledger.state.first()
+        assertTrue(state.movementSuggestions.isEmpty())
+        assertEquals(pocket.id, state.movements.single { it.id == autoRecordedMovementId(second) }.pocketId)
+    }
+
     @Test fun uncertain_payments_stay_in_the_review_inbox() = runTest {
         val pocket = ledger.state.first().pockets.first().pocket
         recordManually(pocket.id, "Known Shop")

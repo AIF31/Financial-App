@@ -28,6 +28,10 @@ _Avoid_: Display currency, preferred input currency
 A frozen, directed conversion rate from the prior period's accounting currency into its successor's accounting currency. It is used for rollover and historical comparison across that boundary.
 _Avoid_: Live rate, reversible rate, unlabeled conversion
 
+**Currency change reversal**:
+Returning the latest period, opened by a currency boundary, to its predecessor's accounting currency. New funds and budgets nobody edited regain their prior amounts, edited ones convert back at the frozen rate, and rollover is recomputed. Movements entered in the restored currency regain their entered amount; any other Movement becomes an estimate at the inverse frozen rate until the final rate of its own date replaces it. It requires no pending currency change.
+_Avoid_: Changing the current period's currency, editing the frozen rate
+
 **Pocket budget**:
 The portion of a period's new funds assigned to a Pocket. Pocket budgets across a period cannot exceed its new funds.
 _Avoid_: Expense, transfer

@@ -6,6 +6,9 @@ import com.aif31.pocket.domain.PeriodSchedule
 import com.aif31.pocket.domain.PocketMath
 import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.domain.sumMoneyExact
+import com.aif31.pocket.fx.canonicalRate
+import java.math.BigDecimal
+import java.math.MathContext
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
@@ -224,18 +227,11 @@ internal object PeriodLedgerRules {
         val nextSnapshots = activePockets.map { pocket ->
             PeriodPocketEntity(nextId, pocket.id, rolloverEligible = pocket.rolloverEnabled, retired = false)
         }
-        val convertedBudgets = activePockets.associate { pocket ->
-            pocket.id to convertForTarget(previousAllocations[pocket.id]?.budgetMinor ?: 0)
-        }.toMutableMap()
-        var roundingExcess = Math.subtractExact(convertedBudgets.values.sumMoneyExact(), next.newFundsMinor)
-        // Preserve higher-priority Pockets and absorb any independent HALF_UP excess from the end of display order.
-        activePockets.asReversed().forEach { pocket ->
-            if (roundingExcess > 0) {
-                val reduction = minOf(convertedBudgets.getValue(pocket.id), roundingExcess)
-                convertedBudgets[pocket.id] = convertedBudgets.getValue(pocket.id) - reduction
-                roundingExcess -= reduction
-            }
-        }
+        val convertedBudgets = fitBudgetsToFunds(
+            activePockets.associate { pocket -> pocket.id to convertForTarget(previousAllocations[pocket.id]?.budgetMinor ?: 0) },
+            activePockets.map { it.id },
+            next.newFundsMinor,
+        )
         val nextAllocations = activePockets.map { pocket ->
             val previousAllocation = previousAllocations[pocket.id]
             val rollover = PocketMath.rollover(
@@ -246,6 +242,93 @@ internal object PeriodLedgerRules {
             AllocationEntity(nextId, pocket.id, convertedBudgets.getValue(pocket.id), convertForTarget(rollover))
         }
         return PeriodSuccessor(next, nextSnapshots, nextAllocations)
+    }
+
+    /**
+     * Undoes the currency boundary that opened [period], returning it to [previous]'s accounting currency. New funds
+     * and budgets the boundary converted and nobody edited return to their prior amounts; edited ones convert back at
+     * the frozen rate. Movements entered in the restored currency regain their entered amount; any other Movement
+     * becomes an estimate at the inverse frozen rate until the final rate of its own date replaces it. Rollover is
+     * left for the caller to recompute from [previous].
+     */
+    fun revertCurrencyBoundary(
+        period: PeriodEntity,
+        previous: PeriodEntity,
+        previousAllocations: Map<String, AllocationEntity>,
+        allocations: List<AllocationEntity>,
+        movements: List<MovementEntity>,
+        pockets: List<PocketEntity>,
+    ): RevertedPeriod {
+        val restored = SupportedCurrency.fromCode(previous.accountingCurrencyCode)
+        val boundary = requireNotNull(period.frozenRateFrom(restored)) { "Este periodo no cambió de moneda" }
+        val reverted = period.copy(
+            newFundsMinor = boundary.revertMinor(period.newFundsMinor, previous.newFundsMinor),
+            accountingCurrencyCode = restored.name,
+            priorBoundaryFromCurrencyCode = null,
+            priorBoundaryRate = null,
+            priorBoundaryEffectiveEpochDay = null,
+            priorBoundarySource = null,
+            priorBoundaryQuoteEffectiveEpochDay = null,
+        )
+        val allocated = allocations.mapTo(mutableSetOf()) { it.pocketId }
+        val periodOrder = pockets.sortedWith(compareBy<PocketEntity> { it.sortOrder }.thenBy { it.id })
+            .map { it.id }.filter { it in allocated }
+        // The budgets the boundary produced, including its rounding compensation; a budget still equal to its
+        // counterpart was not edited and regains its prior amount exactly.
+        val boundaryBudgets = fitBudgetsToFunds(
+            periodOrder.associateWith { boundary.convertMinor(previousAllocations[it]?.budgetMinor ?: 0) },
+            periodOrder,
+            boundary.convertMinor(previous.newFundsMinor),
+        )
+        val budgets = fitBudgetsToFunds(
+            allocations.associate { allocation ->
+                val prior = previousAllocations[allocation.pocketId]?.budgetMinor
+                allocation.pocketId to if (prior != null && allocation.budgetMinor == boundaryBudgets[allocation.pocketId]) {
+                    prior
+                } else {
+                    boundary.revertMinor(allocation.budgetMinor)
+                }
+            },
+            periodOrder,
+            reverted.newFundsMinor,
+        )
+        val inverse = boundary.inverseValue()
+        val reversalSource = "${period.priorBoundarySource} · INVERSA"
+        val revertedMovements = movements.map { movement ->
+            val original = movement.originalAmountMinor
+            if (movement.originalCurrencyCode == restored.name && original != null) {
+                movement.copy(
+                    accountingAmountMinor = original,
+                    originalAmountMinor = null,
+                    conversionStatus = ConversionStatus.CONFIRMED.name,
+                    rate = null,
+                    conversionEffectiveEpochDay = null,
+                    conversionSource = null,
+                )
+            } else {
+                val originalMinor = original ?: movement.accountingAmountMinor
+                val accountingMinor = boundary.revertMinor(movement.accountingAmountMinor).coerceAtLeast(1)
+                // Same-currency Movements have an implicit rate of 1 into the boundary's currency.
+                val originalRate = if (original == null) BigDecimal.ONE else movement.rate?.toBigDecimalOrNull()
+                val rate = originalRate?.multiply(inverse, MathContext.DECIMAL64)
+                    ?: BigDecimal.valueOf(accountingMinor).divide(BigDecimal.valueOf(originalMinor), MathContext.DECIMAL64)
+                // A provider estimate dated on the Movement itself, so the reconciler or the expense form replaces
+                // it with the final rate of that date.
+                movement.copy(
+                    accountingAmountMinor = accountingMinor,
+                    originalAmountMinor = originalMinor,
+                    conversionStatus = ConversionStatus.ESTIMATED.name,
+                    rate = canonicalRate(rate),
+                    conversionEffectiveEpochDay = movement.localEpochDay,
+                    conversionSource = reversalSource,
+                )
+            }
+        }
+        return RevertedPeriod(
+            period = reverted,
+            allocations = allocations.map { it.copy(budgetMinor = budgets.getValue(it.pocketId), rolloverMinor = 0) },
+            movements = revertedMovements,
+        )
     }
 
     fun catchUp(
@@ -315,6 +398,20 @@ internal object PeriodLedgerRules {
         )
     }
 
+    /** Lowers [budgets] until they fit [fundsMinor], absorbing HALF_UP rounding excess from the end of [order]. */
+    private fun fitBudgetsToFunds(budgets: Map<String, Long>, order: List<String>, fundsMinor: Long): Map<String, Long> {
+        val fitted = budgets.toMutableMap()
+        var roundingExcess = Math.subtractExact(fitted.values.sumMoneyExact(), fundsMinor)
+        (order.filter { it in fitted } + fitted.keys.filterNot { it in order }).asReversed().forEach { pocketId ->
+            if (roundingExcess > 0) {
+                val reduction = minOf(fitted.getValue(pocketId), roundingExcess)
+                fitted[pocketId] = fitted.getValue(pocketId) - reduction
+                roundingExcess -= reduction
+            }
+        }
+        return fitted
+    }
+
     /** Pockets that a new period includes, in display order. */
     fun activePocketsInOrder(pockets: List<PocketEntity>): List<PocketEntity> =
         pockets.filterNot { it.archived }.sortedWith(compareBy<PocketEntity> { it.sortOrder }.thenBy { it.id })
@@ -362,6 +459,13 @@ internal data class PeriodSuccessor(
     val period: PeriodEntity,
     val periodPockets: List<PeriodPocketEntity>,
     val allocations: List<AllocationEntity>,
+)
+
+/** A period returned to its predecessor's currency, with rollover not yet recomputed. */
+internal data class RevertedPeriod(
+    val period: PeriodEntity,
+    val allocations: List<AllocationEntity>,
+    val movements: List<MovementEntity>,
 )
 
 internal data class RolloverProjection(
