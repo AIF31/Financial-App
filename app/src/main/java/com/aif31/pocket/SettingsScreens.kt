@@ -336,6 +336,16 @@ private fun SettingsDetailScreen(
     }
     val selectedFundsPeriod = state.periods.firstOrNull { it.id == selectedFundsPeriodId }
     val selectedFundsCurrency = selectedFundsPeriod?.accountingCurrency ?: SupportedCurrency.SAR
+    // Only the change that opened the current period can be undone here; later periods change in Moneda y conversión.
+    val selectedPeriodChange = state.revertibleCurrencyChange()?.takeIf { selectedFundsPeriodId == state.currentPeriod?.id }
+    var confirmingCurrencyRevert by rememberSaveable { mutableStateOf(false) }
+    var fundsShownIn by rememberSaveable(selectedFundsPeriodId) { mutableStateOf(selectedFundsCurrency) }
+    LaunchedEffect(selectedFundsCurrency) {
+        if (fundsShownIn != selectedFundsCurrency) {
+            fundsShownIn = selectedFundsCurrency
+            selectedFundsPeriod?.let { funds = minorNumber(it.newFundsMinor) }
+        }
+    }
     val focusManager = LocalFocusManager.current
     fun resetTemplateForm() {
         editingTemplate = null
@@ -373,6 +383,36 @@ private fun SettingsDetailScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Text("Moneda del periodo", style = MaterialTheme.typography.titleSmall)
+                        if (selectedPeriodChange != null) {
+                            val blocked = selectedPeriodChange.revertBlockedBy(state.pendingCurrencyChange?.boundary)
+                            SegmentedChoice(
+                                options = listOf(selectedPeriodChange.from, selectedPeriodChange.to).map { ChoiceOption(it, it.name) },
+                                selected = selectedFundsCurrency,
+                                onSelect = { currency ->
+                                    if (currency == selectedPeriodChange.from) {
+                                        if (blocked) {
+                                            message = "Cancela el cambio pendiente en Moneda y conversión para volver a ${currency.name}."
+                                        } else {
+                                            confirmingCurrencyRevert = true
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().testTag("period_currency"),
+                            )
+                            Text(
+                                "Este periodo cambió de ${selectedPeriodChange.from.name} a ${selectedPeriodChange.to.name} " +
+                                    "el ${selectedPeriodChange.effectiveDate}.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            Text(
+                                "${selectedFundsCurrency.name} · Para usar otra moneda, cámbiala para el próximo periodo en Moneda y conversión.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         OutlinedTextField(
                             funds,
                             { funds = it },
@@ -699,6 +739,23 @@ private fun SettingsDetailScreen(
                 }
             }
         }
+    }
+    if (confirmingCurrencyRevert && selectedPeriodChange != null) {
+        RevertCurrencyDialog(
+            change = selectedPeriodChange,
+            onConfirm = {
+                confirmingCurrencyRevert = false
+                val periodId = selectedFundsPeriodId ?: return@RevertCurrencyDialog
+                scope.launch {
+                    message = when (val result = ledger.execute(LedgerCommand.RevertCurrencyChange(periodId))) {
+                        LedgerResult.Success -> "Este periodo vuelve a estar en ${selectedPeriodChange.from.name}"
+                        is LedgerResult.Rejected -> result.message
+                        is LedgerResult.Deleted -> null
+                    }
+                }
+            },
+            onDismiss = { confirmingCurrencyRevert = false },
+        )
     }
     if (reminderPickerVisible) {
         TimeOfDayPickerDialog(

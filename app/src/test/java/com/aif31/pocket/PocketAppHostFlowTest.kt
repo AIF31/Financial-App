@@ -56,6 +56,7 @@ import com.aif31.pocket.settings.AppPreferences
 import com.aif31.pocket.settings.PreferencesStore
 import com.aif31.pocket.settings.ReminderScheduler
 import com.aif31.pocket.settings.ReminderStatus
+import com.aif31.pocket.ui.MoneyText
 import com.aif31.pocket.ui.SettingsSection
 import java.time.Clock
 import java.time.Instant
@@ -113,6 +114,43 @@ class PocketAppHostFlowTest {
         compose.onNodeWithText("Guardar fondos").performScrollTo().performClick()
         compose.waitUntilExactlyOneExists(hasText("Fondos guardados"), 5_000)
         assertEquals(200_000L, runBlocking { ledger.state.first().newFundsMinor })
+    }
+
+    @Test
+    fun period_funds_return_the_current_period_to_its_prior_currency() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        runBlocking {
+            val february = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+            february.execute(LedgerCommand.Initialize(375_000))
+            val first = february.state.first { !it.needsOnboarding }.currentPeriod!!
+            february.execute(LedgerCommand.ScheduleCurrencyChange(
+                SupportedCurrency.USD, "0.2666666666666666666666666666666667", first.endExclusive, "SAMA_PARITY",
+            ))
+        }
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-03-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.CatchUpPeriods(preferredStartDay = 25)) }
+        compose.setContent {
+            ledger.state.collectAsState(initial = null).value?.let {
+                SettingsScreen(
+                    state = it, ledger = ledger, preferences = AppPreferences(),
+                    preferencesStore = null, reminderScheduler = null,
+                    onCreateBackup = {}, onCreateCsv = {}, onPickBackup = {},
+                    onRequestNotificationPermission = {}, padding = PaddingValues(),
+                    section = SettingsSection.PERIOD, onSectionChange = {},
+                )
+            }
+        }
+
+        compose.waitUntilExactlyOneExists(hasText("Fondos nuevos USD"), 5_000)
+        compose.onNodeWithText("SAR").performClick()
+        compose.onNodeWithText("Volver a SAR").performClick()
+
+        compose.waitUntilExactlyOneExists(hasText("Fondos nuevos SAR"), 5_000)
+        val reverted = runBlocking { ledger.state.first().currentPeriod!! }
+        assertEquals(SupportedCurrency.SAR, reverted.accountingCurrency)
+        assertEquals(375_000L, reverted.newFundsMinor)
+        compose.onNodeWithTag("period_funds").assertTextContains(MoneyText.editable(375_000L))
+        compose.onNodeWithText("Este periodo vuelve a estar en SAR").performScrollTo().assertIsDisplayed()
     }
 
     @Test
