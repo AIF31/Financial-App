@@ -657,8 +657,12 @@ class RoomPocketLedger(
         // A later period inherits this currency and may have converted rollover from it.
         require(period == periods.last()) { "Solo el último periodo puede volver a su moneda anterior" }
         val previous = requireNotNull(periods.getOrNull(periods.lastIndex - 1)) { "Este periodo no cambió de moneda" }
-        // A pending change starts from this period's currency, which the reversal replaces.
-        require(dao.pendingCurrencyChange() == null) { "Cancela primero el cambio de moneda pendiente" }
+        // A pending change starts from this period's currency, which the reversal replaces. One back to the
+        // restored currency is what the reversal does now, so it is dropped; any other must be cancelled first.
+        val pending = dao.pendingCurrencyChange()
+        require(pending == null || pending.targetCurrencyCode == previous.accountingCurrencyCode) {
+            "Cancela primero el cambio de moneda pendiente"
+        }
         val allocations = dao.allocations()
         val movements = dao.movements()
         val reverted = PeriodLedgerRules.revertCurrencyBoundary(
@@ -682,6 +686,7 @@ class RoomPocketLedger(
         dao.putAllocations(reverted.allocations)
         dao.putMovements(reverted.movements)
         apply(projection)
+        if (pending != null) dao.clearPendingCurrencyChange()
         LedgerResult.Success
     }
 

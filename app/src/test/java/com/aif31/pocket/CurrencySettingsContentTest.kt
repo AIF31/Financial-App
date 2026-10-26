@@ -148,6 +148,7 @@ class CurrencySettingsContentTest {
         }
 
         compose.onNodeWithText("Este periodo cambió de SAR a USD").assertIsDisplayed()
+        compose.onNodeWithText("Desde 2026-10-25 · 1 USD = 3.75 SAR").assertIsDisplayed()
         compose.onNodeWithText("Volver a SAR en este periodo").performClick()
         assertEquals(0, reverts)
         compose.onNodeWithText("Volver a SAR").performClick()

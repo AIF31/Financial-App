@@ -1430,9 +1430,16 @@ class PocketLedgerHostBehaviorTest {
             localDate = LocalDate.of(2026, 3, 26),
         ))
 
+        // A pending change to a third currency blocks the reversal; one back to SAR is replaced by it.
+        ledger.execute(LedgerCommand.ScheduleCurrencyChange(SupportedCurrency.MXN, "18.5", second.endExclusive, "TEST"))
+        assertTrue(ledger.execute(LedgerCommand.RevertCurrencyChange(second.id)) is LedgerResult.Rejected)
+        ledger.execute(LedgerCommand.CancelCurrencyChange)
+        ledger.execute(LedgerCommand.ScheduleCurrencyChange(SupportedCurrency.SAR, "3.75", second.endExclusive, "SAMA_PARITY"))
+
         assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.RevertCurrencyChange(second.id)))
 
         val reverted = ledger.state.first { it.currentPeriod?.accountingCurrency == SupportedCurrency.SAR }
+        assertNull(reverted.pendingCurrencyChange)
         assertNull(reverted.currentPeriod!!.priorCurrencyBoundary)
         assertEquals(525_000L, reverted.newFundsMinor)
         val budgets = reverted.pockets.associateBy { it.pocket.id }

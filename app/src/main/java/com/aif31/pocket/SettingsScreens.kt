@@ -234,8 +234,7 @@ private fun CurrencySettingsRoute(
                 targetCurrency = targetCurrency,
                 quoteState = quoteState,
                 pendingChange = state.pendingCurrencyChange?.boundary,
-                revertibleChange = currentPeriod.priorCurrencyBoundary
-                    ?.takeIf { currentPeriod == state.periods.maxByOrNull { it.start } },
+                revertibleChange = state.revertibleCurrencyChange(),
                 fxRateAlert = FxRateAlertUiState(settings = preferences.fxRateAlert, status = fxRateAlertStatus),
             ),
             contentPadding = PaddingValues(16.dp),

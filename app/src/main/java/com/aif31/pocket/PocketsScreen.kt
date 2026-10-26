@@ -58,6 +58,8 @@ internal fun PocketsScreen(
     var editing by remember { mutableStateOf<PocketPeriodSummary?>(null) }
     var creating by rememberSaveable { mutableStateOf(false) }
     var reviewingSuggestions by rememberSaveable { mutableStateOf(false) }
+    var confirmingCurrencyRevert by rememberSaveable { mutableStateOf(false) }
+    val revertibleChange = state.revertibleCurrencyChange()
     val scope = rememberCoroutineScope()
     val selectedPeriod = state.periods.firstOrNull { it.id == selectedPeriodId } ?: state.currentPeriod
     val selectedCurrency = selectedPeriod?.accountingCurrency ?: SupportedCurrency.SAR
@@ -120,6 +122,32 @@ internal fun PocketsScreen(
                         }) {
                             Text("Marcar periodo como revisado")
                         }
+                    }
+                }
+            }
+        }
+        // Shown with the period it concerns, since a wrong currency is noticed while reviewing budgets.
+        revertibleChange?.takeIf { selectedPeriod?.id == state.currentPeriod?.id }?.let { change ->
+            item {
+                Card(Modifier.fillMaxWidth().testTag("revert_currency_change")) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Este periodo cambió de ${change.from.name} a ${change.to.name}",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        val blocked = change.revertBlockedBy(state.pendingCurrencyChange?.boundary)
+                        Text(
+                            if (!blocked) {
+                                "Si no querías el cambio, vuelve a ${change.from.name} sin esperar al próximo periodo."
+                            } else {
+                                "Cancela el cambio pendiente en Moneda y conversión para volver a ${change.from.name}."
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        OutlinedButton(
+                            onClick = { confirmingCurrencyRevert = true },
+                            enabled = !blocked,
+                        ) { Text("Volver a ${change.from.name} en este periodo") }
                     }
                 }
             }
@@ -374,6 +402,17 @@ internal fun PocketsScreen(
     }
     if (reviewingSuggestions && selectedPeriod != null) {
         SuggestedBudgetsDialog(state, selectedPeriod.id, ledger, selectedCurrency) { reviewingSuggestions = false }
+    }
+    val currentPeriodId = state.currentPeriod?.id
+    if (confirmingCurrencyRevert && revertibleChange != null && currentPeriodId != null) {
+        RevertCurrencyDialog(
+            change = revertibleChange,
+            onConfirm = {
+                confirmingCurrencyRevert = false
+                scope.launch { ledger.execute(LedgerCommand.RevertCurrencyChange(currentPeriodId)) }
+            },
+            onDismiss = { confirmingCurrencyRevert = false },
+        )
     }
 }
 

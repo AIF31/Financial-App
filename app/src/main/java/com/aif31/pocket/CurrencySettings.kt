@@ -31,12 +31,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.CurrencyBoundary
+import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.fx.FxQuote
 import com.aif31.pocket.settings.FxRateAlertFrequency
 import com.aif31.pocket.settings.FxRateAlertSettings
 import com.aif31.pocket.settings.ReminderStatus
 import com.aif31.pocket.ui.ChoiceOption
+import com.aif31.pocket.ui.MoneyText
 import com.aif31.pocket.ui.SegmentedChoice
 import com.aif31.pocket.ui.SingleChoiceChips
 import com.aif31.pocket.ui.TimeOfDayPickerDialog
@@ -69,6 +71,31 @@ internal data class FxRateAlertUiState(
     val status: ReminderStatus = ReminderStatus.Off,
 )
 
+/** The change that opened the current period, while that period is still the latest one and can be reverted. */
+internal fun LedgerState.revertibleCurrencyChange(): CurrencyBoundary? =
+    currentPeriod?.takeIf { it == periods.maxByOrNull { period -> period.start } }?.priorCurrencyBoundary
+
+/** A pending change to a third currency blocks a reversal; one back to [CurrencyBoundary.from] is replaced by it. */
+internal fun CurrencyBoundary.revertBlockedBy(pending: CurrencyBoundary?): Boolean = pending != null && pending.to != from
+
+/** Confirms a currency change reversal, naming what returns to the prior currency and what becomes an estimate. */
+@Composable
+internal fun RevertCurrencyDialog(change: CurrencyBoundary, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("¿Volver a ${change.from.name} en este periodo?") },
+        text = {
+            Text(
+                "Los fondos, los presupuestos y el rollover vuelven a ${change.from.name}. Los gastos registrados " +
+                    "en ${change.from.name} recuperan su importe; los de otras monedas quedan estimados hasta " +
+                    "confirmar el tipo de cambio de su fecha.",
+            )
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Volver a ${change.from.name}") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
+}
+
 @Composable
 internal fun CurrencySettingsContent(
     state: CurrencySettingsUiState,
@@ -95,8 +122,8 @@ internal fun CurrencySettingsContent(
             text = {
                 Text(
                     "Desde el próximo periodo, los fondos, los presupuestos y los gastos se contarán en " +
-                        "${readyQuote.quote.name}. Los importes pasarán a 1 ${readyQuote.base.name} = " +
-                        "${readyQuote.rate} ${readyQuote.quote.name}.",
+                        "${readyQuote.quote.name}. Los importes se convertirán a " +
+                        "${MoneyText.rate(readyQuote.base, readyQuote.quote, readyQuote.rate)}.",
                 )
             },
             confirmButton = {
@@ -108,22 +135,10 @@ internal fun CurrencySettingsContent(
         )
     }
     state.revertibleChange?.takeIf { confirmingRevert }?.let { change ->
-        AlertDialog(
-            onDismissRequest = { confirmingRevert = false },
-            title = { Text("¿Volver a ${change.from.name} en este periodo?") },
-            text = {
-                Text(
-                    "Los fondos, los presupuestos y el rollover vuelven a ${change.from.name}. Los gastos registrados " +
-                        "en ${change.from.name} recuperan su importe; los de otras monedas quedan estimados para que " +
-                        "los revises.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { confirmingRevert = false; onRevertCurrentPeriod() }) {
-                    Text("Volver a ${change.from.name}")
-                }
-            },
-            dismissButton = { TextButton(onClick = { confirmingRevert = false }) { Text("Cancelar") } },
+        RevertCurrencyDialog(
+            change = change,
+            onConfirm = { confirmingRevert = false; onRevertCurrentPeriod() },
+            onDismiss = { confirmingRevert = false },
         )
     }
     LazyColumn(
@@ -142,8 +157,9 @@ internal fun CurrencySettingsContent(
                             "Este periodo cambió de ${change.from.name} a ${change.to.name}",
                             style = MaterialTheme.typography.titleMedium,
                         )
-                        Text("Desde ${change.effectiveDate} · 1 ${change.from.name} = ${change.rate} ${change.to.name}")
-                        if (state.pendingChange != null) {
+                        Text("Desde ${change.effectiveDate} · ${MoneyText.rate(change.from, change.to, change.rate)}")
+                        val blocked = change.revertBlockedBy(state.pendingChange)
+                        if (blocked) {
                             Text(
                                 "Cancela el cambio pendiente para volver a ${change.from.name}.",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -151,7 +167,7 @@ internal fun CurrencySettingsContent(
                         }
                         OutlinedButton(
                             onClick = { confirmingRevert = true },
-                            enabled = state.pendingChange == null,
+                            enabled = !blocked,
                         ) { Text("Volver a ${change.from.name} en este periodo") }
                     }
                 }
@@ -192,7 +208,7 @@ internal fun CurrencySettingsContent(
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("Cambio pendiente: ${pending.to.name}", style = MaterialTheme.typography.titleMedium)
                         Text("Se aplicará al próximo periodo desde ${pending.effectiveDate}")
-                        Text("1 ${pending.from.name} = ${pending.rate} ${pending.to.name}")
+                        Text(MoneyText.rate(pending.from, pending.to, pending.rate))
                         Text("Fuente: ${pending.source}")
                         Text("Cotización efectiva: ${pending.quoteEffectiveDate ?: "No registrada"}")
                         OutlinedButton(onClick = onCancelPendingTransition) { Text("Cancelar cambio pendiente") }
@@ -227,7 +243,7 @@ internal fun CurrencySettingsContent(
                         }
                         is CurrencyQuoteState.Ready -> {
                             Text(
-                                "1 ${quoteState.quote.base.name} = ${quoteState.quote.rate} ${quoteState.quote.quote.name}",
+                                MoneyText.rate(quoteState.quote.base, quoteState.quote.quote, quoteState.quote.rate),
                                 style = MaterialTheme.typography.titleMedium,
                             )
                             Text("Efectiva: ${quoteState.quote.effectiveDate}")
