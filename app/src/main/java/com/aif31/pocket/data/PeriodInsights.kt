@@ -62,7 +62,9 @@ data class PeriodInsights(
     /**
      * The day each Pocket's availability runs out at its pace through today, for Pockets that would run out before
      * the period ends. Only Pockets spent on at least two days are forecast, so a single large expense such as rent
-     * is not extrapolated. Empty for closed periods.
+     * is not extrapolated. Before [FORECAST_WARMUP_DAYS] have elapsed, a few days of pace are not stretched over the
+     * whole period: a run-out is forecast only if it comes within as many days as have elapsed. Empty for closed
+     * periods.
      */
     val runOutDateByPocket: Map<String, LocalDate>,
     val pockets: List<PocketPeriodSummary>,
@@ -82,6 +84,9 @@ data class PeriodInsights(
     }
 
     companion object {
+        /** Elapsed days after which a Pocket's pace is trusted for a run-out anywhere in the period. */
+        const val FORECAST_WARMUP_DAYS = 7
+
         fun of(state: LedgerState, periodId: String): PeriodInsights? {
             val period = state.periods.firstOrNull { it.id == periodId } ?: return null
             val today = state.currentLocalDate
@@ -173,6 +178,7 @@ data class PeriodInsights(
                 // distance is bounded by the period before it becomes a date, since a huge budget would overflow one.
                 val daysUntilRunOut = summary.availabilityMinor / dailyPace + 1
                 if (daysUntilRunOut >= periodEnd.toEpochDay() - today.toEpochDay()) return@mapNotNull null
+                if (elapsedDays < FORECAST_WARMUP_DAYS && daysUntilRunOut > elapsedDays) return@mapNotNull null
                 summary.pocket.id to today.plusDays(daysUntilRunOut)
             }.toMap()
         }

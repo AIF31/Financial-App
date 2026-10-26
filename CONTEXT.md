@@ -92,6 +92,10 @@ _Avoid_: Subscription billing, scheduled expense, Recurring template
 A proposed Pocket budget: the median net spend of up to three recent ended periods in the same accounting currency, each scaled to the target period's length and rounded up to a whole unit. A Pocket with no spending to go on gets no suggestion. Applying suggestions replaces the chosen budgets in one step and only when their total fits the period's new funds.
 _Avoid_: Automatic budget, forecast
 
+**Run-out forecast**:
+The day a Pocket's availability runs out if it keeps the net spending pace it had through today, given only when that day comes before the period ends. Only Pockets with expenses on at least two days are forecast, so one large expense is not extrapolated. In the first seven days of a period, a run-out is forecast only if it comes within as many days as have elapsed. Movements dated after today reduce availability but not the pace. A forecast run-out reads as **Ritmo alto** unless the Pocket is already at risk or exhausted.
+_Avoid_: Projection, budget suggestion
+
 **Pace alert**:
 A notification that a Pocket is forecast to run out before the period ends, has reached 80% of its budget, or has no availability left. Each level alerts once per Pocket and period, and only after auto-recording; levels reached through changes made in the app count as seen. When a payment is auto-recorded while the app is open, the alert may or may not post, depending on which check runs first.
 _Avoid_: Budget warning, reminder

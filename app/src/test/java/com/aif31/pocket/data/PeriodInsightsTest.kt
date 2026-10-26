@@ -507,6 +507,39 @@ class PeriodInsightsTest {
         assertEquals(PocketBudgetStatus.UNBUDGETED, rolloverOnly.budgetStatusAt(null))
     }
 
+    @Test
+    fun a_few_days_of_ordinary_spending_are_not_stretched_into_an_early_run_out() {
+        // Day 3 of March: SAR 155.25 of SAR 1,252.00 spent on two days. At that pace SAR 1,096.75 runs out on 21 March,
+        // before the period ends, but three days are too few to forecast that far.
+        val cafe = summary(market, budget = 125_200, expense = 15_525)
+        val state = state(
+            today = LocalDate.of(2026, 2, 27),
+            elapsedDays = 3,
+            summaries = mapOf(march.id to listOf(cafe)),
+            movements = listOf(movement("a", march, LocalDate.of(2026, 2, 25), 7_000), movement("b", march, LocalDate.of(2026, 2, 27), 8_525)),
+        )
+        val insights = PeriodInsights.of(state, march.id)!!
+
+        assertTrue(insights.runOutDateByPocket.isEmpty())
+        assertEquals(PocketBudgetStatus.ON_TRACK, cafe.budgetStatusAt(insights))
+    }
+
+    @Test
+    fun early_in_the_period_a_run_out_within_the_elapsed_days_is_still_forecast() {
+        // Day 3 of March: SAR 60.00 of SAR 100.00 spent, SAR 20.00 a day; SAR 40.00 lasts two more days.
+        val fast = summary(market, budget = 10_000, expense = 6_000)
+        val state = state(
+            today = LocalDate.of(2026, 2, 27),
+            elapsedDays = 3,
+            summaries = mapOf(march.id to listOf(fast)),
+            movements = listOf(movement("a", march, LocalDate.of(2026, 2, 25), 3_000), movement("b", march, LocalDate.of(2026, 2, 27), 3_000)),
+        )
+        val insights = PeriodInsights.of(state, march.id)!!
+
+        assertEquals(mapOf(market.id to LocalDate.of(2026, 3, 2)), insights.runOutDateByPocket)
+        assertEquals(PocketBudgetStatus.FAST_PACE, fast.budgetStatusAt(insights))
+    }
+
     private fun state(
         today: LocalDate,
         elapsedDays: Int,

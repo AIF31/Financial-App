@@ -36,6 +36,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.*
 import com.aif31.pocket.domain.Money
@@ -74,6 +75,8 @@ internal fun PocketsScreen(
     val retiredPockets = shownPockets.filter { it.retiredThisPeriod }
     val allocatedMinor = shownPockets.map { it.budgetMinor }.sumMoneyExact()
     val availableMinor = shownPockets.map { it.availabilityMinor }.sumMoneyExact()
+    val rolloverMinor = shownPockets.map { it.rolloverMinor }.sumMoneyExact()
+    val netSpendMinor = shownPockets.map { it.netSpendMinor }.sumMoneyExact()
     val unallocatedForPeriodMinor = selectedPeriod?.id
         ?.let(state.unallocatedMinorByPeriod::get)
         ?: state.unallocatedMinor
@@ -216,6 +219,16 @@ internal fun PocketsScreen(
                         PocketSummaryMetric("Asignado", money(allocatedMinor), Modifier.weight(1f))
                         VerticalDivider(Modifier.height(64.dp))
                         PocketSummaryMetric("Disponible", money(availableMinor), Modifier.weight(1f))
+                    }
+                    // Availability is budget plus rollover less net spend; say so, or rollover reads as unexplained money.
+                    if (rolloverMinor != 0L || netSpendMinor != 0L) {
+                        Text(
+                            availabilityBreakdown(rolloverMinor, netSpendMinor, ::money),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.testTag("availability_breakdown"),
+                        )
                     }
                     Text(
                         "${money(unallocatedForPeriodMinor)} sin asignar",
@@ -482,6 +495,18 @@ private fun BudgetFit?.description(periods: Int): String? = when (this) {
     BudgetFit.UNDER -> "usó menos de la mitad en los últimos $periods periodos"
     null -> null
 }
+
+/** "Disponible = asignado + SAR 946.50 de rollover − SAR 155.25 gastado", naming only the parts that are not zero. */
+internal fun availabilityBreakdown(rolloverMinor: Long, netSpendMinor: Long, money: (Long) -> String): String =
+    listOfNotNull(
+        "Disponible = asignado",
+        "+ ${money(rolloverMinor)} de rollover".takeIf { rolloverMinor != 0L },
+        when {
+            netSpendMinor > 0L -> "− ${money(netSpendMinor)} gastado"
+            netSpendMinor < 0L -> "+ ${money(Math.negateExact(netSpendMinor))} en reembolsos"
+            else -> null
+        },
+    ).joinToString(" ")
 
 @Composable
 private fun PocketSummaryMetric(label: String, value: String, modifier: Modifier = Modifier) {

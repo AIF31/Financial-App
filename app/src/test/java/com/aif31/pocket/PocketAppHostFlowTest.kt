@@ -1248,6 +1248,7 @@ class PocketAppHostFlowTest {
         compose.onNodeWithText("Vista histórica · Solo lectura").assertIsDisplayed()
         compose.onNodeWithText("Moneda del periodo · SAR").assertIsDisplayed()
         compose.onNodeWithText("Asignado").assertIsDisplayed()
+        compose.onNodeWithTag("availability_breakdown").assertTextContains("de rollover", substring = true)
         compose.onNodeWithText("SAR 950.00 sin asignar").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("pocket_Viajes"))
         compose.onNodeWithTag("pocket_Viajes").assertIsDisplayed()
