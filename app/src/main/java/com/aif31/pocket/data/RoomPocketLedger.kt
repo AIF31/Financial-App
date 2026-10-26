@@ -167,6 +167,9 @@ class RoomPocketLedger(
         require(command.newFundsMinor >= 0) { "Los fondos no pueden ser negativos" }
         val periods = dao.periods()
         val period = requireNotNull(periods.firstOrNull { it.id == command.periodId }) { "Periodo inexistente" }
+        require(command.currency == null || command.currency.name == period.accountingCurrencyCode) {
+            "La moneda del periodo cambió; revisa los fondos antes de guardar"
+        }
         val updated = period.copy(newFundsMinor = command.newFundsMinor)
         validateLedgerProjection(
             periods.filterNot { it.id == updated.id } + updated,
@@ -662,7 +665,9 @@ class RoomPocketLedger(
         val periods = dao.periods().sortedBy { it.startEpochDay }
         val period = requireNotNull(periods.firstOrNull { it.id == command.periodId }) { "Periodo inexistente" }
         // A later period inherits this currency and may have converted rollover from it.
-        require(period == periods.last()) { "Solo el último periodo puede cambiar de moneda" }
+        require(period == periods.last() && today().toEpochDay() in period.startEpochDay until period.endExclusiveEpochDay) {
+            "Solo el periodo actual puede cambiar de moneda"
+        }
         val target = command.targetCurrency
         require(target.name != period.accountingCurrencyCode) { "Este periodo ya está en ${target.name}" }
         val previous = periods.getOrNull(periods.lastIndex - 1)

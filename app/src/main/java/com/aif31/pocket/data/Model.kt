@@ -176,7 +176,12 @@ sealed interface LedgerCommand {
         val startDay: Int = 25,
         val accountingCurrency: SupportedCurrency = SupportedCurrency.SAR,
     ) : LedgerCommand
-    data class UpdatePeriodFunds(val periodId: String, val newFundsMinor: Long) : LedgerCommand
+    /** [currency], when given, is the one [newFundsMinor] was entered in; a period since moved to another rejects it. */
+    data class UpdatePeriodFunds(
+        val periodId: String,
+        val newFundsMinor: Long,
+        val currency: SupportedCurrency? = null,
+    ) : LedgerCommand
     data class SetAllocation(val periodId: String, val pocketId: String, val amountMinor: Long) : LedgerCommand
 
     /** Sets several Pocket budgets of one period in one transaction; only the final total must fit the new funds. */

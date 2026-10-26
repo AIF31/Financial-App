@@ -1352,8 +1352,13 @@ class PocketLedgerHostBehaviorTest {
         ledger.execute(LedgerCommand.ScheduleCurrencyChange(SupportedCurrency.USD, "0.5", period.endExclusive, "ROUNDING-TEST"))
         ledger.execute(LedgerCommand.CreateNextPeriod())
         val next = dao.periods().maxBy { it.startEpochDay }
+        // Only the current period changes currency, so the next one must have begun.
+        assertTrue(ledger.execute(LedgerCommand.RevertCurrencyChange(next.id)) is LedgerResult.Rejected)
+        val inNext = RoomPocketLedger(
+            database, Clock.fixed(LocalDate.ofEpochDay(next.startEpochDay).atTime(12, 0).atZone(zone).toInstant(), zone), zone,
+        )
 
-        assertEquals(LedgerResult.Success, ledger.execute(LedgerCommand.RevertCurrencyChange(next.id)))
+        assertEquals(LedgerResult.Success, inNext.execute(LedgerCommand.RevertCurrencyChange(next.id)))
 
         val budgets = dao.allocations().filter { it.periodId == next.id }.associate { it.pocketId to it.budgetMinor }
         assertEquals(2L, dao.periods().single { it.id == next.id }.newFundsMinor)
@@ -1545,6 +1550,12 @@ class PocketLedgerHostBehaviorTest {
         val reverted = ledger.state.first { it.currentPeriod?.accountingCurrency == SupportedCurrency.SAR }
         assertEquals(525_000L, reverted.newFundsMinor)
         assertEquals(3_750L, reverted.movements.single { it.id == "entered-in-usd" }.accountingAmountMinor)
+
+        // Once the period has ended, even before its successor exists, its currency is settled.
+        mutableClock.value = Instant.parse("2026-04-26T09:00:00Z")
+        val ended = database.financeDao().periods()
+        assertTrue(ledger.execute(LedgerCommand.ChangePeriodCurrency(second.id, SupportedCurrency.MXN, "4.8", "BANXICO")) is LedgerResult.Rejected)
+        assertEquals(ended, database.financeDao().periods())
     }
 
     @Test
@@ -1563,6 +1574,9 @@ class PocketLedgerHostBehaviorTest {
         val changed = ledger.state.first { it.currentPeriod?.accountingCurrency == SupportedCurrency.USD }.currentPeriod!!
         assertEquals(100_000L, changed.newFundsMinor)
         assertNull(changed.priorCurrencyBoundary)
+        // Funds typed while the period was still in SAR no longer apply.
+        assertTrue(ledger.execute(LedgerCommand.UpdatePeriodFunds(period.id, 375_000, SupportedCurrency.SAR)) is LedgerResult.Rejected)
+        assertEquals(100_000L, database.financeDao().periods().single().newFundsMinor)
     }
 
     @Test

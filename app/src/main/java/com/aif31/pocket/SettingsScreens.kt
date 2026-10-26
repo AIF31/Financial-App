@@ -415,7 +415,7 @@ private fun SettingsDetailScreen(
                                     message = "Escribe fondos válidos"
                                     return@launch
                                 }
-                                when (val result = ledger.execute(LedgerCommand.UpdatePeriodFunds(selectedFundsPeriodId ?: return@launch, value))) {
+                                when (val result = ledger.execute(LedgerCommand.UpdatePeriodFunds(selectedFundsPeriodId ?: return@launch, value, selectedFundsCurrency))) {
                                     LedgerResult.Success -> message = "Fondos guardados"
                                     is LedgerResult.Rejected -> message = result.message
                                     is LedgerResult.Deleted -> Unit
