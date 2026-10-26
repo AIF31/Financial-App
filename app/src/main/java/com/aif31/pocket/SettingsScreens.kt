@@ -409,13 +409,15 @@ private fun SettingsDetailScreen(
                             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                             modifier = Modifier.fillMaxWidth().testTag("period_funds"),
                         )
-                        Button(onClick = {
+                        // The text belongs to the currency it was last shown in; Save waits until it follows a change.
+                        Button(enabled = fundsShownIn == selectedFundsCurrency, onClick = {
+                            val currency = fundsShownIn
                             scope.launch {
-                                val value = runCatching { Money.parse(funds, selectedFundsCurrency.name).minor }.getOrNull() ?: run {
+                                val value = runCatching { Money.parse(funds, currency.name).minor }.getOrNull() ?: run {
                                     message = "Escribe fondos válidos"
                                     return@launch
                                 }
-                                when (val result = ledger.execute(LedgerCommand.UpdatePeriodFunds(selectedFundsPeriodId ?: return@launch, value, selectedFundsCurrency))) {
+                                when (val result = ledger.execute(LedgerCommand.UpdatePeriodFunds(selectedFundsPeriodId ?: return@launch, value, currency))) {
                                     LedgerResult.Success -> message = "Fondos guardados"
                                     is LedgerResult.Rejected -> message = result.message
                                     is LedgerResult.Deleted -> Unit
