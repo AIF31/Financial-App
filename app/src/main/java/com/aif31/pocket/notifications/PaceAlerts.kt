@@ -40,7 +40,7 @@ internal object PaceAlerts {
                     PocketBudgetStatus.EXHAUSTED -> PaceAlertLevel.EXHAUSTED
                     PocketBudgetStatus.AT_RISK -> PaceAlertLevel.AT_RISK
                     PocketBudgetStatus.FAST_PACE -> PaceAlertLevel.RUN_OUT
-                    PocketBudgetStatus.UNBUDGETED, PocketBudgetStatus.ON_TRACK -> null
+                    PocketBudgetStatus.EARLY_FAST_PACE, PocketBudgetStatus.UNBUDGETED, PocketBudgetStatus.ON_TRACK -> null
                 }?.let { summary.pocket.id to it }
             }
             .toMap()

@@ -41,7 +41,7 @@ The portion of a period's new funds assigned to a Pocket. Pocket budgets across 
 _Avoid_: Expense, transfer
 
 **Budget reassignment**:
-An increase to one Pocket's budget covered by a decrease to another Pocket's budget or by unassigned funds in the same budget period. A giving Pocket must be active, with availability left, and neither exhausted, at risk nor forecast to run out. It can give at most the lesser of its availability and budget. Reassignment changes neither Movements nor rollover.
+An increase to one Pocket's budget covered by a decrease to another Pocket's budget or by unassigned funds in the same budget period. A giving Pocket must be active, with availability left, and neither exhausted, at risk nor on a pace that would run out before the period ends, even one too early to forecast. It can give at most the lesser of its availability and budget. Reassignment changes neither Movements nor rollover.
 _Avoid_: Transfer
 
 **Rollover**:
@@ -93,7 +93,7 @@ A proposed Pocket budget: the median net spend of up to three recent ended perio
 _Avoid_: Automatic budget, forecast
 
 **Run-out forecast**:
-The day a Pocket's availability runs out if it keeps the net spending pace it had through today, given only when that day comes before the period ends. Only Pockets with expenses on at least two days are forecast, so one large expense is not extrapolated. Until seven days of the period have elapsed, a run-out is forecast only if it comes before the middle of the period, and the period's own pace warning looks only that far ahead; a pace that would exceed the funds only later reads as too early to tell, not on plan. Movements dated after today reduce availability but not the pace. A forecast run-out reads as **Ritmo alto** unless the Pocket is already at risk or exhausted.
+The day a Pocket's availability runs out if it keeps the net spending pace it had through today, given only when that day comes before the period ends. Only Pockets with expenses on at least two days are forecast, so one large expense is not extrapolated. Until seven days of the period have elapsed, a run-out is forecast only if it comes before the middle of the period, and the period's own pace warning looks only that far ahead; a pace that would run out or exceed the funds only later reads as too early to tell, not on track or on plan. Movements dated after today reduce availability but not the pace. A forecast run-out reads as **Ritmo alto** unless the Pocket is already at risk or exhausted.
 _Avoid_: Projection, budget suggestion
 
 **Pace alert**:

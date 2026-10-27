@@ -189,7 +189,7 @@ internal fun SpendPaceMetrics(
         }
         insights.projectedSpendMinor?.let {
             // Early in the period the projection stretches a few days over the whole period; say so beside the number.
-            val supporting = if (insights.inProgress && insights.elapsedDays < PeriodInsights.FORECAST_WARMUP_DAYS) {
+            val supporting = if (insights.paceWarmingUp) {
                 "Si mantienes el ritmo de estos pocos días"
             } else {
                 "Si mantienes el ritmo actual"

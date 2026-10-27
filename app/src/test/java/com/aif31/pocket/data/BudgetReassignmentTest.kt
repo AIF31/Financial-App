@@ -84,6 +84,23 @@ class BudgetReassignmentTest {
         assertEquals(listOf(250L, 4_000L, 300L), sources.map { it.maximumMinor })
     }
 
+    @Test fun a_pocket_spending_fast_too_early_to_forecast_cannot_give_budget() {
+        // Day 3: SAR 155.25 spent on two days would run out on 25 March, too late to warn about but still fast.
+        val target = summary("target", 1_000, -235)
+        val early = summary("early", 125_200, 109_675)
+        val state = state(target, early, summary("steady", 4_000, 4_000)).copy(
+            elapsedDays = 3,
+            currentLocalDate = LocalDate.of(2026, 3, 3),
+            movements = listOf(
+                movement("a", "early", LocalDate.of(2026, 3, 1), 7_000),
+                movement("b", "early", LocalDate.of(2026, 3, 3), 8_525),
+            ),
+        )
+
+        assertEquals(PocketBudgetStatus.EARLY_FAST_PACE, early.budgetStatusAt(PeriodInsights.of(state, period.id)))
+        assertEquals(listOf("steady"), BudgetReassignment.of(state, period.id, "target")!!.sources.map { it.pocketId })
+    }
+
     @Test fun rollover_cannot_be_reassigned_and_nonpositive_unassigned_funds_are_omitted() {
         val target = summary("target", 1_000, -235)
         val donor = summary("donor", 500, 1_500).copy(rolloverMinor = 1_000, netSpendMinor = 0)

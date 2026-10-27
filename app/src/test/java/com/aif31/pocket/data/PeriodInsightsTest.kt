@@ -522,7 +522,8 @@ class PeriodInsightsTest {
         val insights = PeriodInsights.of(state, march.id)!!
 
         assertTrue(insights.runOutDateByPocket.isEmpty())
-        assertEquals(PocketBudgetStatus.ON_TRACK, cafe.budgetStatusAt(insights))
+        assertEquals(setOf(market.id), insights.earlyRunOutPocketIds)
+        assertEquals(PocketBudgetStatus.EARLY_FAST_PACE, cafe.budgetStatusAt(insights))
         // The whole-period projection is above the funds, so the period is not called on plan either.
         assertEquals(SpendPaceStatus.EARLY_OVER_PACE, insights.paceStatus)
         assertEquals(144_900L, insights.projectedSpendMinor)

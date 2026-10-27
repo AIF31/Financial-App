@@ -25,7 +25,7 @@ object BudgetReassignment {
         val donors = if (insights == null) emptyList() else pockets
             .filterNot { it.pocket.id == targetPocketId || it.pocket.archived || it.retiredThisPeriod }
             .filter { it.availabilityMinor > 0 && it.budgetMinor > 0 }
-            .filter { it.budgetStatusAt(insights) !in setOf(PocketBudgetStatus.EXHAUSTED, PocketBudgetStatus.AT_RISK, PocketBudgetStatus.FAST_PACE) }
+            .filter { it.budgetStatusAt(insights) !in setOf(PocketBudgetStatus.EXHAUSTED, PocketBudgetStatus.AT_RISK, PocketBudgetStatus.FAST_PACE, PocketBudgetStatus.EARLY_FAST_PACE) }
             .map { BudgetReassignmentSource(it.pocket.id, it.pocket.name, minOf(it.availabilityMinor, it.budgetMinor)) }
             .sortedByDescending { it.maximumMinor }
         val unassigned = state.unallocatedMinorByPeriod[periodId]?.takeIf { it > 0 }

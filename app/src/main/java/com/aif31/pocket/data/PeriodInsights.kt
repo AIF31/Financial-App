@@ -71,8 +71,16 @@ data class PeriodInsights(
      * is forecast. Empty for closed periods.
      */
     val runOutDateByPocket: Map<String, LocalDate>,
+    /**
+     * Pockets whose pace through today would run out before the period ends, but not as soon as [runOutDateByPocket]
+     * looks while [paceWarmingUp]: too early to warn about. Always empty once the warm-up ends.
+     */
+    val earlyRunOutPocketIds: Set<String>,
     val pockets: List<PocketPeriodSummary>,
 ) {
+    /** Whether pace warnings still look only to the middle of the period: see [FORECAST_WARMUP_DAYS]. */
+    val paceWarmingUp: Boolean get() = isWarmingUp(inProgress, elapsedDays)
+
     val accountingCurrency: SupportedCurrency get() = period.accountingCurrency
 
     /** Pocket budgets plus received rollover: what the period's Pocket availability is measured from. */
@@ -94,6 +102,8 @@ data class PeriodInsights(
          * fast enough to run out by then still warns.
          */
         const val FORECAST_WARMUP_DAYS = 7
+
+        private fun isWarmingUp(inProgress: Boolean, elapsedDays: Int) = inProgress && elapsedDays < FORECAST_WARMUP_DAYS
 
         fun of(state: LedgerState, periodId: String): PeriodInsights? {
             val period = state.periods.firstOrNull { it.id == periodId } ?: return null
@@ -128,12 +138,19 @@ data class PeriodInsights(
             fun projectedThrough(days: Int) =
                 Math.addExact(PocketMath.project(netSpendThroughToday, elapsedDays, days).amountMinor, netSpendAfterToday)
             val projected = if (inProgress) projectedThrough(totalDays) else null
-            val warningHorizonDays = if (inProgress && elapsedDays < FORECAST_WARMUP_DAYS) {
+            val warningHorizonDays = if (isWarmingUp(inProgress, elapsedDays)) {
                 maxOf(elapsedDays, totalDays / 2)
             } else {
                 totalDays
             }
             val projectedForWarning = if (inProgress) projectedThrough(warningHorizonDays) else null
+            val allRunOutDates = if (inProgress) {
+                runOutDates(pockets, periodMovements.filter { it.localDate <= today }, today, elapsedDays, period.endExclusive)
+            } else {
+                emptyMap()
+            }
+            val horizonEnd = period.start.plusDays(warningHorizonDays.toLong())
+            val runOutDateByPocket = allRunOutDates.filterValues { it < horizonEnd }
             return PeriodInsights(
                 period = period,
                 inProgress = inProgress,
@@ -165,12 +182,8 @@ data class PeriodInsights(
                 cumulativeNetSpendByDayMinor = cumulativeByDay(period, elapsedDays, periodMovements),
                 netSpendAfterTodayMinor = netSpendAfterToday,
                 netSpendAfterTodayByPocketMinor = netSpendAfterTodayByPocket,
-                runOutDateByPocket = if (inProgress) {
-                    val horizonEnd = period.start.plusDays(warningHorizonDays.toLong())
-                    runOutDates(pockets, periodMovements.filter { it.localDate <= today }, today, elapsedDays, horizonEnd)
-                } else {
-                    emptyMap()
-                },
+                runOutDateByPocket = runOutDateByPocket,
+                earlyRunOutPocketIds = allRunOutDates.keys - runOutDateByPocket.keys,
                 pockets = pockets,
             )
         }
@@ -180,7 +193,7 @@ data class PeriodInsights(
             movementsThroughToday: List<Movement>,
             today: LocalDate,
             elapsedDays: Int,
-            horizonEnd: LocalDate,
+            periodEnd: LocalDate,
         ): Map<String, LocalDate> {
             val byPocket = movementsThroughToday.groupBy { it.pocketId }
             return pockets.mapNotNull { summary ->
@@ -189,9 +202,9 @@ data class PeriodInsights(
                 val dailyPace = movements.netSpendMinor() / elapsedDays
                 if (summary.availabilityMinor <= 0 || spendingDays < 2 || dailyPace <= 0) return@mapNotNull null
                 // Availability covers this many whole days after today; it runs out on the day after them. The
-                // distance is bounded by the horizon before it becomes a date, since a huge budget would overflow one.
+                // distance is bounded by the period before it becomes a date, since a huge budget would overflow one.
                 val daysUntilRunOut = summary.availabilityMinor / dailyPace + 1
-                if (daysUntilRunOut >= horizonEnd.toEpochDay() - today.toEpochDay()) return@mapNotNull null
+                if (daysUntilRunOut >= periodEnd.toEpochDay() - today.toEpochDay()) return@mapNotNull null
                 summary.pocket.id to today.plusDays(daysUntilRunOut)
             }.toMap()
         }
