@@ -6,8 +6,12 @@ import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.domain.sumMoneyExact
 import java.time.LocalDate
 
-/** How the period's spending relates to its plan; the dashboard's status line reads this. */
-enum class SpendPaceStatus { NO_FUNDS, OVERSPENT, OVER_PACE, ON_PLAN }
+/**
+ * How the period's spending relates to its plan; the dashboard's status line reads this. [EARLY_OVER_PACE] is a pace
+ * that would exceed the funds by the period's end but not by its middle, before
+ * [PeriodInsights.FORECAST_WARMUP_DAYS] have elapsed: too early to warn, too fast to call on plan.
+ */
+enum class SpendPaceStatus { NO_FUNDS, OVERSPENT, OVER_PACE, EARLY_OVER_PACE, ON_PLAN }
 
 /**
  * The period's Movements that count toward its totals: those whose Pocket is in the period's snapshot, matching the
@@ -155,6 +159,7 @@ data class PeriodInsights(
                     availability < 0L -> SpendPaceStatus.OVERSPENT
                     periodFunds <= 0L -> SpendPaceStatus.NO_FUNDS
                     (projectedForWarning ?: netSpend) > periodFunds -> SpendPaceStatus.OVER_PACE
+                    (projected ?: netSpend) > periodFunds -> SpendPaceStatus.EARLY_OVER_PACE
                     else -> SpendPaceStatus.ON_PLAN
                 },
                 cumulativeNetSpendByDayMinor = cumulativeByDay(period, elapsedDays, periodMovements),

@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Schedule
@@ -285,6 +286,7 @@ private fun AvailabilityHero(
         SpendPaceStatus.NO_FUNDS -> "Asigna fondos para orientar el periodo"
         SpendPaceStatus.OVERSPENT -> "Gastaste más de lo asignado a tus Pockets"
         SpendPaceStatus.OVER_PACE -> "Tu ritmo supera los fondos del periodo"
+        SpendPaceStatus.EARLY_OVER_PACE -> "Vas por encima del plan, pero aún es pronto para saberlo"
         SpendPaceStatus.ON_PLAN -> "Vas dentro del plan"
     }
     val needsAttention = paceStatus == SpendPaceStatus.OVERSPENT || paceStatus == SpendPaceStatus.OVER_PACE
@@ -304,7 +306,14 @@ private fun AvailabilityHero(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(if (needsAttention) Icons.Default.Warning else Icons.Default.CheckCircle, contentDescription = null)
+                    Icon(
+                        when {
+                            needsAttention -> Icons.Default.Warning
+                            paceStatus == SpendPaceStatus.EARLY_OVER_PACE -> Icons.Default.Info
+                            else -> Icons.Default.CheckCircle
+                        },
+                        contentDescription = null,
+                    )
                     Text(status, style = MaterialTheme.typography.bodyLarge)
                 }
             }

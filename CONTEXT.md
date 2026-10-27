@@ -93,7 +93,7 @@ A proposed Pocket budget: the median net spend of up to three recent ended perio
 _Avoid_: Automatic budget, forecast
 
 **Run-out forecast**:
-The day a Pocket's availability runs out if it keeps the net spending pace it had through today, given only when that day comes before the period ends. Only Pockets with expenses on at least two days are forecast, so one large expense is not extrapolated. Until seven days of the period have elapsed, a run-out is forecast only if it comes before the middle of the period, and the period's own pace warning looks only that far ahead. Movements dated after today reduce availability but not the pace. A forecast run-out reads as **Ritmo alto** unless the Pocket is already at risk or exhausted.
+The day a Pocket's availability runs out if it keeps the net spending pace it had through today, given only when that day comes before the period ends. Only Pockets with expenses on at least two days are forecast, so one large expense is not extrapolated. Until seven days of the period have elapsed, a run-out is forecast only if it comes before the middle of the period, and the period's own pace warning looks only that far ahead; a pace that would exceed the funds only later reads as too early to tell, not on plan. Movements dated after today reduce availability but not the pace. A forecast run-out reads as **Ritmo alto** unless the Pocket is already at risk or exhausted.
 _Avoid_: Projection, budget suggestion
 
 **Pace alert**:
