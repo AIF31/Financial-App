@@ -41,7 +41,6 @@ import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.*
 import com.aif31.pocket.domain.Money
 import com.aif31.pocket.domain.SupportedCurrency
-import com.aif31.pocket.domain.sumMoneyExact
 import com.aif31.pocket.settings.*
 import com.aif31.pocket.ui.*
 import java.util.Locale
@@ -73,10 +72,10 @@ internal fun PocketsScreen(
         summary.retiredThisPeriod || (!isHistorical && summary.pocket.archived)
     }
     val retiredPockets = shownPockets.filter { it.retiredThisPeriod }
-    val allocatedMinor = shownPockets.map { it.budgetMinor }.sumMoneyExact()
-    val availableMinor = shownPockets.map { it.availabilityMinor }.sumMoneyExact()
-    val rolloverMinor = shownPockets.map { it.rolloverMinor }.sumMoneyExact()
-    val netSpendMinor = shownPockets.map { it.netSpendMinor }.sumMoneyExact()
+    val allocatedMinor = shownInsights?.budgetedMinor ?: 0L
+    val availableMinor = shownInsights?.availabilityMinor ?: 0L
+    val rolloverMinor = shownInsights?.rolloverMinor ?: 0L
+    val netSpendMinor = shownInsights?.netSpendMinor ?: 0L
     val unallocatedForPeriodMinor = selectedPeriod?.id
         ?.let(state.unallocatedMinorByPeriod::get)
         ?: state.unallocatedMinor
@@ -227,7 +226,6 @@ internal fun PocketsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                             textAlign = TextAlign.Center,
-                            modifier = Modifier.testTag("availability_breakdown"),
                         )
                     }
                     Text(

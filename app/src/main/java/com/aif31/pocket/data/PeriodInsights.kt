@@ -52,6 +52,7 @@ data class PeriodInsights(
     /** Net spend as a share of Pocket budgets plus rollover, the same base availability is measured from. */
     val budgetUsedPercent: Int?,
     val periodElapsedPercent: Int,
+    /** [SpendPaceStatus.OVER_PACE] reads the pace only up to the same horizon as [runOutDateByPocket]. */
     val paceStatus: SpendPaceStatus,
     /** Net spending accumulated at the end of each elapsed day, starting with the period's first day. */
     val cumulativeNetSpendByDayMinor: List<Long>,
@@ -62,9 +63,8 @@ data class PeriodInsights(
     /**
      * The day each Pocket's availability runs out at its pace through today, for Pockets that would run out before
      * the period ends. Only Pockets spent on at least two days are forecast, so a single large expense such as rent
-     * is not extrapolated. Before [FORECAST_WARMUP_DAYS] have elapsed, a few days of pace are not stretched over the
-     * whole period: a run-out is forecast only if it comes within as many days as have elapsed. Empty for closed
-     * periods.
+     * is not extrapolated. Until [FORECAST_WARMUP_DAYS] have elapsed, only a run-out before the middle of the period
+     * is forecast. Empty for closed periods.
      */
     val runOutDateByPocket: Map<String, LocalDate>,
     val pockets: List<PocketPeriodSummary>,
@@ -84,7 +84,11 @@ data class PeriodInsights(
     }
 
     companion object {
-        /** Elapsed days after which a Pocket's pace is trusted for a run-out anywhere in the period. */
+        /**
+         * Elapsed days after which pace is trusted over the whole period. Before then, a few ordinary days stretched
+         * over a month read as a warning, so pace warnings look only as far as the middle of the period: spending
+         * fast enough to run out by then still warns.
+         */
         const val FORECAST_WARMUP_DAYS = 7
 
         fun of(state: LedgerState, periodId: String): PeriodInsights? {
@@ -117,11 +121,15 @@ data class PeriodInsights(
             // Pace is what has been spent through today. Movements dated later are already-committed spending: they
             // count once in the projection and in period totals, but are not extrapolated or averaged over past days.
             val netSpendThroughToday = Math.subtractExact(netSpend, netSpendAfterToday)
-            val projected = if (inProgress) {
-                Math.addExact(PocketMath.project(netSpendThroughToday, elapsedDays, totalDays).amountMinor, netSpendAfterToday)
+            fun projectedThrough(days: Int) =
+                Math.addExact(PocketMath.project(netSpendThroughToday, elapsedDays, days).amountMinor, netSpendAfterToday)
+            val projected = if (inProgress) projectedThrough(totalDays) else null
+            val warningHorizonDays = if (inProgress && elapsedDays < FORECAST_WARMUP_DAYS) {
+                maxOf(elapsedDays, totalDays / 2)
             } else {
-                null
+                totalDays
             }
+            val projectedForWarning = if (inProgress) projectedThrough(warningHorizonDays) else null
             return PeriodInsights(
                 period = period,
                 inProgress = inProgress,
@@ -146,14 +154,15 @@ data class PeriodInsights(
                 paceStatus = when {
                     availability < 0L -> SpendPaceStatus.OVERSPENT
                     periodFunds <= 0L -> SpendPaceStatus.NO_FUNDS
-                    (projected ?: netSpend) > periodFunds -> SpendPaceStatus.OVER_PACE
+                    (projectedForWarning ?: netSpend) > periodFunds -> SpendPaceStatus.OVER_PACE
                     else -> SpendPaceStatus.ON_PLAN
                 },
                 cumulativeNetSpendByDayMinor = cumulativeByDay(period, elapsedDays, periodMovements),
                 netSpendAfterTodayMinor = netSpendAfterToday,
                 netSpendAfterTodayByPocketMinor = netSpendAfterTodayByPocket,
                 runOutDateByPocket = if (inProgress) {
-                    runOutDates(pockets, periodMovements.filter { it.localDate <= today }, today, elapsedDays, period.endExclusive)
+                    val horizonEnd = period.start.plusDays(warningHorizonDays.toLong())
+                    runOutDates(pockets, periodMovements.filter { it.localDate <= today }, today, elapsedDays, horizonEnd)
                 } else {
                     emptyMap()
                 },
@@ -166,7 +175,7 @@ data class PeriodInsights(
             movementsThroughToday: List<Movement>,
             today: LocalDate,
             elapsedDays: Int,
-            periodEnd: LocalDate,
+            horizonEnd: LocalDate,
         ): Map<String, LocalDate> {
             val byPocket = movementsThroughToday.groupBy { it.pocketId }
             return pockets.mapNotNull { summary ->
@@ -175,10 +184,9 @@ data class PeriodInsights(
                 val dailyPace = movements.netSpendMinor() / elapsedDays
                 if (summary.availabilityMinor <= 0 || spendingDays < 2 || dailyPace <= 0) return@mapNotNull null
                 // Availability covers this many whole days after today; it runs out on the day after them. The
-                // distance is bounded by the period before it becomes a date, since a huge budget would overflow one.
+                // distance is bounded by the horizon before it becomes a date, since a huge budget would overflow one.
                 val daysUntilRunOut = summary.availabilityMinor / dailyPace + 1
-                if (daysUntilRunOut >= periodEnd.toEpochDay() - today.toEpochDay()) return@mapNotNull null
-                if (elapsedDays < FORECAST_WARMUP_DAYS && daysUntilRunOut > elapsedDays) return@mapNotNull null
+                if (daysUntilRunOut >= horizonEnd.toEpochDay() - today.toEpochDay()) return@mapNotNull null
                 summary.pocket.id to today.plusDays(daysUntilRunOut)
             }.toMap()
         }
