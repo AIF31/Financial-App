@@ -28,12 +28,20 @@ _Avoid_: Display currency, preferred input currency
 A frozen, directed conversion rate from the prior period's accounting currency into its successor's accounting currency. It is used for rollover and historical comparison across that boundary.
 _Avoid_: Live rate, reversible rate, unlabeled conversion
 
+**Currency change reversal**:
+Returning the latest period, opened by a currency boundary, to its predecessor's accounting currency. New funds and budgets nobody edited regain their prior amounts, edited ones convert back at the frozen rate, and rollover is recomputed. Movements entered in the restored currency regain their entered amount; any other Movement becomes an estimate at the inverse frozen rate until the final rate of its own date replaces it. A pending currency change to the restored currency is dropped; one to any other currency must be cancelled first.
+_Avoid_: Editing the frozen rate
+
+**Period currency change**:
+Changing the current, latest period to any other accounting currency. Back to its predecessor's currency it is a currency change reversal. Otherwise the period first returns to the currency it started with, then converts at a quote dated on its first day, which becomes its currency boundary quote; the first period has no predecessor and keeps no boundary. Amounts convert as in a reversal, and the same pending-change rule applies.
+_Avoid_: Retroactive currency change, changing a past period's currency
+
 **Pocket budget**:
 The portion of a period's new funds assigned to a Pocket. Pocket budgets across a period cannot exceed its new funds.
 _Avoid_: Expense, transfer
 
 **Budget reassignment**:
-An increase to one Pocket's budget covered by a decrease to another Pocket's budget or by unassigned funds in the same budget period. A giving Pocket must be active, with availability left, and neither exhausted, at risk nor forecast to run out. It can give at most the lesser of its availability and budget. Reassignment changes neither Movements nor rollover.
+An increase to one Pocket's budget covered by a decrease to another Pocket's budget or by unassigned funds in the same budget period. A giving Pocket must be active, with availability left, and neither exhausted, at risk nor on a pace that would run out before the period ends, even one too early to forecast. It can give at most the lesser of its availability and budget. Reassignment changes neither Movements nor rollover.
 _Avoid_: Transfer
 
 **Rollover**:
@@ -83,6 +91,10 @@ _Avoid_: Subscription billing, scheduled expense, Recurring template
 **Budget suggestion**:
 A proposed Pocket budget: the median net spend of up to three recent ended periods in the same accounting currency, each scaled to the target period's length and rounded up to a whole unit. A Pocket with no spending to go on gets no suggestion. Applying suggestions replaces the chosen budgets in one step and only when their total fits the period's new funds.
 _Avoid_: Automatic budget, forecast
+
+**Run-out forecast**:
+The day a Pocket's availability runs out if it keeps the net spending pace it had through today, given only when that day comes before the period ends. Only Pockets with expenses on at least two days are forecast, so one large expense is not extrapolated. Until seven days of the period have elapsed, a run-out is forecast only if it comes before the middle of the period, and the period's own pace warning looks only that far ahead; a pace that would run out or exceed the funds only later reads as too early to tell, not on track or on plan. Movements dated after today reduce availability but not the pace. A forecast run-out reads as **Ritmo alto** unless the Pocket is already at risk or exhausted.
+_Avoid_: Projection, budget suggestion
 
 **Pace alert**:
 A notification that a Pocket is forecast to run out before the period ends, has reached 80% of its budget, or has no availability left. Each level alerts once per Pocket and period, and only after auto-recording; levels reached through changes made in the app count as seen. When a payment is auto-recorded while the app is open, the alert may or may not post, depending on which check runs first.

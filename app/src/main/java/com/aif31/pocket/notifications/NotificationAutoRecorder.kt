@@ -87,6 +87,16 @@ internal class NotificationAutoRecorder(
             else -> AutoRecordOutcome.NeedsReview(ReviewReason.REJECTED)
         }
     }
+
+    /**
+     * Retries every pending suggestion, oldest first. A suggestion that needed review when it arrived can qualify
+     * later: its merchant's first expense was recorded, or the period's currency now matches. Suggestions in [skip]
+     * are left pending. Returns how many became Movements.
+     */
+    suspend fun recordPending(skip: Set<String> = emptySet()): Int = ledger.state.first().movementSuggestions
+        .filterNot { it.id in skip }
+        .sortedBy { it.effectiveAtUtcMillis }
+        .count { record(it.id) is AutoRecordOutcome.Recorded }
 }
 
 private const val AUTO_RECORDED_PREFIX = "ntf-"

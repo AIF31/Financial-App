@@ -507,6 +507,65 @@ class PeriodInsightsTest {
         assertEquals(PocketBudgetStatus.UNBUDGETED, rolloverOnly.budgetStatusAt(null))
     }
 
+    @Test
+    fun a_few_days_of_ordinary_spending_are_not_stretched_into_an_early_warning() {
+        // Day 3 of March: SAR 155.25 of SAR 1,252.00 spent on two days. At that pace SAR 1,096.75 runs out on 21 March
+        // and the period would need SAR 1,449.00, but three days are too few to warn that far ahead.
+        val cafe = summary(market, budget = 125_200, expense = 15_525)
+        val state = state(
+            today = LocalDate.of(2026, 2, 27),
+            elapsedDays = 3,
+            periods = listOf(february, march.copy(newFundsMinor = 125_200), april),
+            summaries = mapOf(march.id to listOf(cafe)),
+            movements = listOf(movement("a", march, LocalDate.of(2026, 2, 25), 7_000), movement("b", march, LocalDate.of(2026, 2, 27), 8_525)),
+        )
+        val insights = PeriodInsights.of(state, march.id)!!
+
+        assertTrue(insights.runOutDateByPocket.isEmpty())
+        assertEquals(setOf(market.id), insights.earlyRunOutPocketIds)
+        assertEquals(PocketBudgetStatus.EARLY_FAST_PACE, cafe.budgetStatusAt(insights))
+        // The whole-period projection is above the funds, so the period is not called on plan either.
+        assertEquals(SpendPaceStatus.EARLY_OVER_PACE, insights.paceStatus)
+        assertEquals(144_900L, insights.projectedSpendMinor)
+    }
+
+    @Test
+    fun early_in_the_period_spending_that_runs_out_before_mid_period_still_warns() {
+        // Day 3 of March: SAR 30.00 of SAR 100.00 spent, SAR 10.00 a day; SAR 70.00 runs out on 7 March, before the
+        // middle of the period on 11 March. The period's funds run out by then too.
+        val fast = summary(market, budget = 10_000, expense = 3_000)
+        val state = state(
+            today = LocalDate.of(2026, 2, 27),
+            elapsedDays = 3,
+            periods = listOf(february, march.copy(newFundsMinor = 10_000), april),
+            summaries = mapOf(march.id to listOf(fast)),
+            movements = listOf(movement("a", march, LocalDate.of(2026, 2, 25), 1_500), movement("b", march, LocalDate.of(2026, 2, 27), 1_500)),
+        )
+        val insights = PeriodInsights.of(state, march.id)!!
+
+        assertEquals(mapOf(market.id to LocalDate.of(2026, 3, 7)), insights.runOutDateByPocket)
+        assertEquals(PocketBudgetStatus.FAST_PACE, fast.budgetStatusAt(insights))
+        assertEquals(SpendPaceStatus.OVER_PACE, insights.paceStatus)
+    }
+
+    @Test
+    fun from_the_seventh_day_pace_warns_about_the_whole_period() {
+        // Day 7 of March: SAR 30.00 of SAR 100.00 spent, SAR 4.28 a day; SAR 70.00 runs out on 20 March, after the
+        // middle of the period but before it ends.
+        val steady = summary(market, budget = 10_000, expense = 3_000)
+        val state = state(
+            today = LocalDate.of(2026, 3, 3),
+            elapsedDays = 7,
+            periods = listOf(february, march.copy(newFundsMinor = 10_000), april),
+            summaries = mapOf(march.id to listOf(steady)),
+            movements = listOf(movement("a", march, LocalDate.of(2026, 2, 25), 1_500), movement("b", march, LocalDate.of(2026, 3, 3), 1_500)),
+        )
+        val insights = PeriodInsights.of(state, march.id)!!
+
+        assertEquals(mapOf(market.id to LocalDate.of(2026, 3, 20)), insights.runOutDateByPocket)
+        assertEquals(SpendPaceStatus.OVER_PACE, insights.paceStatus)
+    }
+
     private fun state(
         today: LocalDate,
         elapsedDays: Int,

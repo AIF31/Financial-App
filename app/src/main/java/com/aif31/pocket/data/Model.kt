@@ -176,7 +176,12 @@ sealed interface LedgerCommand {
         val startDay: Int = 25,
         val accountingCurrency: SupportedCurrency = SupportedCurrency.SAR,
     ) : LedgerCommand
-    data class UpdatePeriodFunds(val periodId: String, val newFundsMinor: Long) : LedgerCommand
+    /** [currency], when given, is the one [newFundsMinor] was entered in; a period since moved to another rejects it. */
+    data class UpdatePeriodFunds(
+        val periodId: String,
+        val newFundsMinor: Long,
+        val currency: SupportedCurrency? = null,
+    ) : LedgerCommand
     data class SetAllocation(val periodId: String, val pocketId: String, val amountMinor: Long) : LedgerCommand
 
     /** Sets several Pocket budgets of one period in one transaction; only the final total must fit the new funds. */
@@ -242,6 +247,21 @@ sealed interface LedgerCommand {
         val quoteEffectiveDate: LocalDate? = null,
     ) : LedgerCommand
     data object CancelCurrencyChange : LedgerCommand
+
+    /** Returns the latest period, opened by a currency change, to its predecessor's accounting currency. */
+    data class RevertCurrencyChange(val periodId: String) : LedgerCommand
+
+    /**
+     * Changes the latest period's accounting currency to [targetCurrency]. Back to its predecessor's currency it is a
+     * reversal and needs no rate; otherwise [rate] converts from the currency the period had before any change.
+     */
+    data class ChangePeriodCurrency(
+        val periodId: String,
+        val targetCurrency: SupportedCurrency,
+        val rate: String? = null,
+        val source: String? = null,
+        val quoteEffectiveDate: LocalDate? = null,
+    ) : LedgerCommand
     data class UpsertPaymentMethod(val id: String? = null, val name: String) : LedgerCommand
     data class ArchivePaymentMethod(val id: String, val archived: Boolean = true) : LedgerCommand
     data class SetDefaultPaymentMethod(val id: String?) : LedgerCommand

@@ -36,11 +36,11 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.*
 import com.aif31.pocket.domain.Money
 import com.aif31.pocket.domain.SupportedCurrency
-import com.aif31.pocket.domain.sumMoneyExact
 import com.aif31.pocket.settings.*
 import com.aif31.pocket.ui.*
 import java.util.Locale
@@ -58,6 +58,8 @@ internal fun PocketsScreen(
     var editing by remember { mutableStateOf<PocketPeriodSummary?>(null) }
     var creating by rememberSaveable { mutableStateOf(false) }
     var reviewingSuggestions by rememberSaveable { mutableStateOf(false) }
+    var confirmingCurrencyRevert by rememberSaveable { mutableStateOf(false) }
+    val revertibleChange = state.revertibleCurrencyChange()
     val scope = rememberCoroutineScope()
     val selectedPeriod = state.periods.firstOrNull { it.id == selectedPeriodId } ?: state.currentPeriod
     val selectedCurrency = selectedPeriod?.accountingCurrency ?: SupportedCurrency.SAR
@@ -70,8 +72,10 @@ internal fun PocketsScreen(
         summary.retiredThisPeriod || (!isHistorical && summary.pocket.archived)
     }
     val retiredPockets = shownPockets.filter { it.retiredThisPeriod }
-    val allocatedMinor = shownPockets.map { it.budgetMinor }.sumMoneyExact()
-    val availableMinor = shownPockets.map { it.availabilityMinor }.sumMoneyExact()
+    val allocatedMinor = shownInsights?.budgetedMinor ?: 0L
+    val availableMinor = shownInsights?.availabilityMinor ?: 0L
+    val rolloverMinor = shownInsights?.rolloverMinor ?: 0L
+    val netSpendMinor = shownInsights?.netSpendMinor ?: 0L
     val unallocatedForPeriodMinor = selectedPeriod?.id
         ?.let(state.unallocatedMinorByPeriod::get)
         ?: state.unallocatedMinor
@@ -120,6 +124,32 @@ internal fun PocketsScreen(
                         }) {
                             Text("Marcar periodo como revisado")
                         }
+                    }
+                }
+            }
+        }
+        // Shown with the period it concerns, since a wrong currency is noticed while reviewing budgets.
+        revertibleChange?.takeIf { selectedPeriod?.id == state.currentPeriod?.id }?.let { change ->
+            item {
+                Card(Modifier.fillMaxWidth().testTag("revert_currency_change")) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Este periodo cambió de ${change.from.name} a ${change.to.name}",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        val blocked = change.revertBlockedBy(state.pendingCurrencyChange?.boundary)
+                        Text(
+                            if (!blocked) {
+                                "Si no querías el cambio, vuelve a ${change.from.name} sin esperar al próximo periodo."
+                            } else {
+                                "Cancela el cambio pendiente en Moneda y conversión para volver a ${change.from.name}."
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        OutlinedButton(
+                            onClick = { confirmingCurrencyRevert = true },
+                            enabled = !blocked,
+                        ) { Text("Volver a ${change.from.name} en este periodo") }
                     }
                 }
             }
@@ -188,6 +218,15 @@ internal fun PocketsScreen(
                         PocketSummaryMetric("Asignado", money(allocatedMinor), Modifier.weight(1f))
                         VerticalDivider(Modifier.height(64.dp))
                         PocketSummaryMetric("Disponible", money(availableMinor), Modifier.weight(1f))
+                    }
+                    // Availability is budget plus rollover less net spend; say so, or rollover reads as unexplained money.
+                    if (rolloverMinor != 0L || netSpendMinor != 0L) {
+                        Text(
+                            availabilityBreakdown(rolloverMinor, netSpendMinor, ::money),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center,
+                        )
                     }
                     Text(
                         "${money(unallocatedForPeriodMinor)} sin asignar",
@@ -375,6 +414,17 @@ internal fun PocketsScreen(
     if (reviewingSuggestions && selectedPeriod != null) {
         SuggestedBudgetsDialog(state, selectedPeriod.id, ledger, selectedCurrency) { reviewingSuggestions = false }
     }
+    val currentPeriodId = state.currentPeriod?.id
+    if (confirmingCurrencyRevert && revertibleChange != null && currentPeriodId != null) {
+        RevertCurrencyDialog(
+            change = revertibleChange,
+            onConfirm = {
+                confirmingCurrencyRevert = false
+                scope.launch { ledger.execute(LedgerCommand.RevertCurrencyChange(currentPeriodId)) }
+            },
+            onDismiss = { confirmingCurrencyRevert = false },
+        )
+    }
 }
 
 /**
@@ -443,6 +493,18 @@ private fun BudgetFit?.description(periods: Int): String? = when (this) {
     BudgetFit.UNDER -> "usó menos de la mitad en los últimos $periods periodos"
     null -> null
 }
+
+/** "Disponible = asignado + SAR 946.50 de rollover − SAR 155.25 gastado", naming only the parts that are not zero. */
+internal fun availabilityBreakdown(rolloverMinor: Long, netSpendMinor: Long, money: (Long) -> String): String =
+    listOfNotNull(
+        "Disponible = asignado",
+        "+ ${money(rolloverMinor)} de rollover".takeIf { rolloverMinor != 0L },
+        when {
+            netSpendMinor > 0L -> "− ${money(netSpendMinor)} gastado"
+            netSpendMinor < 0L -> "+ ${money(Math.negateExact(netSpendMinor))} en reembolsos"
+            else -> null
+        },
+    ).joinToString(" ")
 
 @Composable
 private fun PocketSummaryMetric(label: String, value: String, modifier: Modifier = Modifier) {

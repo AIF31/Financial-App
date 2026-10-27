@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
@@ -36,6 +37,7 @@ internal fun PocketBudgetStatus.presentation(): StatusPresentation = with(Materi
         PocketBudgetStatus.EXHAUSTED -> StatusPresentation("Agotado", Icons.Default.Error, errorContainer, onErrorContainer, error)
         PocketBudgetStatus.AT_RISK -> StatusPresentation("En riesgo", Icons.Default.Warning, tertiaryContainer, onTertiaryContainer, tertiary)
         PocketBudgetStatus.FAST_PACE -> StatusPresentation("Ritmo alto", Icons.Default.Warning, tertiaryContainer, onTertiaryContainer, tertiary)
+        PocketBudgetStatus.EARLY_FAST_PACE -> StatusPresentation("Ritmo por confirmar", Icons.Default.Info, secondaryContainer, onSecondaryContainer, secondary)
         PocketBudgetStatus.UNBUDGETED -> StatusPresentation("Sin presupuesto", Icons.Default.RemoveCircleOutline, surfaceContainerHighest, onSurfaceVariant, outline)
         PocketBudgetStatus.ON_TRACK -> StatusPresentation("En buen ritmo", Icons.Default.CheckCircle, primaryContainer, onPrimaryContainer, primary)
     }

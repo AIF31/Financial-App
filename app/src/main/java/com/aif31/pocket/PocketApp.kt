@@ -53,6 +53,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -181,6 +182,8 @@ fun PocketApp(
     onRequestNotificationPermission: () -> Unit = {},
     notificationPermissionRevision: Int = 0,
     openMovementsRevision: Int = 0,
+    /** The suggestions open in a review form, which automatic recording must leave to the person. */
+    onSuggestionsUnderReviewChange: (Set<String>) -> Unit = {},
     onSuccessfulRestore: () -> Unit = {},
     onRestoreCompleted: (String) -> Unit = {},
     undoWindowMillis: Long = 5_000,
@@ -382,6 +385,10 @@ fun PocketApp(
     }
 
     val backStack = rememberNavBackStack(RootRoute(RootScreen.DASHBOARD))
+    // Includes forms beneath the top one, such as a review interrupted by the new-expense shortcut.
+    val suggestionsUnderReview = backStack.mapNotNullTo(mutableSetOf()) { (it as? MovementRoute)?.suggestionId }
+    LaunchedEffect(suggestionsUnderReview) { onSuggestionsUnderReviewChange(suggestionsUnderReview) }
+    DisposableEffect(Unit) { onDispose { onSuggestionsUnderReviewChange(emptySet()) } }
     val currentRoute = backStack.last()
     val screen = backStack.filterIsInstance<RootRoute>().lastOrNull()?.screen ?: RootScreen.DASHBOARD
     val movementRoute = currentRoute as? MovementRoute

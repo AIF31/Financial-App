@@ -188,7 +188,13 @@ internal fun SpendPaceMetrics(
             )
         }
         insights.projectedSpendMinor?.let {
-            MetricRow("Proyección estimada", money(it), supporting = "Si mantienes el ritmo actual", color = color, supportingColor = supportingColor)
+            // Early in the period the projection stretches a few days over the whole period; say so beside the number.
+            val supporting = if (insights.paceWarmingUp) {
+                "Si mantienes el ritmo de estos pocos días"
+            } else {
+                "Si mantienes el ritmo actual"
+            }
+            MetricRow("Proyección estimada", money(it), supporting = supporting, color = color, supportingColor = supportingColor)
         }
         afterProjectionContent?.invoke()
         Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

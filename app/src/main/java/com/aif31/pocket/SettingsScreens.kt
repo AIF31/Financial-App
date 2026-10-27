@@ -110,6 +110,7 @@ internal fun SettingsScreen(
         preferences = preferences,
         preferencesStore = preferencesStore,
         reminderScheduler = reminderScheduler,
+        exchangeRates = exchangeRates,
         onCreateBackup = onCreateBackup,
         onShareBackup = onShareBackup,
         onCreateCsv = onCreateCsv,
@@ -140,9 +141,8 @@ private fun CurrencySettingsRoute(
     val activationDate = currentPeriod.endExclusive
     val requestedDate = state.currentLocalDate
     val scope = rememberCoroutineScope()
-    var targetCurrency by rememberSaveable(currentCurrency) {
-        mutableStateOf(SupportedCurrency.entries.first { it != currentCurrency })
-    }
+    // Defaults to the current currency, so nothing is quoted or scheduled until the person picks another one.
+    var targetCurrency by rememberSaveable(currentCurrency) { mutableStateOf(currentCurrency) }
     var quoteState by remember { mutableStateOf<CurrencyQuoteState>(CurrencyQuoteState.Idle) }
     var refreshGeneration by rememberSaveable { mutableIntStateOf(0) }
     var quoteCancelled by rememberSaveable { mutableStateOf(false) }
@@ -196,7 +196,8 @@ private fun CurrencySettingsRoute(
         refreshGeneration,
         quoteCancelled,
     ) {
-        if (!preferences.onlineFxEnabled || state.pendingCurrencyChange != null || quoteCancelled) {
+        val target = targetCurrency
+        if (!preferences.onlineFxEnabled || state.pendingCurrencyChange != null || quoteCancelled || target == currentCurrency) {
             quoteState = CurrencyQuoteState.Idle
             return@LaunchedEffect
         }
@@ -211,7 +212,7 @@ private fun CurrencySettingsRoute(
                 repository.quote(
                     requestedDate = requestedDate,
                     base = currentCurrency,
-                    quote = targetCurrency,
+                    quote = target,
                     forceRefresh = refreshGeneration > 0,
                 )
             )
@@ -234,6 +235,7 @@ private fun CurrencySettingsRoute(
                 targetCurrency = targetCurrency,
                 quoteState = quoteState,
                 pendingChange = state.pendingCurrencyChange?.boundary,
+                revertibleChange = state.revertibleCurrencyChange(),
                 fxRateAlert = FxRateAlertUiState(settings = preferences.fxRateAlert, status = fxRateAlertStatus),
             ),
             contentPadding = PaddingValues(16.dp),
@@ -269,6 +271,9 @@ private fun CurrencySettingsRoute(
             onCancelPendingTransition = {
                 scope.launch { ledger.execute(LedgerCommand.CancelCurrencyChange) }
             },
+            onRevertCurrentPeriod = {
+                scope.launch { ledger.execute(LedgerCommand.RevertCurrencyChange(currentPeriod.id)) }
+            },
             onFxRateAlertChange = { settings -> applyFxRateAlert(settings) },
             onRetryFxRateAlert = { applyFxRateAlert(preferences.fxRateAlert, reschedule = true) },
             onRequestNotificationPermission = onRequestNotificationPermission,
@@ -283,6 +288,7 @@ private fun SettingsDetailScreen(
     preferences: AppPreferences,
     preferencesStore: PreferencesStore?,
     reminderScheduler: ReminderScheduler?,
+    exchangeRates: ExchangeRateRepository?,
     onCreateBackup: () -> Unit,
     onShareBackup: () -> Unit,
     onCreateCsv: () -> Unit,
@@ -332,6 +338,13 @@ private fun SettingsDetailScreen(
     }
     val selectedFundsPeriod = state.periods.firstOrNull { it.id == selectedFundsPeriodId }
     val selectedFundsCurrency = selectedFundsPeriod?.accountingCurrency ?: SupportedCurrency.SAR
+    var fundsShownIn by rememberSaveable(selectedFundsPeriodId) { mutableStateOf(selectedFundsCurrency) }
+    LaunchedEffect(selectedFundsCurrency) {
+        if (fundsShownIn != selectedFundsCurrency) {
+            fundsShownIn = selectedFundsCurrency
+            selectedFundsPeriod?.let { funds = minorNumber(it.newFundsMinor) }
+        }
+    }
     val focusManager = LocalFocusManager.current
     fun resetTemplateForm() {
         editingTemplate = null
@@ -369,6 +382,23 @@ private fun SettingsDetailScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Text("Moneda del periodo", style = MaterialTheme.typography.titleSmall)
+                        if (selectedFundsPeriod != null && state.canChangeCurrencyOf(selectedFundsPeriod)) {
+                            PeriodCurrencyChooser(
+                                state = state,
+                                period = selectedFundsPeriod,
+                                ledger = ledger,
+                                exchangeRates = exchangeRates,
+                                onlineFxEnabled = preferences.onlineFxEnabled,
+                                onMessage = { message = it },
+                            )
+                        } else {
+                            Text(
+                                "${selectedFundsCurrency.name} · Solo el periodo actual puede cambiar de moneda.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         OutlinedTextField(
                             funds,
                             { funds = it },
@@ -379,13 +409,15 @@ private fun SettingsDetailScreen(
                             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                             modifier = Modifier.fillMaxWidth().testTag("period_funds"),
                         )
-                        Button(onClick = {
+                        // The text belongs to the currency it was last shown in; Save waits until it follows a change.
+                        Button(enabled = fundsShownIn == selectedFundsCurrency, onClick = {
+                            val currency = fundsShownIn
                             scope.launch {
-                                val value = runCatching { Money.parse(funds, selectedFundsCurrency.name).minor }.getOrNull() ?: run {
+                                val value = runCatching { Money.parse(funds, currency.name).minor }.getOrNull() ?: run {
                                     message = "Escribe fondos válidos"
                                     return@launch
                                 }
-                                when (val result = ledger.execute(LedgerCommand.UpdatePeriodFunds(selectedFundsPeriodId ?: return@launch, value))) {
+                                when (val result = ledger.execute(LedgerCommand.UpdatePeriodFunds(selectedFundsPeriodId ?: return@launch, value, currency))) {
                                     LedgerResult.Success -> message = "Fondos guardados"
                                     is LedgerResult.Rejected -> message = result.message
                                     is LedgerResult.Deleted -> Unit

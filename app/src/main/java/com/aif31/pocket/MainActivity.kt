@@ -21,6 +21,7 @@ import com.aif31.pocket.data.LedgerCommand
 import com.aif31.pocket.data.LedgerResult
 import com.aif31.pocket.data.PortableSettings
 import com.aif31.pocket.expense.EstimatedConversionReconciler
+import com.aif31.pocket.notifications.NotificationAutoRecorder
 import com.aif31.pocket.ui.PocketTheme
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -30,13 +31,19 @@ import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private val recovery by viewModels<RecoveryViewModel>()
     private lateinit var dateCoordinator: ForegroundDateCoordinator
+    private val suggestionsUnderReview = MutableStateFlow<Set<String>>(emptySet())
     private var notificationPermissionRevision by mutableIntStateOf(0)
     /** Count of "new expense" launches; PocketApp opens quick entry once per increment. */
     private var newExpenseRequest by mutableIntStateOf(0)
@@ -108,6 +115,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch { confirmEstimatedConversions() }
+                launch { recordPendingSuggestions() }
                 while (true) {
                     delay(dateCoordinator.refresh())
                 }
@@ -127,6 +135,7 @@ class MainActivity : ComponentActivity() {
                     reminderScheduler = (application as PocketApplication).reminderScheduler,
                     fxRateAlertScheduler = (application as PocketApplication).fxRateAlertScheduler,
                     newExpenseRequest = newExpenseRequest,
+                    onSuggestionsUnderReviewChange = { suggestionsUnderReview.value = it },
                     restoreCandidate = recovery.restoreCandidate,
                     onRestoreCandidateHandled = recovery::clearRestoreCandidate,
                     operationMessage = recovery.operationMessage,
@@ -183,6 +192,33 @@ class MainActivity : ComponentActivity() {
         } catch (error: Exception) {
             if (error is CancellationException) throw error
         }
+    }
+
+    /**
+     * Retries the review inbox while Pocket is visible. A payment that arrived from a new merchant, or in another
+     * currency than its period, is recorded as soon as the ledger would accept it automatically. Suggestions open
+     * in a review form are left to the person.
+     */
+    private suspend fun recordPendingSuggestions() {
+        val application = application as PocketApplication
+        val recorder = NotificationAutoRecorder(application.ledger, application.budgetZone, catchUpPeriods = { catchUpPeriods() })
+        combine(
+            application.preferences.state.map { it.notificationAutoRecord }.distinctUntilChanged(),
+            // Everything auto-recording reads; recording one suggestion changes it and retries the rest.
+            application.ledger.state.map { state ->
+                listOf(state.movementSuggestions, state.movements, state.periods, state.pocketCatalog)
+            }.distinctUntilChanged(),
+            suggestionsUnderReview,
+        ) { enabled, inputs, underReview -> (enabled && inputs.first().isNotEmpty()) to underReview }
+            // A newer emission, such as auto-recording turned off, cancels the pass in progress.
+            .collectLatest { (retry, underReview) ->
+                if (!retry) return@collectLatest
+                try {
+                    recorder.recordPending(skip = underReview)
+                } catch (error: Exception) {
+                    if (error is CancellationException) throw error
+                }
+            }
     }
 
     internal fun launchDocumentOperation(operation: DocumentOperation) {

@@ -6,8 +6,12 @@ import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.domain.sumMoneyExact
 import java.time.LocalDate
 
-/** How the period's spending relates to its plan; the dashboard's status line reads this. */
-enum class SpendPaceStatus { NO_FUNDS, OVERSPENT, OVER_PACE, ON_PLAN }
+/**
+ * How the period's spending relates to its plan; the dashboard's status line reads this. [EARLY_OVER_PACE] is a pace
+ * that would exceed the funds by the period's end but not by its middle, before
+ * [PeriodInsights.FORECAST_WARMUP_DAYS] have elapsed: too early to warn, too fast to call on plan.
+ */
+enum class SpendPaceStatus { NO_FUNDS, OVERSPENT, OVER_PACE, EARLY_OVER_PACE, ON_PLAN }
 
 /**
  * The period's Movements that count toward its totals: those whose Pocket is in the period's snapshot, matching the
@@ -52,6 +56,7 @@ data class PeriodInsights(
     /** Net spend as a share of Pocket budgets plus rollover, the same base availability is measured from. */
     val budgetUsedPercent: Int?,
     val periodElapsedPercent: Int,
+    /** [SpendPaceStatus.OVER_PACE] reads the pace only up to the same horizon as [runOutDateByPocket]. */
     val paceStatus: SpendPaceStatus,
     /** Net spending accumulated at the end of each elapsed day, starting with the period's first day. */
     val cumulativeNetSpendByDayMinor: List<Long>,
@@ -62,11 +67,20 @@ data class PeriodInsights(
     /**
      * The day each Pocket's availability runs out at its pace through today, for Pockets that would run out before
      * the period ends. Only Pockets spent on at least two days are forecast, so a single large expense such as rent
-     * is not extrapolated. Empty for closed periods.
+     * is not extrapolated. Until [FORECAST_WARMUP_DAYS] have elapsed, only a run-out before the middle of the period
+     * is forecast. Empty for closed periods.
      */
     val runOutDateByPocket: Map<String, LocalDate>,
+    /**
+     * Pockets whose pace through today would run out before the period ends, but not as soon as [runOutDateByPocket]
+     * looks while [paceWarmingUp]: too early to warn about. Always empty once the warm-up ends.
+     */
+    val earlyRunOutPocketIds: Set<String>,
     val pockets: List<PocketPeriodSummary>,
 ) {
+    /** Whether pace warnings still look only to the middle of the period: see [FORECAST_WARMUP_DAYS]. */
+    val paceWarmingUp: Boolean get() = isWarmingUp(inProgress, elapsedDays)
+
     val accountingCurrency: SupportedCurrency get() = period.accountingCurrency
 
     /** Pocket budgets plus received rollover: what the period's Pocket availability is measured from. */
@@ -82,6 +96,15 @@ data class PeriodInsights(
     }
 
     companion object {
+        /**
+         * Elapsed days after which pace is trusted over the whole period. Before then, a few ordinary days stretched
+         * over a month read as a warning, so pace warnings look only as far as the middle of the period: spending
+         * fast enough to run out by then still warns.
+         */
+        const val FORECAST_WARMUP_DAYS = 7
+
+        private fun isWarmingUp(inProgress: Boolean, elapsedDays: Int) = inProgress && elapsedDays < FORECAST_WARMUP_DAYS
+
         fun of(state: LedgerState, periodId: String): PeriodInsights? {
             val period = state.periods.firstOrNull { it.id == periodId } ?: return null
             val today = state.currentLocalDate
@@ -112,11 +135,22 @@ data class PeriodInsights(
             // Pace is what has been spent through today. Movements dated later are already-committed spending: they
             // count once in the projection and in period totals, but are not extrapolated or averaged over past days.
             val netSpendThroughToday = Math.subtractExact(netSpend, netSpendAfterToday)
-            val projected = if (inProgress) {
-                Math.addExact(PocketMath.project(netSpendThroughToday, elapsedDays, totalDays).amountMinor, netSpendAfterToday)
+            fun projectedThrough(days: Int) =
+                Math.addExact(PocketMath.project(netSpendThroughToday, elapsedDays, days).amountMinor, netSpendAfterToday)
+            val projected = if (inProgress) projectedThrough(totalDays) else null
+            val warningHorizonDays = if (isWarmingUp(inProgress, elapsedDays)) {
+                maxOf(elapsedDays, totalDays / 2)
             } else {
-                null
+                totalDays
             }
+            val projectedForWarning = if (inProgress) projectedThrough(warningHorizonDays) else null
+            val allRunOutDates = if (inProgress) {
+                runOutDates(pockets, periodMovements.filter { it.localDate <= today }, today, elapsedDays, period.endExclusive)
+            } else {
+                emptyMap()
+            }
+            val horizonEnd = period.start.plusDays(warningHorizonDays.toLong())
+            val runOutDateByPocket = allRunOutDates.filterValues { it < horizonEnd }
             return PeriodInsights(
                 period = period,
                 inProgress = inProgress,
@@ -141,17 +175,15 @@ data class PeriodInsights(
                 paceStatus = when {
                     availability < 0L -> SpendPaceStatus.OVERSPENT
                     periodFunds <= 0L -> SpendPaceStatus.NO_FUNDS
-                    (projected ?: netSpend) > periodFunds -> SpendPaceStatus.OVER_PACE
+                    (projectedForWarning ?: netSpend) > periodFunds -> SpendPaceStatus.OVER_PACE
+                    (projected ?: netSpend) > periodFunds -> SpendPaceStatus.EARLY_OVER_PACE
                     else -> SpendPaceStatus.ON_PLAN
                 },
                 cumulativeNetSpendByDayMinor = cumulativeByDay(period, elapsedDays, periodMovements),
                 netSpendAfterTodayMinor = netSpendAfterToday,
                 netSpendAfterTodayByPocketMinor = netSpendAfterTodayByPocket,
-                runOutDateByPocket = if (inProgress) {
-                    runOutDates(pockets, periodMovements.filter { it.localDate <= today }, today, elapsedDays, period.endExclusive)
-                } else {
-                    emptyMap()
-                },
+                runOutDateByPocket = runOutDateByPocket,
+                earlyRunOutPocketIds = allRunOutDates.keys - runOutDateByPocket.keys,
                 pockets = pockets,
             )
         }

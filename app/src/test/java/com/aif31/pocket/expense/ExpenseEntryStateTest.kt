@@ -33,6 +33,24 @@ class ExpenseEntryStateTest {
         assertEquals(ConversionStatus.ESTIMATED, result.status)
     }
 
+    @Test fun unchanged_provider_estimate_is_requoted_online_and_kept_when_the_quote_fails() = runTest {
+        val final = object : ExchangeRateRepository {
+            override suspend fun quote(requestedDate: LocalDate, base: SupportedCurrency, quote: SupportedCurrency, forceRefresh: Boolean) =
+                FxQuote(requestedDate, requestedDate, base, quote, "3.75", "SAMA_PARITY")
+        }
+        val confirmed = ExpenseEntryStateHolder(final, saved, SupportedCurrency.SAR).resolve(request, true)
+        assertEquals(375L, confirmed.accountingAmountMinor)
+        assertEquals(ConversionStatus.CONFIRMED, confirmed.status)
+
+        val failing = object : ExchangeRateRepository {
+            override suspend fun quote(requestedDate: LocalDate, base: SupportedCurrency, quote: SupportedCurrency, forceRefresh: Boolean): FxQuote =
+                throw QuoteFailure.Unavailable()
+        }
+        val kept = ExpenseEntryStateHolder(failing, saved, SupportedCurrency.SAR).resolve(request, true)
+        assertEquals(401L, kept.accountingAmountMinor)
+        assertEquals(ConversionStatus.ESTIMATED, kept.status)
+    }
+
     @Test fun unchanged_legacy_edit_keeps_missing_provenance_and_stored_amount() = runTest {
         val legacy = saved.copy(rate = null, conversionEffectiveDate = null, conversionSource = null)
         val result = ExpenseEntryStateHolder(null, legacy, SupportedCurrency.SAR).resolve(request, false)

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -30,12 +31,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.CurrencyBoundary
+import com.aif31.pocket.data.LedgerState
 import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.fx.FxQuote
 import com.aif31.pocket.settings.FxRateAlertFrequency
 import com.aif31.pocket.settings.FxRateAlertSettings
 import com.aif31.pocket.settings.ReminderStatus
 import com.aif31.pocket.ui.ChoiceOption
+import com.aif31.pocket.ui.MoneyText
 import com.aif31.pocket.ui.SegmentedChoice
 import com.aif31.pocket.ui.SingleChoiceChips
 import com.aif31.pocket.ui.TimeOfDayPickerDialog
@@ -58,6 +61,8 @@ internal data class CurrencySettingsUiState(
     val targetCurrency: SupportedCurrency? = null,
     val quoteState: CurrencyQuoteState = CurrencyQuoteState.Idle,
     val pendingChange: CurrencyBoundary? = null,
+    /** The change that opened the current period, while that period is still the latest one. */
+    val revertibleChange: CurrencyBoundary? = null,
     val fxRateAlert: FxRateAlertUiState = FxRateAlertUiState(),
 )
 
@@ -65,6 +70,31 @@ internal data class FxRateAlertUiState(
     val settings: FxRateAlertSettings = FxRateAlertSettings(),
     val status: ReminderStatus = ReminderStatus.Off,
 )
+
+/** The change that opened the current period, while that period is still the latest one and can be reverted. */
+internal fun LedgerState.revertibleCurrencyChange(): CurrencyBoundary? =
+    currentPeriod?.takeIf { it == periods.maxByOrNull { period -> period.start } }?.priorCurrencyBoundary
+
+/** A pending change to a third currency blocks a reversal; one back to [CurrencyBoundary.from] is replaced by it. */
+internal fun CurrencyBoundary.revertBlockedBy(pending: CurrencyBoundary?): Boolean = pending != null && pending.to != from
+
+/** Confirms a currency change reversal, naming what returns to the prior currency and what becomes an estimate. */
+@Composable
+internal fun RevertCurrencyDialog(change: CurrencyBoundary, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("¿Volver a ${change.from.name} en este periodo?") },
+        text = {
+            Text(
+                "Los fondos, los presupuestos y el rollover vuelven a ${change.from.name}. Los gastos registrados " +
+                    "en ${change.from.name} recuperan su importe; los de otras monedas quedan estimados hasta " +
+                    "confirmar el tipo de cambio de su fecha.",
+            )
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Volver a ${change.from.name}") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
+}
 
 @Composable
 internal fun CurrencySettingsContent(
@@ -77,10 +107,40 @@ internal fun CurrencySettingsContent(
     onCancelQuote: () -> Unit = {},
     onConfirmTransition: () -> Unit = {},
     onCancelPendingTransition: () -> Unit = {},
+    onRevertCurrentPeriod: () -> Unit = {},
     onFxRateAlertChange: (FxRateAlertSettings) -> Unit = {},
     onRetryFxRateAlert: () -> Unit = {},
     onRequestNotificationPermission: () -> Unit = {},
 ) {
+    var confirmingTransition by rememberSaveable { mutableStateOf(false) }
+    var confirmingRevert by rememberSaveable { mutableStateOf(false) }
+    val readyQuote = (state.quoteState as? CurrencyQuoteState.Ready)?.quote
+    if (confirmingTransition && readyQuote != null) {
+        AlertDialog(
+            onDismissRequest = { confirmingTransition = false },
+            title = { Text("¿Cambiar a ${readyQuote.quote.name}?") },
+            text = {
+                Text(
+                    "Desde el próximo periodo, los fondos, los presupuestos y los gastos se contarán en " +
+                        "${readyQuote.quote.name}. Los importes se convertirán a " +
+                        "${MoneyText.rate(readyQuote.base, readyQuote.quote, readyQuote.rate)}.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmingTransition = false; onConfirmTransition() }) {
+                    Text("Cambiar a ${readyQuote.quote.name}")
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmingTransition = false }) { Text("Cancelar") } },
+        )
+    }
+    state.revertibleChange?.takeIf { confirmingRevert }?.let { change ->
+        RevertCurrencyDialog(
+            change = change,
+            onConfirm = { confirmingRevert = false; onRevertCurrentPeriod() },
+            onDismiss = { confirmingRevert = false },
+        )
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize().testTag("currency_settings_list"),
         contentPadding = contentPadding,
@@ -88,6 +148,30 @@ internal fun CurrencySettingsContent(
     ) {
         item {
             Text("Moneda contable actual: ${state.currentCurrency.name}", style = MaterialTheme.typography.titleMedium)
+        }
+        state.revertibleChange?.let { change ->
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "Este periodo cambió de ${change.from.name} a ${change.to.name}",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text("Desde ${change.effectiveDate} · ${MoneyText.rate(change.from, change.to, change.rate)}")
+                        val blocked = change.revertBlockedBy(state.pendingChange)
+                        if (blocked) {
+                            Text(
+                                "Cancela el cambio pendiente para volver a ${change.from.name}.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = { confirmingRevert = true },
+                            enabled = !blocked,
+                        ) { Text("Volver a ${change.from.name} en este periodo") }
+                    }
+                }
+            }
         }
         item {
             Row(
@@ -124,7 +208,7 @@ internal fun CurrencySettingsContent(
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("Cambio pendiente: ${pending.to.name}", style = MaterialTheme.typography.titleMedium)
                         Text("Se aplicará al próximo periodo desde ${pending.effectiveDate}")
-                        Text("1 ${pending.from.name} = ${pending.rate} ${pending.to.name}")
+                        Text(MoneyText.rate(pending.from, pending.to, pending.rate))
                         Text("Fuente: ${pending.source}")
                         Text("Cotización efectiva: ${pending.quoteEffectiveDate ?: "No registrada"}")
                         OutlinedButton(onClick = onCancelPendingTransition) { Text("Cancelar cambio pendiente") }
@@ -133,41 +217,47 @@ internal fun CurrencySettingsContent(
             }
         }
         if (state.onlineFxEnabled && state.pendingChange == null) {
+            // The current currency is the default and means "no change"; only another currency needs a quote.
+            val nextCurrency = state.targetCurrency ?: state.currentCurrency
             item {
                 Text("Moneda del próximo periodo", style = MaterialTheme.typography.titleMedium)
                 SingleChoiceChips(
-                    options = SupportedCurrency.entries.filterNot { it == state.currentCurrency }.map { ChoiceOption<SupportedCurrency?>(it, it.name) },
-                    selected = state.targetCurrency,
-                    onSelect = { it?.let(onTargetCurrencyChange) },
+                    options = SupportedCurrency.entries.map { ChoiceOption(it, it.name, "next_period_currency_${it.name}") },
+                    selected = nextCurrency,
+                    onSelect = onTargetCurrencyChange,
                 )
             }
             item {
-                when (val quoteState = state.quoteState) {
-                    CurrencyQuoteState.Idle -> Text("Selecciona la moneda del próximo periodo")
-                    CurrencyQuoteState.Loading -> {
-                        Text("Consultando tipo de cambio…")
-                        OutlinedButton(onClick = onCancelQuote) { Text("Cancelar consulta") }
+                if (nextCurrency == state.currentCurrency) {
+                    Text("El próximo periodo seguirá en ${state.currentCurrency.name}")
+                } else {
+                    when (val quoteState = state.quoteState) {
+                        CurrencyQuoteState.Idle -> Text("Selecciona la moneda del próximo periodo")
+                        CurrencyQuoteState.Loading -> {
+                            Text("Consultando tipo de cambio…")
+                            OutlinedButton(onClick = onCancelQuote) { Text("Cancelar consulta") }
+                        }
+                        is CurrencyQuoteState.Error -> {
+                            Text(quoteState.message, color = MaterialTheme.colorScheme.error)
+                            OutlinedButton(onClick = onRefreshQuote) { Text("Reintentar") }
+                        }
+                        is CurrencyQuoteState.Ready -> {
+                            Text(
+                                MoneyText.rate(quoteState.quote.base, quoteState.quote.quote, quoteState.quote.rate),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text("Efectiva: ${quoteState.quote.effectiveDate}")
+                            Text("Fuente: ${quoteState.quote.source}")
+                            OutlinedButton(onClick = onRefreshQuote) { Text("Actualizar cotización") }
+                        }
                     }
-                    is CurrencyQuoteState.Error -> {
-                        Text(quoteState.message, color = MaterialTheme.colorScheme.error)
-                        OutlinedButton(onClick = onRefreshQuote) { Text("Reintentar") }
+                    Button(
+                        onClick = { confirmingTransition = true },
+                        enabled = (state.quoteState as? CurrencyQuoteState.Ready)?.quote?.quote == nextCurrency,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Confirmar cambio próximo periodo")
                     }
-                    is CurrencyQuoteState.Ready -> {
-                        Text(
-                            "1 ${quoteState.quote.base.name} = ${quoteState.quote.rate} ${quoteState.quote.quote.name}",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Text("Efectiva: ${quoteState.quote.effectiveDate}")
-                        Text("Fuente: ${quoteState.quote.source}")
-                        OutlinedButton(onClick = onRefreshQuote) { Text("Actualizar cotización") }
-                    }
-                }
-                Button(
-                    onClick = onConfirmTransition,
-                    enabled = state.quoteState is CurrencyQuoteState.Ready,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Confirmar cambio próximo periodo")
                 }
             }
         }

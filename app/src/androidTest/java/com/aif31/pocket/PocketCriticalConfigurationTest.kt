@@ -1,6 +1,7 @@
 package com.aif31.pocket
 
 import android.content.Intent
+import android.view.WindowInsets
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.test.assertIsDisplayed
@@ -21,7 +22,6 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.waitUntilExactlyOneExists
 import androidx.compose.ui.test.waitUntilDoesNotExist
-import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
@@ -77,6 +77,13 @@ class PocketCriticalConfigurationTest {
 
     private fun launch() = ActivityScenario.launch<MainActivity>(Intent(app, MainActivity::class.java))
 
+    // Espresso's closeSoftKeyboard waits for window focus, which the emulator can withhold after `wm size`; the
+    // insets controller hides the keyboard without it.
+    private fun ActivityScenario<MainActivity>.hideKeyboard() {
+        onActivity { it.window.insetsController?.hide(WindowInsets.Type.ime()) }
+        compose.waitForIdle()
+    }
+
     private fun seedLedger() = runBlocking {
         app.ledger.execute(LedgerCommand.Initialize(100_000))
         app.ledger.state.first { !it.needsOnboarding }
@@ -98,16 +105,16 @@ class PocketCriticalConfigurationTest {
         seedLedger()
         shell("settings put system font_scale 1.5")
         shell("wm size 720x1280")
-        launch().use {
+        launch().use { scenario ->
             compose.waitUntilExactlyOneExists(hasText("Ajustes"), 10_000)
             compose.onNodeWithText("Ajustes").performClick()
             compose.onNodeWithText("Periodo y fondos").performScrollTo().performClick()
             compose.onNodeWithTag("period_funds").performTextReplacement("1.2.3")
-            closeSoftKeyboard()
+            scenario.hideKeyboard()
             compose.onNodeWithText("Guardar fondos").performScrollTo().performClick()
             compose.onNodeWithText("Escribe fondos válidos").performScrollTo().assertIsDisplayed()
             compose.onNodeWithTag("period_funds").performTextReplacement("1200.00")
-            closeSoftKeyboard()
+            scenario.hideKeyboard()
             compose.onNodeWithText("Guardar fondos").performScrollTo().performClick()
             compose.waitUntil(10_000) { runBlocking { app.ledger.state.first().newFundsMinor == 120_000L } }
             compose.onNodeWithText("Crear periodo siguiente").performScrollTo().assertIsDisplayed()
@@ -119,7 +126,7 @@ class PocketCriticalConfigurationTest {
             compose.onNodeWithText("Guardar Pocket").assertIsDisplayed().performClick()
             compose.onNodeWithText("Escribe un nombre para el Pocket").performScrollTo().assertIsDisplayed()
             compose.onNodeWithTag("pocket_name").performTextInput("Vacaciones")
-            closeSoftKeyboard()
+            scenario.hideKeyboard()
             compose.onNodeWithText("Aplicar rollover").performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("Guardar Pocket").assertIsDisplayed().performClick()
             compose.waitUntil(10_000) { runBlocking { app.ledger.state.first().pockets.any { it.pocket.name == "Vacaciones" } } }
@@ -127,14 +134,14 @@ class PocketCriticalConfigurationTest {
             compose.onNodeWithTag("pockets_list").performScrollToNode(hasTestTag("pocket_Supermercado"))
             compose.onNodeWithTag("pocket_Supermercado").performClick()
             compose.onNodeWithTag("allocation_amount").performTextReplacement("50.00")
-            closeSoftKeyboard()
+            scenario.hideKeyboard()
             compose.onNodeWithText("Guardar presupuesto").assertIsDisplayed().performClick()
             compose.waitUntil(10_000) { runBlocking { app.ledger.state.first().pockets.first { it.pocket.name == "Supermercado" }.budgetMinor == 5_000L } }
 
             compose.onNodeWithText("Inicio").performClick()
             compose.onNodeWithTag("contextual_add").performClick()
             compose.onNodeWithTag("movement_amount").performTextInput("8.25")
-            closeSoftKeyboard()
+            scenario.hideKeyboard()
             compose.onNodeWithTag("movement_pocket_Supermercado").performScrollTo().performClick()
             compose.onNodeWithTag("movement_save").assertIsDisplayed().performClick()
             compose.waitUntil(10_000) { runBlocking { app.ledger.state.first().movements.size == 1 } }
@@ -196,7 +203,7 @@ class PocketCriticalConfigurationTest {
             compose.waitUntilExactlyOneExists(hasTestTag("contextual_add"), 10_000)
             compose.onNodeWithTag("contextual_add").performClick()
             compose.onNodeWithTag("movement_amount").performTextInput("12.50")
-            closeSoftKeyboard()
+            scenario.hideKeyboard()
             compose.onNodeWithTag("movement_pocket_Supermercado").performClick()
             compose.onNodeWithTag("movement_pocket_Supermercado").assertIsSelected()
             compose.waitUntil(10_000) {
@@ -228,7 +235,7 @@ class PocketCriticalConfigurationTest {
         launch().use { scenario ->
             compose.waitUntilExactlyOneExists(hasTestTag("contextual_add"), 10_000)
             compose.onNodeWithTag("contextual_add").performClick()
-            closeSoftKeyboard()
+            scenario.hideKeyboard()
             compose.onNodeWithTag("movement_pocket_Supermercado").performClick()
             compose.onNodeWithTag("movement_amount").performTextInput("8.25")
             compose.waitUntil(10_000) {

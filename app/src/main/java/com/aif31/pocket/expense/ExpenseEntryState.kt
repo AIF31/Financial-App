@@ -6,6 +6,7 @@ import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.fx.ExchangeRateRepository
 import com.aif31.pocket.fx.QuoteFailure
 import java.time.LocalDate
+import kotlinx.coroutines.CancellationException
 
 internal data class ExpenseRequest(
     val date: LocalDate,
@@ -41,17 +42,30 @@ internal class ExpenseEntryStateHolder(
             request.date == initial.localDate && request.inputCurrency.name == initial.originalCurrencyCode &&
             request.inputAmountMinor == (initial.originalAmountMinor ?: initial.accountingAmountMinor)
         ) {
-            return ExpenseConversion(
+            val stored = ExpenseConversion(
                 initial.accountingAmountMinor, initial.rate, initial.conversionEffectiveDate,
                 initial.conversionSource, initial.conversionStatus,
             )
+            // A provider estimate is quoted again so saving it can confirm it; failing that, it stays as stored.
+            val providerEstimate = initial.conversionStatus == ConversionStatus.ESTIMATED && initial.conversionSource != null
+            if (!providerEstimate || !onlineFxEnabled || repository == null) return stored
+            return try {
+                quote(request, repository)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                stored
+            }
         }
         if (request.inputCurrency == request.accountingCurrency) {
             // Rate 1 is implicit in the ledger's canonical same-currency representation.
             return ExpenseConversion(request.inputAmountMinor)
         }
         if (!onlineFxEnabled) throw QuoteFailure.ConsentRequired()
-        val provider = repository ?: throw QuoteFailure.ConfigurationUnavailable()
+        return quote(request, repository ?: throw QuoteFailure.ConfigurationUnavailable())
+    }
+
+    private suspend fun quote(request: ExpenseRequest, provider: ExchangeRateRepository): ExpenseConversion {
         val quote = provider.quote(request.date, request.inputCurrency, request.accountingCurrency)
         if (quote.base != request.inputCurrency || quote.quote != request.accountingCurrency || quote.requestedDate != request.date) {
             throw QuoteFailure.Unavailable()
