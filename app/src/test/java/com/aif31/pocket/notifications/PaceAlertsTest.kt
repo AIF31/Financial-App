@@ -9,6 +9,7 @@ import com.aif31.pocket.data.Period
 import com.aif31.pocket.data.Pocket
 import com.aif31.pocket.data.PocketIconKey
 import com.aif31.pocket.data.PocketPeriodSummary
+import com.aif31.pocket.domain.PocketMath
 import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.settings.AppPreferences
 import com.aif31.pocket.settings.PreferencesStore
@@ -31,47 +32,52 @@ class PaceAlertsTest {
     @Test
     fun each_pocket_reports_its_highest_level() {
         val insights = insights(
-            summary(market, budget = 10_000, expense = 8_500).copy(atRisk = true),
-            summary(food, budget = 10_000, expense = 10_500).copy(exhausted = true),
-            summary(gifts, budget = 10_000, expense = 6_000),
-            summary(travel, budget = 10_000, expense = 100),
-            movements = runOutMovements(gifts),
+            summary(market, budget = 100_000, expense = 85_000),
+            summary(food, budget = 100_000, expense = 105_000),
+            summary(gifts, budget = 100_000, expense = 85_000),
+            summary(travel, budget = 100_000, expense = 60_000),
+            movements = runOutMovements(gifts) + runOutMovements(travel, total = 60_000),
         )
 
-        assertEquals(
-            mapOf(market.id to PaceAlertLevel.AT_RISK, food.id to PaceAlertLevel.EXHAUSTED, gifts.id to PaceAlertLevel.RUN_OUT),
-            PaceAlerts.levels(insights),
-        )
+        // Supermercado has consumed 85% but no pace to judge, and Viajes is fast but has 40% left: neither is at risk.
+        assertEquals(mapOf(food.id to PaceAlertLevel.EXHAUSTED, gifts.id to PaceAlertLevel.AT_RISK), PaceAlerts.levels(insights))
     }
 
     @Test
-    fun a_pocket_funded_only_by_rollover_alerts_when_it_will_run_out() {
-        // SAR 100.00 of rollover and no budget of its own; SAR 60.00 spent over two days.
-        val rolloverOnly = summary(gifts, budget = 10_000, expense = 6_000).copy(budgetMinor = 0, rolloverMinor = 10_000)
+    fun a_pocket_funded_only_by_rollover_alerts_when_it_is_at_risk() {
+        val rolloverOnly = summary(gifts, budget = 0, rollover = 100_000, expense = 85_000)
 
-        assertEquals(mapOf(gifts.id to PaceAlertLevel.RUN_OUT), PaceAlerts.levels(insights(rolloverOnly, movements = runOutMovements(gifts))))
+        assertEquals(mapOf(gifts.id to PaceAlertLevel.AT_RISK), PaceAlerts.levels(insights(rolloverOnly, movements = runOutMovements(gifts))))
+    }
+
+    @Test
+    fun a_small_budget_does_not_alert_before_the_middle_of_the_period() {
+        // SAR 150.00 is below the SAR 200.00 small-budget limit, and day 9 of 28 is before the middle of the period.
+        val small = summary(gifts, budget = 15_000, expense = 12_750)
+
+        assertTrue(PaceAlerts.levels(insights(small, movements = runOutMovements(gifts, total = 12_750))).isEmpty())
     }
 
     @Test
     fun alerts_are_due_once_per_level_and_again_only_when_a_pocket_gets_worse() {
-        val runOut = insights(summary(gifts, budget = 10_000, expense = 6_000), movements = runOutMovements(gifts))
-        val atRisk = insights(summary(gifts, budget = 10_000, expense = 8_500).copy(atRisk = true), movements = runOutMovements(gifts))
+        val atRisk = insights(summary(gifts, budget = 100_000, expense = 85_000), movements = runOutMovements(gifts))
+        val exhausted = insights(summary(gifts, budget = 100_000, expense = 105_000), movements = runOutMovements(gifts))
 
-        val first = PaceAlerts.due(runOut, emptySet())
-        val afterFirst = PaceAlerts.seen(runOut, emptySet())
-        val repeated = PaceAlerts.due(runOut, afterFirst)
-        val escalated = PaceAlerts.due(atRisk, afterFirst)
-        val afterEscalation = PaceAlerts.seen(atRisk, afterFirst)
+        val first = PaceAlerts.due(atRisk, emptySet())
+        val afterFirst = PaceAlerts.seen(atRisk, emptySet())
+        val repeated = PaceAlerts.due(atRisk, afterFirst)
+        val escalated = PaceAlerts.due(exhausted, afterFirst)
+        val afterEscalation = PaceAlerts.seen(exhausted, afterFirst)
 
-        assertEquals(listOf(PaceAlertLevel.RUN_OUT), first.map { it.level })
+        assertEquals(listOf(PaceAlertLevel.AT_RISK), first.map { it.level })
         assertTrue(repeated.isEmpty())
-        assertEquals(listOf(PaceAlertLevel.AT_RISK), escalated.map { it.level })
-        assertTrue(PaceAlerts.due(runOut, afterEscalation).isEmpty())
+        assertEquals(listOf(PaceAlertLevel.EXHAUSTED), escalated.map { it.level })
+        assertTrue(PaceAlerts.due(atRisk, afterEscalation).isEmpty())
     }
 
     @Test
     fun a_pocket_jumping_straight_to_exhausted_gets_one_alert_and_old_periods_are_forgotten() {
-        val exhausted = insights(summary(food, budget = 10_000, expense = 10_500).copy(exhausted = true))
+        val exhausted = insights(summary(food, budget = 10_000, expense = 10_500))
 
         val due = PaceAlerts.due(exhausted, setOf("${february.id}/${food.id}/EXHAUSTED"))
         val seen = PaceAlerts.seen(exhausted, setOf("${february.id}/${food.id}/EXHAUSTED"))
@@ -81,19 +87,15 @@ class PaceAlertsTest {
     }
 
     @Test
-    fun alert_copy_names_the_pocket_and_what_is_left() {
-        val atRisk = insights(summary(market, budget = 10_000, expense = 8_500).copy(atRisk = true))
-        val runOut = insights(summary(gifts, budget = 10_000, expense = 6_000), movements = runOutMovements(gifts))
-        val exhausted = insights(summary(food, budget = 10_000, expense = 10_500).copy(exhausted = true))
+    fun alert_copy_names_the_pocket_when_it_runs_out_and_what_is_left() {
+        val atRisk = insights(summary(market, budget = 100_000, expense = 85_000), movements = runOutMovements(market))
+        val exhausted = insights(summary(food, budget = 10_000, expense = 10_500))
 
         val risk = PaceAlerts.due(atRisk, emptySet()).single()
-        val pace = PaceAlerts.due(runOut, emptySet()).single()
         val over = PaceAlerts.due(exhausted, emptySet()).single()
 
         assertEquals("Supermercado lleva el 85%", risk.title)
-        assertEquals("Quedan SAR 15.00 de SAR 100.00 en este periodo.", risk.text)
-        assertEquals("Regalos va rápido", pace.title)
-        assertEquals("Al ritmo actual, se agota el 12 mar. Quedan SAR 40.00.", pace.text)
+        assertEquals("Al ritmo actual, se agota el 7 mar. Quedan SAR 150.00 de SAR 1,000.00 en este periodo.", risk.text)
         assertEquals("Restaurantes sin disponible", over.title)
         assertEquals("Vas SAR 5.00 por encima de lo asignado.", over.text)
     }
@@ -103,11 +105,13 @@ class PaceAlertsTest {
         val preferences = FakePreferences()
         val posted = mutableListOf<PaceAlert>()
         val coordinator = PaceAlertCoordinator(preferences) { posted += it }
-        val calm = state(summary(market, budget = 10_000, expense = 8_500).copy(atRisk = true))
-        val seenInApp = state(summary(market, budget = 10_000, expense = 10_500).copy(exhausted = true))
+        val movements = runOutMovements(market) + runOutMovements(food)
+        val calm = state(summary(market, budget = 100_000, expense = 85_000), movements = movements)
+        val seenInApp = state(summary(market, budget = 100_000, expense = 105_000), movements = movements)
         val background = state(
-            summary(market, budget = 10_000, expense = 10_500).copy(exhausted = true),
-            summary(food, budget = 10_000, expense = 8_500).copy(atRisk = true),
+            summary(market, budget = 100_000, expense = 105_000),
+            summary(food, budget = 100_000, expense = 85_000),
+            movements = movements,
         )
 
         coordinator.notifyNew(calm)
@@ -122,7 +126,7 @@ class PaceAlertsTest {
         val preferences = FakePreferences(AppPreferences(paceAlertsEnabled = false, paceAlertsSent = emptySet()))
         val posted = mutableListOf<PaceAlert>()
         val coordinator = PaceAlertCoordinator(preferences) { posted += it }
-        val atRisk = state(summary(market, budget = 10_000, expense = 8_500).copy(atRisk = true))
+        val atRisk = state(summary(market, budget = 100_000, expense = 85_000), movements = runOutMovements(market))
 
         coordinator.notifyNew(atRisk)
         preferences.setPaceAlertsEnabled(true)
@@ -145,10 +149,13 @@ class PaceAlertsTest {
         }
     }
 
-    /** Two spending days of SAR 30.00 by 5 March, so SAR 40.00 of SAR 100.00 runs out on 12 March. */
-    private fun runOutMovements(pocket: Pocket) = listOf(
-        movement("${pocket.id}-a", LocalDate.of(2026, 2, 26), pocket),
-        movement("${pocket.id}-b", LocalDate.of(2026, 3, 3), pocket),
+    /**
+     * [total] spent over two days by 5 March, day 9 of the period. At the default SAR 850.00, SAR 150.00 left of
+     * SAR 1,000.00 lasts one more day at SAR 94.44 a day and runs out on 7 March.
+     */
+    private fun runOutMovements(pocket: Pocket, total: Long = 85_000) = listOf(
+        movement("${pocket.id}-a", LocalDate.of(2026, 2, 26), pocket, total / 2),
+        movement("${pocket.id}-b", LocalDate.of(2026, 3, 3), pocket, total - total / 2),
     )
 
     private fun insights(vararg summaries: PocketPeriodSummary, movements: List<Movement> = emptyList()): PeriodInsights =
@@ -169,21 +176,24 @@ class PaceAlertsTest {
 
     private fun pocket(id: String, name: String) = Pocket(id, name, PocketIconKey.forName(name), 0, false, false)
 
-    private fun summary(pocket: Pocket, budget: Long, expense: Long) = PocketPeriodSummary(
-        pocket = pocket,
-        budgetMinor = budget,
-        rolloverMinor = 0,
-        expenseMinor = expense,
-        netSpendMinor = expense,
-        availabilityMinor = budget - expense,
-        consumedPercent = (expense * 100 / budget).toInt(),
-        atRisk = false,
-        exhausted = false,
-    )
+    private fun summary(pocket: Pocket, budget: Long, expense: Long, rollover: Long = 0): PocketPeriodSummary {
+        val math = PocketMath.summary(budget, rollover, expense, 0)
+        return PocketPeriodSummary(
+            pocket = pocket,
+            budgetMinor = budget,
+            rolloverMinor = rollover,
+            expenseMinor = expense,
+            netSpendMinor = math.netSpendMinor,
+            availabilityMinor = math.availabilityMinor,
+            consumedPercent = math.consumedPercent,
+            atRisk = math.atRisk,
+            exhausted = math.exhausted,
+        )
+    }
 
-    private fun movement(id: String, date: LocalDate, pocket: Pocket) = Movement(
+    private fun movement(id: String, date: LocalDate, pocket: Pocket, amount: Long) = Movement(
         id = id, pocketId = pocket.id, pocketName = pocket.name, periodId = march.id, type = MovementType.EXPENSE,
-        accountingAmountMinor = 3_000, occurredAtUtcMillis = 0, localDate = date, zoneId = "Asia/Riyadh",
+        accountingAmountMinor = amount, occurredAtUtcMillis = 0, localDate = date, zoneId = "Asia/Riyadh",
         merchant = null, note = null, paymentMethodId = null, paymentMethodName = null,
         originalAmountMinor = null, originalCurrencyCode = SupportedCurrency.SAR.name,
         conversionStatus = ConversionStatus.CONFIRMED, rate = null, conversionEffectiveDate = null, conversionSource = null,

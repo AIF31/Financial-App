@@ -23,7 +23,7 @@ import kotlin.math.abs
 import kotlinx.coroutines.flow.first
 
 /** How far a Pocket has gone this period, from the first warning to running out; later levels are worse. */
-internal enum class PaceAlertLevel { RUN_OUT, AT_RISK, EXHAUSTED }
+internal enum class PaceAlertLevel { AT_RISK, EXHAUSTED }
 
 internal data class PaceAlert(val periodId: String, val pocketId: String, val level: PaceAlertLevel, val title: String, val text: String)
 
@@ -39,8 +39,8 @@ internal object PaceAlerts {
                 when (summary.budgetStatusAt(insights)) {
                     PocketBudgetStatus.EXHAUSTED -> PaceAlertLevel.EXHAUSTED
                     PocketBudgetStatus.AT_RISK -> PaceAlertLevel.AT_RISK
-                    PocketBudgetStatus.FAST_PACE -> PaceAlertLevel.RUN_OUT
-                    PocketBudgetStatus.EARLY_FAST_PACE, PocketBudgetStatus.UNBUDGETED, PocketBudgetStatus.ON_TRACK -> null
+                    PocketBudgetStatus.UNCONFIRMED_PACE, PocketBudgetStatus.UNBUDGETED, PocketBudgetStatus.ON_TRACK,
+                    PocketBudgetStatus.SMALL_BUDGET -> null
                 }?.let { summary.pocket.id to it }
             }
             .toMap()
@@ -68,10 +68,8 @@ internal object PaceAlerts {
         // Alerts are only for the period in progress, whose elapsed days end today.
         val today = insights.period.start.plusDays(insights.elapsedDays - 1L)
         val (title, text) = when (level) {
-            PaceAlertLevel.RUN_OUT -> "$name va rápido" to
-                "${runOutText(insights.runOutDateByPocket.getValue(pocketId), today)}. " +
-                "Quedan ${money(summary.availabilityMinor)}."
             PaceAlertLevel.AT_RISK -> "$name lleva el ${summary.consumedPercent}%" to
+                "${runOutText(insights.runOutDateByPocket.getValue(pocketId), today)}. " +
                 "Quedan ${money(summary.availabilityMinor)} de ${money(Math.addExact(summary.budgetMinor, summary.rolloverMinor))} en este periodo."
             PaceAlertLevel.EXHAUSTED -> "$name sin disponible" to
                 if (summary.availabilityMinor < 0) "Vas ${money(abs(summary.availabilityMinor))} por encima de lo asignado."

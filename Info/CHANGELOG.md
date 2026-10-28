@@ -2,6 +2,16 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-10-28
+
+### Pace warnings need 80% consumed and a run-out, and small budgets wait (1.0.14)
+
+- **Ritmo alto** fired on Pockets with most of their budget left: a SAR 1,252.00 Pocket at 15% and a SAR 159.00 Pocket at 50% both warned. A Pocket is now at risk (**En riesgo**, with **Al ritmo actual, se agota…**) only when it has consumed at least 80% *and* its average daily spending would run out before the period ends. **Ritmo alto** (`PocketBudgetStatus.FAST_PACE`) is gone. Reaching 80% with enough left for the pace reads **En buen ritmo**; a pace that would run out with more than 20% left reads **Ritmo por confirmar** (`PocketBudgetStatus.EARLY_FAST_PACE` is renamed `UNCONFIRMED_PACE`, since it no longer applies only early in the period). The run-out forecast now uses the exact daily average instead of one truncated to whole minor units, so a shortfall of a fraction of a halala a day still warns.
+- A Pocket whose budget plus rollover is below SAR 200.00 (USD 53.34, MXN 1,000.00; `PeriodInsights.smallBudgetLimitMinor`) is never at risk before the middle of the period, and shows no status badge until it is at risk or exhausted (`PocketBudgetStatus.SMALL_BUDGET`).
+- Pace alerts follow the same rule. The separate "va rápido" alert (`PaceAlertLevel.RUN_OUT`) is merged into the at-risk alert, which now says when the Pocket runs out. Reassignment is offered to at-risk Pockets; a Pocket at 80% or more, or on a pace that would run out, still cannot give budget. Defined as **At-risk Pocket** and **Small-budget Pocket** in `CONTEXT.md`. No Room migration or backup-format change.
+- Two rounds of GPT-6.1-Sol (high) Standards and Spec reviews. Round one found six issues, all fixed: the glossary named the wrong base for donors, `EARLY_FAST_PACE` no longer meant early, test fixtures duplicated the 80%/100% thresholds, USD 53.33 (SAR 199.99) was not small, and a daily pace truncated to whole minor units could hide a shortfall. The ledger's `atRisk` field keeps its name, with KDoc saying it is only the 80% half of the rule; the MXN limit stays a fixed figure. Round two found nothing.
+- Verification: the gradle-run wrapper passed all 462 host tests, lint and all APK builds. On the `Medium_Phone_API_37.0` emulator, all 27 `connectedDebugAndroidTest` cases passed; 20 had first failed because the emulator was asleep and passed when rerun once it was awake. A fresh-install journey on day 4 of 31 matched the bug report: Restaurantes (SAR 1,252.00, 15%) read **Ritmo por confirmar** with no run-out line, Universidad (SAR 159.00, 50%) showed no badge, and Restaurantes raised to 85% read **En riesgo** with **se agota mañana**, on both the dashboard and Pockets. No crashes were logged. Pace notifications were not exercised on the device.
+
 ## 2026-10-26
 
 ### Period currency reversal, review-inbox retry, and pace and availability fixes (1.0.13)

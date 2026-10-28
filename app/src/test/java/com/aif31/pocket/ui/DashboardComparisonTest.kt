@@ -3,6 +3,7 @@ package com.aif31.pocket.ui
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -70,17 +71,17 @@ class DashboardComparisonTest {
     }
 
     @Test
-    fun a_pocket_running_out_before_the_period_ends_says_when_and_the_analysis_opens_from_the_dashboard() {
-        // Day 9 of a SAR period: SAR 60.00 of SAR 100.00 spent on two days, so SAR 40.00 lasts until 12 March.
+    fun a_pocket_at_risk_says_when_it_runs_out_and_the_analysis_opens_from_the_dashboard() {
+        // Day 9 of a SAR period: SAR 850.00 of SAR 1,000.00 spent on two days, so SAR 150.00 lasts until 7 March.
         val sarMarch = march.copy(accountingCurrency = SupportedCurrency.SAR)
-        val summary = spend(6_000).copy(budgetMinor = 10_000, availabilityMinor = 4_000, consumedPercent = 60)
+        val summary = spend(85_000).copy(budgetMinor = 100_000, availabilityMinor = 15_000, consumedPercent = 85, atRisk = true)
         val state = LedgerState(
             periods = listOf(sarMarch),
             currentPeriod = sarMarch,
             pockets = listOf(summary),
             pocketSummariesByPeriod = mapOf(sarMarch.id to listOf(summary)),
             unallocatedMinorByPeriod = mapOf(sarMarch.id to 0L),
-            movements = listOf(expense("a", sarMarch, LocalDate.of(2026, 2, 26)), expense("b", sarMarch, LocalDate.of(2026, 3, 3))),
+            movements = listOf(expense("a", sarMarch, LocalDate.of(2026, 2, 26), 42_500), expense("b", sarMarch, LocalDate.of(2026, 3, 3), 42_500)),
             elapsedDays = 9,
             totalDays = 28,
             currentLocalDate = LocalDate.of(2026, 3, 5),
@@ -98,17 +99,48 @@ class DashboardComparisonTest {
         }
 
         compose.onNodeWithTag("dashboard_list").performScrollToNode(
-            hasContentDescription("Al ritmo actual, se agota el 12 mar", substring = true)
-                .and(hasContentDescription("Ritmo alto", substring = true)),
+            hasContentDescription("Al ritmo actual, se agota el 7 mar", substring = true)
+                .and(hasContentDescription("En riesgo", substring = true)),
         )
         compose.onNodeWithTag("dashboard_list").performScrollToNode(hasTestTag("open_analysis"))
         compose.onNodeWithTag("open_analysis").performClick()
         assertTrue(analysisOpened)
     }
 
-    private fun expense(id: String, period: Period, date: LocalDate) = Movement(
+    @Test
+    fun a_small_budget_spending_fast_shows_no_status_or_run_out_date_before_the_middle_of_the_period() {
+        // Day 9 of a SAR period: SAR 127.20 of SAR 159.00 spent on two days would run out on 8 March.
+        val sarMarch = march.copy(accountingCurrency = SupportedCurrency.SAR)
+        val summary = spend(12_720).copy(budgetMinor = 15_900, availabilityMinor = 3_180, consumedPercent = 80, atRisk = true)
+        val state = LedgerState(
+            periods = listOf(sarMarch),
+            currentPeriod = sarMarch,
+            pockets = listOf(summary),
+            pocketSummariesByPeriod = mapOf(sarMarch.id to listOf(summary)),
+            unallocatedMinorByPeriod = mapOf(sarMarch.id to 0L),
+            movements = listOf(expense("a", sarMarch, LocalDate.of(2026, 2, 26), 6_000), expense("b", sarMarch, LocalDate.of(2026, 3, 3), 6_720)),
+            elapsedDays = 9,
+            totalDays = 28,
+            currentLocalDate = LocalDate.of(2026, 3, 5),
+        )
+        compose.setContent {
+            PocketTheme {
+                ActionableDashboardContent(state = state, contentPadding = PaddingValues(), onManagePockets = {}, onOpenAnalysis = {})
+            }
+        }
+
+        compose.onNodeWithTag("dashboard_list").performScrollToNode(hasTestTag("pocket_row_${market.name}"))
+        compose.onNodeWithTag("pocket_row_${market.name}")
+            .assert(hasContentDescription("80% consumido · Presupuesto SAR 159.00", substring = true))
+            .assert(hasContentDescription("se agota", substring = true).not())
+            .assert(hasContentDescription("En riesgo", substring = true).not())
+            .assert(hasContentDescription("ritmo", substring = true, ignoreCase = true).not())
+        compose.onNodeWithTag("run_out_${market.name}").assertDoesNotExist()
+    }
+
+    private fun expense(id: String, period: Period, date: LocalDate, amount: Long) = Movement(
         id = id, pocketId = market.id, pocketName = market.name, periodId = period.id, type = MovementType.EXPENSE,
-        accountingAmountMinor = 3_000, occurredAtUtcMillis = 0, localDate = date, zoneId = "Asia/Riyadh",
+        accountingAmountMinor = amount, occurredAtUtcMillis = 0, localDate = date, zoneId = "Asia/Riyadh",
         merchant = null, note = null, paymentMethodId = null, paymentMethodName = null,
         originalAmountMinor = null, originalCurrencyCode = period.accountingCurrency.name,
         conversionStatus = ConversionStatus.CONFIRMED, rate = null, conversionEffectiveDate = null, conversionSource = null,

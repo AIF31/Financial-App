@@ -4,6 +4,7 @@ import com.aif31.pocket.domain.FrozenRate
 import com.aif31.pocket.domain.PocketMath
 import com.aif31.pocket.domain.SupportedCurrency
 import com.aif31.pocket.domain.sumMoneyExact
+import java.math.BigInteger
 import java.time.LocalDate
 
 /**
@@ -65,17 +66,18 @@ data class PeriodInsights(
     /** [netSpendAfterTodayMinor] by Pocket ID; Pockets with nothing dated after today are absent. */
     val netSpendAfterTodayByPocketMinor: Map<String, Long>,
     /**
-     * The day each Pocket's availability runs out at its pace through today, for Pockets that would run out before
-     * the period ends. Only Pockets spent on at least two days are forecast, so a single large expense such as rent
-     * is not extrapolated. Until [FORECAST_WARMUP_DAYS] have elapsed, only a run-out before the middle of the period
-     * is forecast. Empty for closed periods.
+     * The day each at-risk Pocket's availability runs out at its pace through today. A Pocket is at risk once it has
+     * consumed at least 80% and what is left will not cover its average daily spending until the period ends. Only
+     * Pockets spent on at least two days are forecast, so a single large expense such as rent is not extrapolated.
+     * Until [FORECAST_WARMUP_DAYS] have elapsed, only a run-out before the middle of the period counts, and a
+     * [hasSmallBudget] Pocket is never at risk before the middle of the period. Empty for closed periods.
      */
     val runOutDateByPocket: Map<String, LocalDate>,
     /**
-     * Pockets whose pace through today would run out before the period ends, but not as soon as [runOutDateByPocket]
-     * looks while [paceWarmingUp]: too early to warn about. Always empty once the warm-up ends.
+     * Pockets whose pace through today would run out before the period ends, but which are not at risk yet: less
+     * than 80% consumed, before the warm-up horizon, or a [hasSmallBudget] Pocket before the middle of the period.
      */
-    val earlyRunOutPocketIds: Set<String>,
+    val unconfirmedRunOutPocketIds: Set<String>,
     val pockets: List<PocketPeriodSummary>,
 ) {
     /** Whether pace warnings still look only to the middle of the period: see [FORECAST_WARMUP_DAYS]. */
@@ -88,6 +90,12 @@ data class PeriodInsights(
 
     /** Net spend dated through today: what [averageDailySpendMinor] is measured from. */
     val netSpendThroughTodayMinor: Long get() = Math.subtractExact(netSpendMinor, netSpendAfterTodayMinor)
+
+    /**
+     * Whether the Pocket's budget plus rollover is below about SAR 200.00, where a couple of ordinary expenses read as
+     * a fast pace: see [smallBudgetLimitMinor].
+     */
+    fun hasSmallBudget(summary: PocketPeriodSummary): Boolean = isSmallBudget(summary, accountingCurrency)
 
     /** A Pocket's net spend dated through today: what its daily average is measured from. */
     fun pocketNetSpendThroughTodayMinor(pocketId: String): Long {
@@ -104,6 +112,22 @@ data class PeriodInsights(
         const val FORECAST_WARMUP_DAYS = 7
 
         private fun isWarmingUp(inProgress: Boolean, elapsedDays: Int) = inProgress && elapsedDays < FORECAST_WARMUP_DAYS
+
+        /**
+         * The smallest budget in [currency]'s minor units that is not small: SAR 200.00 or more. The riyal is pegged
+         * at 3.75 to the dollar, so USD 53.33 is still below SAR 200.00 and USD 53.34 is not. The peso floats, so its
+         * limit is a fixed round figure near the same value rather than a conversion.
+         */
+        fun smallBudgetLimitMinor(currency: SupportedCurrency): Long = when (currency) {
+            SupportedCurrency.SAR -> 20_000
+            SupportedCurrency.USD -> 5_334
+            SupportedCurrency.MXN -> 100_000
+        }
+
+        private fun isSmallBudget(summary: PocketPeriodSummary, currency: SupportedCurrency): Boolean {
+            val availableBudget = Math.addExact(summary.budgetMinor, summary.rolloverMinor)
+            return availableBudget > 0 && availableBudget < smallBudgetLimitMinor(currency)
+        }
 
         fun of(state: LedgerState, periodId: String): PeriodInsights? {
             val period = state.periods.firstOrNull { it.id == periodId } ?: return null
@@ -150,7 +174,13 @@ data class PeriodInsights(
                 emptyMap()
             }
             val horizonEnd = period.start.plusDays(warningHorizonDays.toLong())
-            val runOutDateByPocket = allRunOutDates.filterValues { it < horizonEnd }
+            val pastMidPeriod = elapsedDays * 2 > totalDays
+            val pocketsById = pockets.associateBy { it.pocket.id }
+            // The ledger's atRisk flag is the 80% consumption half of the rule; the forecast is the other half.
+            val runOutDateByPocket = allRunOutDates.filter { (pocketId, date) ->
+                val summary = pocketsById.getValue(pocketId)
+                date < horizonEnd && summary.atRisk && (pastMidPeriod || !isSmallBudget(summary, period.accountingCurrency))
+            }
             return PeriodInsights(
                 period = period,
                 inProgress = inProgress,
@@ -183,7 +213,7 @@ data class PeriodInsights(
                 netSpendAfterTodayMinor = netSpendAfterToday,
                 netSpendAfterTodayByPocketMinor = netSpendAfterTodayByPocket,
                 runOutDateByPocket = runOutDateByPocket,
-                earlyRunOutPocketIds = allRunOutDates.keys - runOutDateByPocket.keys,
+                unconfirmedRunOutPocketIds = allRunOutDates.keys - runOutDateByPocket.keys,
                 pockets = pockets,
             )
         }
@@ -199,13 +229,17 @@ data class PeriodInsights(
             return pockets.mapNotNull { summary ->
                 val movements = byPocket[summary.pocket.id].orEmpty()
                 val spendingDays = movements.filter { it.type == MovementType.EXPENSE }.distinctBy { it.localDate }.size
-                val dailyPace = movements.netSpendMinor() / elapsedDays
-                if (summary.availabilityMinor <= 0 || spendingDays < 2 || dailyPace <= 0) return@mapNotNull null
-                // Availability covers this many whole days after today; it runs out on the day after them. The
-                // distance is bounded by the period before it becomes a date, since a huge budget would overflow one.
-                val daysUntilRunOut = summary.availabilityMinor / dailyPace + 1
-                if (daysUntilRunOut >= periodEnd.toEpochDay() - today.toEpochDay()) return@mapNotNull null
-                summary.pocket.id to today.plusDays(daysUntilRunOut)
+                val netSpend = movements.netSpendMinor()
+                if (summary.availabilityMinor <= 0 || spendingDays < 2 || netSpend <= 0) return@mapNotNull null
+                // Availability covers this many whole days after today at the exact daily average, unrounded so a
+                // fraction of a minor unit a day still counts; it runs out on the day after them. The distance is
+                // bounded by the period before it becomes a date, since a huge budget would overflow one.
+                val coveredDays = BigInteger.valueOf(summary.availabilityMinor)
+                    .multiply(BigInteger.valueOf(elapsedDays.toLong()))
+                    .divide(BigInteger.valueOf(netSpend))
+                val daysAfterToday = periodEnd.toEpochDay() - today.toEpochDay() - 1
+                if (coveredDays >= BigInteger.valueOf(daysAfterToday)) return@mapNotNull null
+                summary.pocket.id to today.plusDays(coveredDays.toLong() + 1)
             }.toMap()
         }
 

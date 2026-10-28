@@ -28,27 +28,39 @@ class BudgetReassignmentTest {
     )
 
     @Test fun forecast_uses_pace_through_today_and_rounds_the_remaining_shortfall_up() {
-        // 1,030 spent over 10 days gives 103/day; 21 remaining days need 2,163.
+        // 215.00 spent over 10 days gives 21.50/day; 21 remaining days need 451.50 against 55.00 left.
         // A later-dated expense is already subtracted from availability, so it is not extrapolated again.
-        val target = summary("target", 3_000, 1_520)
+        val target = summary("target", 30_000, 5_500).copy(atRisk = true)
         val state = state(target).copy(movements = listOf(
-            movement("a", "target", LocalDate.of(2026, 3, 2), 500),
-            movement("b", "target", LocalDate.of(2026, 3, 3), 530),
-            movement("later", "target", LocalDate.of(2026, 3, 20), 450),
+            movement("a", "target", LocalDate.of(2026, 3, 2), 10_000),
+            movement("b", "target", LocalDate.of(2026, 3, 3), 11_500),
+            movement("later", "target", LocalDate.of(2026, 3, 20), 3_000),
         ))
-        assertEquals(PocketBudgetStatus.FAST_PACE, target.budgetStatusAt(PeriodInsights.of(state, period.id)))
-        assertEquals(700L, BudgetReassignment.of(state, period.id, "target")!!.neededMinor)
+        assertEquals(PocketBudgetStatus.AT_RISK, target.budgetStatusAt(PeriodInsights.of(state, period.id)))
+        assertEquals(39_700L, BudgetReassignment.of(state, period.id, "target")!!.neededMinor)
     }
 
     @Test fun forecast_keeps_fractional_daily_pace_until_the_whole_unit_ceiling() {
-        val target = summary("target", 2_419, 1_410)
+        val target = summary("target", 125_909, 25_000).copy(atRisk = true)
         val state = state(target).copy(movements = listOf(
-            movement("a", "target", LocalDate.of(2026, 3, 2), 500),
-            movement("b", "target", LocalDate.of(2026, 3, 3), 509),
+            movement("a", "target", LocalDate.of(2026, 3, 2), 50_000),
+            movement("b", "target", LocalDate.of(2026, 3, 3), 50_909),
         ))
 
-        // 1,009 × 21 / 10 − 1,410 = 708.9 minor, rounded up once to 800.
-        assertEquals(800L, BudgetReassignment.of(state, period.id, "target")!!.neededMinor)
+        // 100,909 × 21 / 10 − 25,000 = 186,908.9 minor, rounded up once to 187,000.
+        assertEquals(187_000L, BudgetReassignment.of(state, period.id, "target")!!.neededMinor)
+    }
+
+    @Test fun a_pocket_spending_fast_with_most_of_its_budget_left_needs_no_covering() {
+        // 103.00/day would run out on 30 March, but 66% of the budget is left: not at risk yet.
+        val target = summary("target", 300_000, 197_000)
+        val state = state(target).copy(movements = listOf(
+            movement("a", "target", LocalDate.of(2026, 3, 2), 50_000),
+            movement("b", "target", LocalDate.of(2026, 3, 3), 53_000),
+        ))
+
+        assertEquals(PocketBudgetStatus.UNCONFIRMED_PACE, target.budgetStatusAt(PeriodInsights.of(state, period.id)))
+        assertNull(BudgetReassignment.of(state, period.id, "target"))
     }
 
     @Test fun only_current_active_targets_that_need_covering_are_offered() {
@@ -97,7 +109,7 @@ class BudgetReassignmentTest {
             ),
         )
 
-        assertEquals(PocketBudgetStatus.EARLY_FAST_PACE, early.budgetStatusAt(PeriodInsights.of(state, period.id)))
+        assertEquals(PocketBudgetStatus.UNCONFIRMED_PACE, early.budgetStatusAt(PeriodInsights.of(state, period.id)))
         assertEquals(listOf("steady"), BudgetReassignment.of(state, period.id, "target")!!.sources.map { it.pocketId })
     }
 
