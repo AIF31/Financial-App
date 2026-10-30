@@ -22,6 +22,7 @@ Notable repository changes are recorded here for future maintainers.
   - Before the fix, `KeyboardInsetsTest` failed on the `pixel6Api35` managed device: the form ended at 1,424 px against a keyboard top of 1,625 px, and the lists at 2,190 and 2,400 px.
   - On the final code before the last rationale fix (`7a1a98d`), the gradle-run wrapper passed the CI gate: all 479 host tests, lint, the debug, release and test APKs, and all 28 managed-device tests (`pixel6Api35`, `swiftshader_indirect`).
   - After that fix, all 480 host tests and lint passed.
+  - On the Android Studio `Medium_Phone_API_37.0` emulator (API 37, read-only), all 30 `connectedDebugAndroidTest` cases passed on two consecutive runs, one without a window and one in a visible window. That includes `KeyboardInsetsTest` and the two large tests the CI gate skips.
   - On a read-only `Medium_Phone_API_37.0` emulator, Inicio's content faded under the status bar, and **Nuevo gasto** ended at the top of the on-screen keyboard.
   - Not verified: a physical device, the real permission dialog's dismiss and deny paths, the predictive-back gesture's look, and landscape insets on screen.
 
