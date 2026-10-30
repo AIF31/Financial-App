@@ -22,10 +22,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.aif31.pocket.data.PocketBudgetStatus
 
-/** Presentation of a [PocketBudgetStatus]; the status itself is decided in the data layer. */
+/** Presentation of a [PocketBudgetStatus]; the status itself is decided in the data layer. No label shows no badge. */
 internal data class StatusPresentation(
-    val label: String,
-    val icon: ImageVector,
+    val label: String?,
+    val icon: ImageVector?,
     val container: Color,
     val content: Color,
     val indicator: Color,
@@ -36,10 +36,10 @@ internal fun PocketBudgetStatus.presentation(): StatusPresentation = with(Materi
     when (this@presentation) {
         PocketBudgetStatus.EXHAUSTED -> StatusPresentation("Agotado", Icons.Default.Error, errorContainer, onErrorContainer, error)
         PocketBudgetStatus.AT_RISK -> StatusPresentation("En riesgo", Icons.Default.Warning, tertiaryContainer, onTertiaryContainer, tertiary)
-        PocketBudgetStatus.FAST_PACE -> StatusPresentation("Ritmo alto", Icons.Default.Warning, tertiaryContainer, onTertiaryContainer, tertiary)
-        PocketBudgetStatus.EARLY_FAST_PACE -> StatusPresentation("Ritmo por confirmar", Icons.Default.Info, secondaryContainer, onSecondaryContainer, secondary)
+        PocketBudgetStatus.UNCONFIRMED_PACE -> StatusPresentation("Ritmo por confirmar", Icons.Default.Info, secondaryContainer, onSecondaryContainer, secondary)
         PocketBudgetStatus.UNBUDGETED -> StatusPresentation("Sin presupuesto", Icons.Default.RemoveCircleOutline, surfaceContainerHighest, onSurfaceVariant, outline)
         PocketBudgetStatus.ON_TRACK -> StatusPresentation("En buen ritmo", Icons.Default.CheckCircle, primaryContainer, onPrimaryContainer, primary)
+        PocketBudgetStatus.SMALL_BUDGET -> StatusPresentation(null, null, primaryContainer, onPrimaryContainer, primary)
     }
 }
 
@@ -47,6 +47,7 @@ internal fun PocketBudgetStatus.presentation(): StatusPresentation = with(Materi
 @Composable
 internal fun PocketStatusBadge(status: PocketBudgetStatus, modifier: Modifier = Modifier) {
     val presentation = status.presentation()
+    val label = presentation.label ?: return
     Surface(
         shape = MaterialTheme.shapes.extraLarge,
         color = presentation.container,
@@ -58,8 +59,8 @@ internal fun PocketStatusBadge(status: PocketBudgetStatus, modifier: Modifier = 
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(presentation.icon, contentDescription = null, modifier = Modifier.size(16.dp))
-            Text(presentation.label, style = MaterialTheme.typography.labelMedium)
+            presentation.icon?.let { Icon(it, contentDescription = null, modifier = Modifier.size(16.dp)) }
+            Text(label, style = MaterialTheme.typography.labelMedium)
         }
     }
 }

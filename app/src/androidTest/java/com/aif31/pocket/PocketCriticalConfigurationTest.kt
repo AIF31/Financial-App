@@ -4,6 +4,7 @@ import android.content.Intent
 import android.view.WindowInsets
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -17,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
@@ -236,7 +238,10 @@ class PocketCriticalConfigurationTest {
             compose.waitUntilExactlyOneExists(hasTestTag("contextual_add"), 10_000)
             compose.onNodeWithTag("contextual_add").performClick()
             scenario.hideKeyboard()
-            compose.onNodeWithTag("movement_pocket_Supermercado").performClick()
+            // On CI's emulator the keyboard can still be animating in, and a tap on the Pocket then lands on the
+            // keyboard. The semantics click selects it whatever covers it; saving still happens with the keyboard up.
+            compose.onNodeWithTag("movement_pocket_Supermercado").performSemanticsAction(SemanticsActions.OnClick)
+            compose.onNodeWithTag("movement_pocket_Supermercado").assertIsSelected()
             compose.onNodeWithTag("movement_amount").performTextInput("8.25")
             compose.waitUntil(10_000) {
                 !compose.onNodeWithTag("movement_save").fetchSemanticsNode().config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled)

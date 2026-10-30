@@ -139,6 +139,10 @@ data class PocketPeriodSummary(
     val netSpendMinor: Long,
     val availabilityMinor: Long,
     val consumedPercent: Int,
+    /**
+     * At least 80% of budget plus rollover consumed. Consumption alone does not make an at-risk Pocket, which also
+     * needs a run-out forecast: see [PocketBudgetStatus.AT_RISK].
+     */
     val atRisk: Boolean,
     val exhausted: Boolean,
 )

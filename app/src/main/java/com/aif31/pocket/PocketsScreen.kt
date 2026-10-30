@@ -283,7 +283,7 @@ internal fun PocketsScreen(
                     .clickable { selected = summary }
                     // A card scrolled partly out of view exposes only its visible children, so it carries its own label.
                     .semantics {
-                        contentDescription = listOf(
+                        contentDescription = listOfNotNull(
                             summary.pocket.name,
                             available.text,
                             "${summary.consumedPercent}% consumido",

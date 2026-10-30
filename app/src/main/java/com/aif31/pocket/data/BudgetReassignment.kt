@@ -16,7 +16,7 @@ object BudgetReassignment {
         val target = pockets.firstOrNull { it.pocket.id == targetPocketId } ?: return null
         if (target.pocket.archived || target.retiredThisPeriod) return null
         val insights = runCatching { PeriodInsights.of(state, periodId) }.getOrNull()
-        if (target.availabilityMinor >= 0 && target.budgetStatusAt(insights) != PocketBudgetStatus.FAST_PACE) return null
+        if (target.availabilityMinor >= 0 && target.budgetStatusAt(insights) != PocketBudgetStatus.AT_RISK) return null
         val needed = if (target.availabilityMinor < 0) {
             runCatching { Math.negateExact(target.availabilityMinor) }.getOrNull()
         } else {
@@ -25,7 +25,8 @@ object BudgetReassignment {
         val donors = if (insights == null) emptyList() else pockets
             .filterNot { it.pocket.id == targetPocketId || it.pocket.archived || it.retiredThisPeriod }
             .filter { it.availabilityMinor > 0 && it.budgetMinor > 0 }
-            .filter { it.budgetStatusAt(insights) !in setOf(PocketBudgetStatus.EXHAUSTED, PocketBudgetStatus.AT_RISK, PocketBudgetStatus.FAST_PACE, PocketBudgetStatus.EARLY_FAST_PACE) }
+            // Nor can a Pocket spare budget when it has little left or its pace would run out, even one too small to rate.
+            .filterNot { it.atRisk || it.pocket.id in insights.runOutDateByPocket || it.pocket.id in insights.unconfirmedRunOutPocketIds }
             .map { BudgetReassignmentSource(it.pocket.id, it.pocket.name, minOf(it.availabilityMinor, it.budgetMinor)) }
             .sortedByDescending { it.maximumMinor }
         val unassigned = state.unallocatedMinorByPeriod[periodId]?.takeIf { it > 0 }
