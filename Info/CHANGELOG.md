@@ -2,6 +2,29 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-10-30
+
+### Keyboard insets, notification permission recovery, Navigation 3 display and list performance (1.0.15)
+
+- `66376a0` installed the full collection of official Android skills under `.agents/skills/`. A read-only GPT-6.1-Sol (medium) triage of the 36 new or updated skills picked four to run now: `edge-to-edge`, `android-permissions-security` (with an `android-intent-security` pass), `navigation-3` and `jetpack-compose-performance`. `testing-setup` was used only to choose tests. Most others target surfaces Pocket doesn't have (Wear, TV, cars, camera, billing, sign-in). The Glance widget, on-device AI, Play policy and R8 skills were left for later.
+- **Keyboard.** Pocket draws edge to edge, so the window doesn't shrink for the keyboard. **Nuevo gasto** padded for the keyboard on top of its hidden save bar, leaving a dead gap as tall as the bar (201 px on a Pixel 6). The settings detail forms and the **Movimientos** search results ignored the keyboard and ran under it. Each now fits inside the keyboard ruler (`fitInside(WindowInsetsRulers.Ime.current)`) and ends exactly where the keyboard starts. `KeyboardInsetsTest` pins all three on the managed device.
+- **System bars.** Comparar periodos and Análisis scroll behind the transparent navigation bar. Movimientos and Pockets scroll behind the status bar but stay above the opaque bottom navigation bar, where a row could not be tapped. A faint fade (`StatusBarProtection`) keeps the status bar icons legible over scrolled content. Inicio and Ajustes keep clear of side insets in landscape.
+- **Notification permission.** On Android 13+, the detection alert, rate alert and daily reminder cards could request a permission Android would no longer prompt for, and the button then did nothing. Android reports a dismissed prompt exactly like a permanent denial, so asking stays each card's action. A short rationale shows when Android asks for one. After a refusal Android won't explain, the card also offers **Abrir ajustes de Android** (`NotificationPermissionRequest`). This also covers denials that predate this version. The intent pass found no gap: the listener is protected by `BIND_NOTIFICATION_LISTENER_SERVICE`, the backup FileProvider is private and grants read-only access, and PendingIntents are explicit and immutable.
+- **Navigation 3.** `PocketApp` renders through `NavDisplay`, with typed entries, a saveable-state entry decorator and `onBack`, instead of branching on the top route with one `BackHandler` per route type. Root tabs keep their own state in a holder outside the display, and switching tabs still crossfades over 150 ms. Movement drafts belong to their entries and are discarded when popped. Pushed routes have no transition, including predictive back. A root-only handler keeps back returning to Inicio before leaving. `PocketNavigationHostTest` pins tab state, stacked drafts, shortcut reuse, return targets and settings back.
+- **Performance.** Mixed lazy lists on Movimientos, Inicio and Análisis declare content types and stable keys. Inicio remembers its Pocket sort. The Análisis relative line caches its paths, dash effect and stroke with `drawWithCache`. No speedup was measured. App baseline profiles for startup and Movement scrolling are recommended as follow-up; ProfileInstaller is already present transitively.
+- The four tracks ran in parallel: GPT-6.1-Sol (high) agents took permissions, navigation and performance, and Claude took the inset work. Five rounds of GPT-6.1-Sol (high) Standards and Spec reviews followed:
+  - Round one: both axes found that a dismissed prompt was treated as a permanent denial, so later taps opened settings although Android could still ask. Spec also found that Movimientos and Pockets didn't scroll behind the status bar.
+  - Round two: Standards found that the reminder card couldn't recover from a permanent denial.
+  - Round three: Standards flagged the three cards' duplicated permission UI, now shared.
+  - Round four: Spec found the detection card's rationale staying after a grant made in Android's settings.
+  - All were fixed with tests. Round five found nothing.
+- Verification:
+  - Before the fix, `KeyboardInsetsTest` failed on the `pixel6Api35` managed device: the form ended at 1,424 px against a keyboard top of 1,625 px, and the lists at 2,190 and 2,400 px.
+  - On the final code before the last rationale fix (`7a1a98d`), the gradle-run wrapper passed the CI gate: all 479 host tests, lint, the debug, release and test APKs, and all 28 managed-device tests (`pixel6Api35`, `swiftshader_indirect`).
+  - After that fix, all 480 host tests and lint passed.
+  - On a read-only `Medium_Phone_API_37.0` emulator, Inicio's content faded under the status bar, and **Nuevo gasto** ended at the top of the on-screen keyboard.
+  - Not verified: a physical device, the real permission dialog's dismiss and deny paths, the predictive-back gesture's look, and landscape insets on screen.
+
 ## 2026-10-28
 
 ### Pace warnings need 80% consumed and a run-out, and small budgets wait (1.0.14)
