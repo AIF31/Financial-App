@@ -28,6 +28,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
@@ -237,57 +238,60 @@ internal fun RelativeLine(values: List<Long?>, modifier: Modifier = Modifier) {
     val lineColor = MaterialTheme.colorScheme.primary
     val referenceColor = MaterialTheme.colorScheme.outline
     val ringColor = MaterialTheme.colorScheme.surfaceContainerHighest
-    val present = values.filterNotNull()
-    Canvas(modifier.height(44.dp).clearAndSetSemantics { }) {
-        if (present.isEmpty()) return@Canvas
-        val (low, high) = relativeRange(present)
-        val inset = 6.dp.toPx()
-        fun x(index: Int) = (index + 0.5f) * size.width / values.size
-        fun y(value: Long) = (inset + (size.height - inset * 2) * (1 - (value - low) / (high - low))).toFloat()
-        val medianY = y(medianMinor(present)!!)
-        drawLine(
-            referenceColor,
-            Offset(0f, medianY),
-            Offset(size.width, medianY),
-            strokeWidth = 1.dp.toPx(),
-            pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx())),
-        )
-        val line = Path()
-        val area = Path()
-        var segmentStart: Int? = null
-        fun closeArea(end: Int) {
-            val start = segmentStart ?: return
-            area.lineTo(x(end), medianY)
-            area.lineTo(x(start), medianY)
-            area.close()
-        }
-        values.forEachIndexed { index, value ->
-            if (value == null) {
-                closeArea(index - 1)
-                segmentStart = null
-            } else if (segmentStart == null) {
-                line.moveTo(x(index), y(value))
-                area.moveTo(x(index), y(value))
-                segmentStart = index
+    Spacer(
+        modifier.height(44.dp).clearAndSetSemantics { }.drawWithCache {
+            val present = values.filterNotNull()
+            if (present.isEmpty()) {
+                onDrawBehind { }
             } else {
-                line.lineTo(x(index), y(value))
-                area.lineTo(x(index), y(value))
+                val (low, high) = relativeRange(present)
+                val inset = 6.dp.toPx()
+                fun x(index: Int) = (index + 0.5f) * size.width / values.size
+                fun y(value: Long) = (inset + (size.height - inset * 2) * (1 - (value - low) / (high - low))).toFloat()
+                val medianY = y(medianMinor(present)!!)
+                val line = Path()
+                val area = Path()
+                var segmentStart: Int? = null
+                fun closeArea(end: Int) {
+                    val start = segmentStart ?: return
+                    area.lineTo(x(end), medianY)
+                    area.lineTo(x(start), medianY)
+                    area.close()
+                }
+                values.forEachIndexed { index, value ->
+                    if (value == null) {
+                        closeArea(index - 1)
+                        segmentStart = null
+                    } else if (segmentStart == null) {
+                        line.moveTo(x(index), y(value))
+                        area.moveTo(x(index), y(value))
+                        segmentStart = index
+                    } else {
+                        line.lineTo(x(index), y(value))
+                        area.lineTo(x(index), y(value))
+                    }
+                }
+                closeArea(values.lastIndex)
+                val dashEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx()))
+                val lineStroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                onDrawBehind {
+                    drawLine(referenceColor, Offset(0f, medianY), Offset(size.width, medianY), strokeWidth = 1.dp.toPx(), pathEffect = dashEffect)
+                    drawPath(area, lineColor.copy(alpha = 0.12f))
+                    drawPath(line, lineColor, style = lineStroke)
+                    values.forEachIndexed { index, value ->
+                        if (value == null) return@forEachIndexed
+                        val center = Offset(x(index), y(value))
+                        if (index == values.lastIndex) {
+                            drawCircle(ringColor, radius = 7.dp.toPx(), center = center)
+                            drawCircle(lineColor, radius = 5.dp.toPx(), center = center)
+                        } else {
+                            drawCircle(lineColor.copy(alpha = 0.7f), radius = 2.dp.toPx(), center = center)
+                        }
+                    }
+                }
             }
-        }
-        closeArea(values.lastIndex)
-        drawPath(area, lineColor.copy(alpha = 0.12f))
-        drawPath(line, lineColor, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-        values.forEachIndexed { index, value ->
-            if (value == null) return@forEachIndexed
-            val center = Offset(x(index), y(value))
-            if (index == values.lastIndex) {
-                drawCircle(ringColor, radius = 7.dp.toPx(), center = center)
-                drawCircle(lineColor, radius = 5.dp.toPx(), center = center)
-            } else {
-                drawCircle(lineColor.copy(alpha = 0.7f), radius = 2.dp.toPx(), center = center)
-            }
-        }
-    }
+        },
+    )
 }
 
 /**

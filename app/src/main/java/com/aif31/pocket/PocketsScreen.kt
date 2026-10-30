@@ -45,6 +45,7 @@ import com.aif31.pocket.settings.*
 import com.aif31.pocket.ui.*
 import java.util.Locale
 import kotlinx.coroutines.launch
+import com.aif31.pocket.ui.exceptTop
 
 @Composable
 internal fun PocketsScreen(
@@ -81,8 +82,9 @@ internal fun PocketsScreen(
         ?: state.unallocatedMinor
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(padding).testTag("pockets_list"),
-        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 32.dp),
+        // Scrolls behind the status bar.
+        modifier = Modifier.fillMaxSize().padding(padding.exceptTop()).testTag("pockets_list"),
+        contentPadding = PaddingValues(start = 16.dp, top = padding.calculateTopPadding() + 16.dp, end = 16.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {

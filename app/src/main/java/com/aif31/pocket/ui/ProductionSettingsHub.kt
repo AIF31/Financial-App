@@ -95,12 +95,7 @@ internal fun ProductionSettingsHub(
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize().testTag("settings_hub"),
-        contentPadding = PaddingValues(
-            start = 16.dp,
-            top = contentPadding.calculateTopPadding() + 16.dp,
-            end = 16.dp,
-            bottom = contentPadding.calculateBottomPadding() + 24.dp,
-        ),
+        contentPadding = contentPadding.plusMargin(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

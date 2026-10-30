@@ -29,6 +29,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.AlertDialog
@@ -77,6 +80,9 @@ import com.aif31.pocket.ui.ChoiceOption
 import com.aif31.pocket.ui.SegmentedChoice
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation3.runtime.entryProvider
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
+import androidx.navigation3.ui.NavDisplay
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.rememberNavBackStack
 import com.aif31.pocket.data.LedgerCommand
@@ -391,22 +397,11 @@ fun PocketApp(
     DisposableEffect(Unit) { onDispose { onSuggestionsUnderReviewChange(emptySet()) } }
     val currentRoute = backStack.last()
     val screen = backStack.filterIsInstance<RootRoute>().lastOrNull()?.screen ?: RootScreen.DASHBOARD
-    val movementRoute = currentRoute as? MovementRoute
-    val comparisonRoute = currentRoute as? ComparisonRoute
-    val analysisRoute = currentRoute as? AnalysisRoute
-    val drillRoute = currentRoute as? MovementDrillRoute
-    val settingsSection = (currentRoute as? SettingsDetailRoute)?.section
     val snackbar = remember { SnackbarHostState() }
     val appScope = rememberCoroutineScope()
-    // Keeps each root destination's saveable state (scroll, search, filters) while other routes are shown,
-    // and each open Movement form's draft while another form is stacked above it.
+    // Tab entries are replaced, so retain their scroll, search and filters outside NavDisplay.
+    // Movement drafts belong to the display's entry decorator and are discarded when popped.
     val rootStateHolder = rememberSaveableStateHolder()
-    val openFormIds = backStack.mapNotNull { (it as? MovementRoute)?.instanceId }
-    var knownFormIds by remember { mutableStateOf(emptyList<String>()) }
-    LaunchedEffect(openFormIds) {
-        (knownFormIds - openFormIds.toSet()).forEach(rootStateHolder::removeState)
-        knownFormIds = openFormIds
-    }
 
     fun navigateRoot(destination: RootScreen) {
         backStack[0] = RootRoute(destination)
@@ -434,176 +429,221 @@ fun PocketApp(
         }
     }
 
-    if (movementRoute != null) {
-        val movementBeingEdited = state.movements.firstOrNull { it.id == movementRoute.movementId }
-        val suggestion = state.movementSuggestions.firstOrNull { it.id == movementRoute.suggestionId }
-        BackHandler { backStack.removeLastOrNull() }
-        if (movementRoute.suggestionId != null && suggestion == null) {
-            AlertDialog(
-                onDismissRequest = { backStack.removeLastOrNull() },
-                title = { Text("Sugerencia no disponible") },
-                text = { Text("Esta sugerencia ya fue revisada o expiró.") },
-                confirmButton = {
-                    TextButton(onClick = { backStack.removeLastOrNull() }) { Text("Cerrar") }
-                },
-            )
-            return
-        }
-        rootStateHolder.SaveableStateProvider(movementRoute.instanceId) {
-            MovementDialog(
-                state = state,
-                ledger = ledger,
-                defaultExpenseCurrency = preferenceState.defaultExpenseCurrency,
-                onlineFxEnabled = preferenceState.onlineFxEnabled,
-                exchangeRates = exchangeRates,
-                onDismiss = { backStack.removeLastOrNull() },
-                onSaved = {
-                    // A form stacked over another Movement form (the launcher shortcut over an edit) returns to it
-                    // with its draft, and one opened from an analysis list returns to that list; only a form opened
-                    // from a root screen goes back to that screen.
-                    val underneath = backStack.getOrNull(backStack.lastIndex - 1)
-                    if (underneath is MovementRoute || underneath is MovementDrillRoute) {
-                        backStack.removeLastOrNull()
+    val settingsContent: @Composable (PaddingValues, SettingsSection?) -> Unit = { padding, section ->
+        SettingsScreen(
+            state = state,
+            ledger = ledger,
+            preferences = preferenceState,
+            preferencesStore = preferences,
+            exchangeRates = exchangeRates,
+            reminderScheduler = reminderScheduler,
+            fxRateAlertScheduler = fxRateAlertScheduler,
+            onCreateBackup = { requestBackup("create") },
+            onShareBackup = { requestBackup("share") },
+            onCreateCsv = onCreateCsv,
+            onPickBackup = onPickBackup,
+            onRequestNotificationPermission = onRequestNotificationPermission,
+            notificationPermissionRevision = notificationPermissionRevision,
+            padding = padding,
+            section = section,
+            snackbar = snackbar,
+            onSectionChange = { section ->
+                if (section == null) {
+                    if (backStack.lastOrNull() is SettingsDetailRoute) backStack.removeLastOrNull()
+                } else {
+                    backStack.add(SettingsDetailRoute(section))
+                }
+            },
+        )
+    }
+    val rootContent: @Composable (SettingsSection?) -> Unit = { settingsSection ->
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val useNavigationRail = maxWidth >= 600.dp
+            val rootNavigationVisible = currentRoute is RootRoute
+            Row(modifier = Modifier.fillMaxSize()) {
+                if (useNavigationRail && rootNavigationVisible) {
+                    NavigationRail {
+                        Spacer(Modifier.height(24.dp))
+                        RootScreen.entries.forEach { destination ->
+                            NavigationRailItem(
+                                selected = screen == destination,
+                                onClick = { navigateRoot(destination) },
+                                icon = { Icon(destination.icon, contentDescription = destination.label) },
+                                label = { RootDestinationLabel(destination.label) },
+                            )
+                        }
+                    }
+                }
+                Scaffold(
+                    modifier = Modifier.fillMaxSize().weight(1f),
+                    snackbarHost = { SnackbarHost(snackbar) },
+                    floatingActionButton = {
+                        if (rootNavigationVisible) {
+                            when (screen) {
+                                RootScreen.DASHBOARD -> ExtendedFloatingActionButton(
+                                    onClick = { backStack.add(movementForm()) },
+                                    icon = { Icon(Icons.Default.Add, contentDescription = "Registrar gasto") },
+                                    text = { Text("Registrar gasto") },
+                                    modifier = Modifier.testTag("contextual_add"),
+                                    containerColor = MaterialTheme.colorScheme.tertiary,
+                                    contentColor = MaterialTheme.colorScheme.onTertiary,
+                                )
+                                RootScreen.MOVEMENTS -> FloatingActionButton(
+                                    onClick = { backStack.add(movementForm()) },
+                                    modifier = Modifier.testTag("contextual_add"),
+                                    containerColor = MaterialTheme.colorScheme.tertiary,
+                                    contentColor = MaterialTheme.colorScheme.onTertiary,
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = "Registrar gasto")
+                                }
+                                else -> Unit
+                            }
+                        }
+                    },
+                    floatingActionButtonPosition = FabPosition.End,
+                    bottomBar = {
+                        if (!useNavigationRail && rootNavigationVisible) {
+                            NavigationBar {
+                                RootScreen.entries.forEach { destination ->
+                                    NavigationBarItem(
+                                        selected = screen == destination,
+                                        onClick = { navigateRoot(destination) },
+                                        icon = { Icon(destination.icon, contentDescription = destination.label) },
+                                        label = { RootDestinationLabel(destination.label) },
+                                    )
+                                }
+                            }
+                        }
+                    },
+                ) { padding ->
+                    if (settingsSection != null) {
+                        settingsContent(padding, settingsSection)
                     } else {
-                        navigateRoot(if (movementRoute.movementId == null) RootScreen.DASHBOARD else RootScreen.MOVEMENTS)
-                    }
-                    appScope.launch {
-                        snackbar.showSnackbar(
-                            if (movementRoute.movementId == null) "Gasto guardado" else "Movimiento actualizado",
-                        )
-                    }
-                },
-                initialMovement = movementBeingEdited,
-                suggestion = suggestion,
-                initialPocketId = movementRoute.pocketId,
-                snackbarHostState = snackbar,
-            )
-        }
-        return
-    }
-
-    if (comparisonRoute != null) {
-        BackHandler { backStack.removeLastOrNull() }
-        ComparisonScreen(
-            state = state,
-            periodId = comparisonRoute.periodId,
-            baselinePeriodId = comparisonRoute.baselinePeriodId,
-            onPeriodsChange = { periodId, baselineId -> backStack[backStack.lastIndex] = ComparisonRoute(periodId, baselineId) },
-            onBack = { backStack.removeLastOrNull() },
-        )
-        return
-    }
-
-    if (analysisRoute != null) {
-        BackHandler { backStack.removeLastOrNull() }
-        AnalysisScreen(
-            state = state,
-            periodId = analysisRoute.periodId,
-            onPeriodChange = { backStack[backStack.lastIndex] = AnalysisRoute(it) },
-            onOpenMovements = { drill, title -> backStack.add(MovementDrillRoute(drill, title)) },
-            onBack = { backStack.removeLastOrNull() },
-            sectionOrder = AnalysisSection.ordered(preferenceState.analysisSectionOrder),
-            onSectionOrderChange = { order -> appScope.launch { preferences?.setAnalysisSectionOrder(order.map { it.name }) } },
-        )
-        return
-    }
-
-    if (drillRoute != null) {
-        BackHandler { backStack.removeLastOrNull() }
-        Scaffold(
-            topBar = { PocketTopAppBar(title = drillRoute.title, onNavigateBack = { backStack.removeLastOrNull() }) },
-            snackbarHost = { SnackbarHost(snackbar) },
-        ) { padding ->
-            MovementsScreen(
-                state = state,
-                ledger = ledger,
-                snackbar = snackbar,
-                padding = padding,
-                undoWindowMillis = undoWindowMillis,
-                onRecordExpense = { backStack.add(movementForm()) },
-                onEditMovement = { backStack.add(movementForm(movementId = it.id)) },
-                drill = drillRoute.drill,
-            )
-        }
-        return
-    }
-
-    BackHandler(enabled = backStack.size > 1) { backStack.removeLastOrNull() }
-    // Platform convention: back from another root tab returns to Inicio before leaving the app.
-    BackHandler(enabled = backStack.size == 1 && screen != RootScreen.DASHBOARD) { navigateRoot(RootScreen.DASHBOARD) }
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val useNavigationRail = maxWidth >= 600.dp
-        val rootNavigationVisible = currentRoute is RootRoute
-        Row(modifier = Modifier.fillMaxSize()) {
-            if (useNavigationRail && rootNavigationVisible) {
-                NavigationRail {
-                    Spacer(Modifier.height(24.dp))
-                    RootScreen.entries.forEach { destination ->
-                        NavigationRailItem(
-                            selected = screen == destination,
-                            onClick = { navigateRoot(destination) },
-                            icon = { Icon(destination.icon, contentDescription = destination.label) },
-                            label = { RootDestinationLabel(destination.label) },
-                        )
+                        Crossfade(targetState = screen, animationSpec = tween(durationMillis = 150), label = "root") { shown ->
+                            rootStateHolder.SaveableStateProvider(shown.name) {
+                                when (shown) {
+                                    RootScreen.DASHBOARD -> DashboardScreen(
+                                        state = state,
+                                        padding = padding,
+                                        onManagePockets = { navigateRoot(RootScreen.POCKETS) },
+                                        onRecordExpenseIn = { backStack.add(movementForm(pocketId = it)) },
+                                        onComparePeriods = { openComparison(state.currentPeriod.id) },
+                                        onOpenAnalysis = { backStack.add(AnalysisRoute(it)) },
+                                        recapDismissedPeriodId = preferenceState.recapDismissedPeriodId,
+                                        onDismissRecap = { periodId -> appScope.launch { preferences?.dismissRecap(periodId) } },
+                                    )
+                                    RootScreen.MOVEMENTS -> MovementsScreen(
+                                        state = state,
+                                        ledger = ledger,
+                                        snackbar = snackbar,
+                                        padding = padding,
+                                        undoWindowMillis = undoWindowMillis,
+                                        onRecordExpense = { backStack.add(movementForm()) },
+                                        onEditMovement = { backStack.add(movementForm(movementId = it.id)) },
+                                        onReviewSuggestion = { backStack.add(movementForm(suggestionId = it)) },
+                                    )
+                                    RootScreen.POCKETS -> PocketsScreen(state, ledger, padding, onComparePeriod = ::openComparison)
+                                    RootScreen.SETTINGS -> settingsContent(padding, null)
+                                }
+                            }
+                        }
                     }
                 }
             }
-            Scaffold(
-                modifier = Modifier.fillMaxSize().weight(1f),
-                snackbarHost = { SnackbarHost(snackbar) },
-                floatingActionButton = {
-                    if (rootNavigationVisible) {
-                        when (screen) {
-                            RootScreen.DASHBOARD -> ExtendedFloatingActionButton(
-                                onClick = { backStack.add(movementForm()) },
-                                icon = { Icon(Icons.Default.Add, contentDescription = "Registrar gasto") },
-                                text = { Text("Registrar gasto") },
-                                modifier = Modifier.testTag("contextual_add"),
-                                containerColor = MaterialTheme.colorScheme.tertiary,
-                                contentColor = MaterialTheme.colorScheme.onTertiary,
-                            )
-                            RootScreen.MOVEMENTS -> FloatingActionButton(
-                                onClick = { backStack.add(movementForm()) },
-                                modifier = Modifier.testTag("contextual_add"),
-                                containerColor = MaterialTheme.colorScheme.tertiary,
-                                contentColor = MaterialTheme.colorScheme.onTertiary,
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = "Registrar gasto")
-                            }
-                            else -> Unit
-                        }
+        }
+    }
+
+    // NavDisplay handles back for every pushed destination. A single-entry display cannot consume
+    // back, so the root-only policy returns to Inicio before allowing the activity to exit.
+    BackHandler(enabled = backStack.size == 1 && screen != RootScreen.DASHBOARD) {
+        navigateRoot(RootScreen.DASHBOARD)
+    }
+    NavDisplay(
+        backStack = backStack,
+        onBack = { backStack.removeLastOrNull() },
+        entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator()),
+        transitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
+        popTransitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
+        // Preserve instant destination changes during gestures too; no sliding preview.
+        predictivePopTransitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
+        entryProvider = entryProvider {
+            // One shell identity keeps the existing inner 150 ms tab crossfade alive on replacement.
+            entry<RootRoute>(clazzContentKey = { "root-shell" }) { rootContent(null) }
+            entry<SettingsDetailRoute> { rootContent(it.section) }
+            entry<MovementRoute>(clazzContentKey = { it.instanceId }) { movementRoute ->
+                val movementBeingEdited = state.movements.firstOrNull { it.id == movementRoute.movementId }
+                val suggestion = state.movementSuggestions.firstOrNull { it.id == movementRoute.suggestionId }
+                if (movementRoute.suggestionId != null && suggestion == null) {
+                    if (currentRoute == movementRoute) {
+                        AlertDialog(
+                            onDismissRequest = { backStack.removeLastOrNull() },
+                            title = { Text("Sugerencia no disponible") },
+                            text = { Text("Esta sugerencia ya fue revisada o expiró.") },
+                            confirmButton = {
+                                TextButton(onClick = { backStack.removeLastOrNull() }) { Text("Cerrar") }
+                            },
+                        )
                     }
-                },
-                floatingActionButtonPosition = FabPosition.End,
-                bottomBar = {
-                    if (!useNavigationRail && rootNavigationVisible) {
-                        NavigationBar {
-                            RootScreen.entries.forEach { destination ->
-                                NavigationBarItem(
-                                    selected = screen == destination,
-                                    onClick = { navigateRoot(destination) },
-                                    icon = { Icon(destination.icon, contentDescription = destination.label) },
-                                    label = { RootDestinationLabel(destination.label) },
+                } else {
+                    MovementDialog(
+                        state = state,
+                        ledger = ledger,
+                        defaultExpenseCurrency = preferenceState.defaultExpenseCurrency,
+                        onlineFxEnabled = preferenceState.onlineFxEnabled,
+                        exchangeRates = exchangeRates,
+                        onDismiss = { backStack.removeLastOrNull() },
+                        onSaved = {
+                            // A form stacked over another Movement form (the launcher shortcut over an edit) returns to it
+                            // with its draft, and one opened from an analysis list returns to that list; only a form opened
+                            // from a root screen goes back to that screen.
+                            val underneath = backStack.getOrNull(backStack.lastIndex - 1)
+                            if (underneath is MovementRoute || underneath is MovementDrillRoute) {
+                                backStack.removeLastOrNull()
+                            } else {
+                                navigateRoot(if (movementRoute.movementId == null) RootScreen.DASHBOARD else RootScreen.MOVEMENTS)
+                            }
+                            appScope.launch {
+                                snackbar.showSnackbar(
+                                    if (movementRoute.movementId == null) "Gasto guardado" else "Movimiento actualizado",
                                 )
                             }
-                        }
-                    }
-                },
-            ) { padding ->
-                Crossfade(targetState = screen, animationSpec = tween(durationMillis = 150), label = "root") { shown ->
-                rootStateHolder.SaveableStateProvider(shown.name) {
-                when (shown) {
-                    RootScreen.DASHBOARD -> DashboardScreen(
-                        state = state,
-                        padding = padding,
-                        onManagePockets = { navigateRoot(RootScreen.POCKETS) },
-                        onRecordExpenseIn = { backStack.add(movementForm(pocketId = it)) },
-                        onComparePeriods = { openComparison(state.currentPeriod.id) },
-                        onOpenAnalysis = { backStack.add(AnalysisRoute(it)) },
-                        recapDismissedPeriodId = preferenceState.recapDismissedPeriodId,
-                        onDismissRecap = { periodId -> appScope.launch { preferences?.dismissRecap(periodId) } },
+                        },
+                        initialMovement = movementBeingEdited,
+                        suggestion = suggestion,
+                        initialPocketId = movementRoute.pocketId,
+                        snackbarHostState = snackbar,
                     )
-                    RootScreen.MOVEMENTS -> MovementsScreen(
+                }
+            }
+
+            entry<ComparisonRoute> { comparisonRoute ->
+                ComparisonScreen(
+                    state = state,
+                    periodId = comparisonRoute.periodId,
+                    baselinePeriodId = comparisonRoute.baselinePeriodId,
+                    onPeriodsChange = { periodId, baselineId -> backStack[backStack.lastIndex] = ComparisonRoute(periodId, baselineId) },
+                    onBack = { backStack.removeLastOrNull() },
+                )
+            }
+
+            entry<AnalysisRoute> { analysisRoute ->
+                AnalysisScreen(
+                    state = state,
+                    periodId = analysisRoute.periodId,
+                    onPeriodChange = { backStack[backStack.lastIndex] = AnalysisRoute(it) },
+                    onOpenMovements = { drill, title -> backStack.add(MovementDrillRoute(drill, title)) },
+                    onBack = { backStack.removeLastOrNull() },
+                    sectionOrder = AnalysisSection.ordered(preferenceState.analysisSectionOrder),
+                    onSectionOrderChange = { order -> appScope.launch { preferences?.setAnalysisSectionOrder(order.map { it.name }) } },
+                )
+            }
+
+            entry<MovementDrillRoute> { drillRoute ->
+                Scaffold(
+                    topBar = { PocketTopAppBar(title = drillRoute.title, onNavigateBack = { backStack.removeLastOrNull() }) },
+                    snackbarHost = { SnackbarHost(snackbar) },
+                ) { padding ->
+                    MovementsScreen(
                         state = state,
                         ledger = ledger,
                         snackbar = snackbar,
@@ -611,40 +651,12 @@ fun PocketApp(
                         undoWindowMillis = undoWindowMillis,
                         onRecordExpense = { backStack.add(movementForm()) },
                         onEditMovement = { backStack.add(movementForm(movementId = it.id)) },
-                        onReviewSuggestion = { backStack.add(movementForm(suggestionId = it)) },
+                        drill = drillRoute.drill,
                     )
-                    RootScreen.POCKETS -> PocketsScreen(state, ledger, padding, onComparePeriod = ::openComparison)
-                    RootScreen.SETTINGS -> SettingsScreen(
-                        state = state,
-                        ledger = ledger,
-                        preferences = preferenceState,
-                        preferencesStore = preferences,
-                        exchangeRates = exchangeRates,
-                        reminderScheduler = reminderScheduler,
-                        fxRateAlertScheduler = fxRateAlertScheduler,
-                        onCreateBackup = { requestBackup("create") },
-                        onShareBackup = { requestBackup("share") },
-                        onCreateCsv = onCreateCsv,
-                        onPickBackup = onPickBackup,
-                        onRequestNotificationPermission = onRequestNotificationPermission,
-                        notificationPermissionRevision = notificationPermissionRevision,
-                        padding = padding,
-                        section = settingsSection,
-                        snackbar = snackbar,
-                        onSectionChange = { section ->
-                            if (section == null) {
-                                if (backStack.lastOrNull() is SettingsDetailRoute) backStack.removeLastOrNull()
-                            } else {
-                                backStack.add(SettingsDetailRoute(section))
-                            }
-                        },
-                    )
-                }
-                }
                 }
             }
-        }
-    }
+        },
+    )
 }
 
 /** "1 periodo, 10 Pockets y 1 movimiento" */

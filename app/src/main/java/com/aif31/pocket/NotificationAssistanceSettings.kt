@@ -7,6 +7,8 @@ import android.provider.Settings
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.layout.WindowInsetsRulers
+import androidx.compose.foundation.layout.fitInside
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -109,6 +111,7 @@ internal fun NotificationAssistanceSettings(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
+    val permissionRequest = rememberNotificationPermissionRequest(onRequestNotificationPermission)
     var accessGranted by remember { mutableStateOf(false) }
     var alertsAllowed by remember { mutableStateOf(false) }
     var selectedPackages by remember { mutableStateOf(preferences.notificationSourcePackages) }
@@ -187,7 +190,8 @@ internal fun NotificationAssistanceSettings(
     // Items before the search field: introduction, setup, behaviour and, when shown, diagnostics.
     val searchIndex = if (diagnostics == null) 3 else 4
 
-    Column(Modifier.fillMaxSize().padding(padding)) {
+    // The keyboard covers this screen instead of resizing it; the fields being typed into stay above it.
+    Column(Modifier.fillMaxSize().padding(padding).fitInside(WindowInsetsRulers.Ime.current)) {
         PocketTopAppBar("Captura desde notificaciones", onBack, windowInsets = WindowInsets(0))
         LazyColumn(
             state = listState,
@@ -234,18 +238,10 @@ internal fun NotificationAssistanceSettings(
                         SetupStep(
                             done = alertsAllowed || !preferences.notificationDetectionAlerts,
                             title = if (alertsAllowed) "Avisos de Pocket permitidos" else "Avisos de Pocket bloqueados",
-                            detail = "Necesarios para ver el aviso emergente cuando se detecta un gasto.",
-                            action = if (alertsAllowed) null else "Permitir avisos",
-                            onAction = {
-                                if (android.os.Build.VERSION.SDK_INT >= 33 && !NotificationManagerCompat.from(context).areNotificationsEnabled()) {
-                                    onRequestNotificationPermission()
-                                } else {
-                                    context.startActivity(
-                                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                                            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                    )
-                                }
-                            },
+                            detail = permissionRequest.explanation("Necesarios para ver el aviso emergente cuando se detecta un gasto."),
+                            action = if (alertsAllowed) null else permissionRequest.requestLabel("Permitir avisos"),
+                            onAction = { permissionRequest?.request() ?: onRequestNotificationPermission() },
+                            moreActions = { if (!alertsAllowed) NotificationSettingsOffer(permissionRequest) },
                         )
                     }
                 }
@@ -362,6 +358,7 @@ private fun SetupStep(
     detail: String,
     action: String? = null,
     onAction: () -> Unit = {},
+    moreActions: @Composable () -> Unit = {},
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
         Icon(
@@ -375,6 +372,7 @@ private fun SetupStep(
             if (action != null) {
                 if (done) OutlinedButton(onClick = onAction) { Text(action) } else Button(onClick = onAction) { Text(action) }
             }
+            moreActions()
         }
     }
 }

@@ -23,6 +23,7 @@ import com.aif31.pocket.data.PortableSettings
 import com.aif31.pocket.expense.EstimatedConversionReconciler
 import com.aif31.pocket.notifications.NotificationAutoRecorder
 import com.aif31.pocket.ui.PocketTheme
+import com.aif31.pocket.ui.StatusBarProtection
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
@@ -95,7 +96,8 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    private val requestNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+    private val requestNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        NotificationPermissionRequest(this) {}.onResult(granted)
         notificationPermissionRevision++
     }
 
@@ -153,11 +155,16 @@ class MainActivity : ComponentActivity() {
                     },
                     onRestoreCompleted = { showOperationMessage(it) },
                     onRequestNotificationPermission = {
-                        if (android.os.Build.VERSION.SDK_INT >= 33) requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        // Each settings card explains the permission before invoking this callback.
+                        NotificationPermissionRequest(this) {
+                            if (android.os.Build.VERSION.SDK_INT >= 33) requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        }.request(rationaleAccepted = true)
                     },
                     notificationPermissionRevision = notificationPermissionRevision,
                     openMovementsRevision = openMovementsRevision,
                 )
+                // Lists scroll behind the transparent status bar.
+                StatusBarProtection()
             }
         }
     }
