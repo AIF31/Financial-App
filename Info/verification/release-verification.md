@@ -1,6 +1,6 @@
 # Release verification
 
-This record is a public-safe template for release evidence. Add only reproducible results and synthetic data; omit usernames, device serials, personal financial values, signing secrets, and other environment-specific identifiers.
+This record is a public-safe template for release evidence. Add only reproducible results and synthetic data; omit personal email addresses, residence details, usernames, device serials, personal financial values and record counts, backup fingerprints, personal device settings, signing secrets, and other environment-specific identifiers.
 
 ## Artifact and environment
 
