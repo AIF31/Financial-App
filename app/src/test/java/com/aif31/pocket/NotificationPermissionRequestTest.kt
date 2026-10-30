@@ -31,19 +31,36 @@ class NotificationPermissionRequestTest {
         permission = NotificationPermissionRequest(activity) { requests++ }
     }
 
-    @Test fun permanent_denial_opens_pocket_settings_even_after_recreation() {
+    @Test fun a_dismissed_prompt_is_asked_again_and_also_offers_settings_after_recreation() {
         permission.request()
         assertEquals(1, requests)
-        shadowOf(activity.packageManager).setShouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS, true)
+        // Swiping the prompt away and a permanent denial both return false with no rationale.
         permission.onResult(false)
-        shadowOf(activity.packageManager).setShouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS, false)
         permission = NotificationPermissionRequest(activity) { requests++ }
+        assertTrue(permission.offerSettings)
         permission.request()
-        assertEquals(1, requests)
+        assertEquals(2, requests)
+        assertNull(shadowOf(activity).nextStartedActivity)
+        permission.openSettings()
         val intent = shadowOf(activity).nextStartedActivity
         assertEquals(Settings.ACTION_APP_NOTIFICATION_SETTINGS, intent.action)
         assertEquals(activity.packageName, intent.getStringExtra(Settings.EXTRA_APP_PACKAGE))
     }
+
+    @Test fun a_denial_android_will_explain_does_not_offer_settings() {
+        shadowOf(activity.packageManager).setShouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS, true)
+        permission.onResult(false)
+        assertFalse(permission.offerSettings)
+    }
+
+    @Test fun a_grant_withdraws_the_settings_offer() {
+        permission.onResult(false)
+        shadowOf(ApplicationProvider.getApplicationContext<android.app.Application>())
+            .grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        permission.onResult(true)
+        assertFalse(NotificationPermissionRequest(activity) {}.offerSettings)
+    }
+
     @Test fun first_request_launches_without_a_rationale() {
         permission.request()
         assertEquals(1, requests)

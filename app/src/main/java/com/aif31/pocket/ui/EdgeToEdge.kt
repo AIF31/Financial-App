@@ -34,6 +34,20 @@ internal fun PaddingValues.plusMargin(start: Dp, top: Dp, end: Dp, bottom: Dp): 
 }
 
 /**
+ * These insets with the top one set to zero. A root list sits above an opaque navigation bar, so it pads the bottom with
+ * this and takes only the top inset as `contentPadding`, scrolling behind the status bar alone.
+ */
+@Composable
+internal fun PaddingValues.exceptTop(): PaddingValues {
+    val direction = LocalLayoutDirection.current
+    return PaddingValues(
+        start = calculateStartPadding(direction),
+        end = calculateEndPadding(direction),
+        bottom = calculateBottomPadding(),
+    )
+}
+
+/**
  * Fades the content scrolling behind the transparent status bar into the background, so the bar's light icons stay
  * legible over cards and text. Drawn above the whole app; it handles no touches, and over a top app bar, which shares
  * the background color, it is invisible.

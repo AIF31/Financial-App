@@ -327,6 +327,9 @@ private fun FxRateAlertCard(
                 Button(onClick = { permissionRequest?.request() ?: onRequestNotificationPermission() }) {
                     Text(if (permissionRequest?.showRationale == true) "Continuar" else "Permitir notificaciones")
                 }
+                if (permissionRequest?.offerSettings == true) {
+                    TextButton(onClick = permissionRequest::openSettings) { Text(OPEN_NOTIFICATION_SETTINGS) }
+                }
             }
             if (onlineFxEnabled && settings.enabled && state.status == ReminderStatus.Failed) {
                 Text("Comprueba los ajustes de notificaciones y vuelve a intentarlo.")

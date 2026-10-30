@@ -52,14 +52,15 @@ class NotificationPermissionCardsTest {
         assertEquals(1, requests)
     }
 
-    @Test fun detection_card_opens_settings_after_permanent_denial() {
-        NotificationPermissionRequest(compose.activity) {}.onResult(false)
+    @Test fun detection_card_keeps_asking_and_offers_settings_after_an_unexplained_refusal() {
         shadowOf(compose.activity.packageManager).setShouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS, false)
+        NotificationPermissionRequest(compose.activity) {}.onResult(false)
         compose.setContent {
             NotificationAssistanceSettings(AppPreferences(), null, PaddingValues(), {}, { requests++ })
         }
         compose.onNodeWithText("Permitir avisos").performScrollTo().performClick()
-        assertEquals(0, requests)
+        assertEquals(1, requests)
+        compose.onNodeWithText(OPEN_NOTIFICATION_SETTINGS).performScrollTo().performClick()
         val intent = shadowOf(compose.activity).nextStartedActivity
         assertEquals(Settings.ACTION_APP_NOTIFICATION_SETTINGS, intent.action)
         assertEquals(compose.activity.packageName, intent.getStringExtra(Settings.EXTRA_APP_PACKAGE))
@@ -89,9 +90,9 @@ class NotificationPermissionCardsTest {
         assertEquals(1, requests)
     }
 
-    @Test fun rate_alert_card_opens_settings_after_permanent_denial() {
-        NotificationPermissionRequest(compose.activity) {}.onResult(false)
+    @Test fun rate_alert_card_keeps_asking_and_offers_settings_after_an_unexplained_refusal() {
         shadowOf(compose.activity.packageManager).setShouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS, false)
+        NotificationPermissionRequest(compose.activity) {}.onResult(false)
         compose.setContent {
             CurrencySettingsContent(
                 state = CurrencySettingsUiState(
@@ -104,9 +105,12 @@ class NotificationPermissionCardsTest {
                 onRequestNotificationPermission = { requests++ },
             )
         }
-        compose.onNodeWithTag("currency_settings_list").performScrollToNode(hasText("Permitir notificaciones"))
+        val list = compose.onNodeWithTag("currency_settings_list")
+        list.performScrollToNode(hasText("Permitir notificaciones"))
         compose.onNodeWithText("Permitir notificaciones").performClick()
-        assertEquals(0, requests)
+        assertEquals(1, requests)
+        list.performScrollToNode(hasText(OPEN_NOTIFICATION_SETTINGS))
+        compose.onNodeWithText(OPEN_NOTIFICATION_SETTINGS).performClick()
         val intent = shadowOf(compose.activity).nextStartedActivity
         assertEquals(Settings.ACTION_APP_NOTIFICATION_SETTINGS, intent.action)
         assertEquals(compose.activity.packageName, intent.getStringExtra(Settings.EXTRA_APP_PACKAGE))

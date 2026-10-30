@@ -16,8 +16,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LifecycleResumeEffect
 
-/** Shared recovery for detection alerts and rate alerts; permission state is always read on a tap. */
+/**
+ * Notification permission for the cards that need it: detection alerts and rate alerts. Permission state is read on
+ * every tap. Android reports a dismissed prompt, which can be asked again, exactly like a permanent denial, which
+ * cannot: refused, with no rationale. So asking stays the card's action, and after such a refusal the card also
+ * offers Android's notification settings for Pocket.
+ */
 internal class NotificationPermissionRequest(
     private val activity: Activity,
     private val launchRequest: () -> Unit,
@@ -26,21 +32,27 @@ internal class NotificationPermissionRequest(
     var showRationale by mutableStateOf(false)
         private set
 
+    /** The last request was refused with no rationale, so Android may no longer show its prompt. */
+    var offerSettings by mutableStateOf(false)
+        private set
+
+    init {
+        refresh()
+    }
+
+    /** Re-reads the last result, which arrives through the activity before it resumes. */
+    fun refresh() {
+        offerSettings = runtimeDenied() && history.getBoolean(KEY_UNEXPLAINED_REFUSAL, false)
+    }
+
     fun request(rationaleAccepted: Boolean = false) {
-        val runtimeDenied = Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        val rationale = runtimeDenied && ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.POST_NOTIFICATIONS)
         when {
-            !runtimeDenied -> {
+            !runtimeDenied() -> {
                 showRationale = false
                 // A card can still be blocked by app or channel settings after the runtime grant.
                 openSettings()
             }
-            rationale && !showRationale && !rationaleAccepted -> showRationale = true
-            !rationale && history.getBoolean("denied", false) -> {
-                showRationale = false
-                openSettings()
-            }
+            rationale() && !showRationale && !rationaleAccepted -> showRationale = true
             else -> {
                 showRationale = false
                 launchRequest()
@@ -49,14 +61,23 @@ internal class NotificationPermissionRequest(
     }
 
     fun onResult(granted: Boolean) {
-        // Android can also return false after dismissal. If it offers no rationale on the next
-        // tap, prefer a working settings route; never open settings just because of a denial.
-        history.edit().putBoolean("denied", !granted).apply()
+        history.edit().putBoolean(KEY_UNEXPLAINED_REFUSAL, !granted && !rationale()).apply()
+        refresh()
     }
 
-    private fun openSettings() {
+    fun openSettings() {
         activity.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
             .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName))
+    }
+
+    private fun runtimeDenied() = Build.VERSION.SDK_INT >= 33 &&
+        ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+
+    private fun rationale() = runtimeDenied() &&
+        ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.POST_NOTIFICATIONS)
+
+    private companion object {
+        const val KEY_UNEXPLAINED_REFUSAL = "unexplained_refusal"
     }
 }
 
@@ -67,8 +88,15 @@ internal fun rememberNotificationPermissionRequest(onRequest: () -> Unit): Notif
         generateSequence(context) { (it as? ContextWrapper)?.baseContext }
             .filterIsInstance<Activity>().firstOrNull()
     }
-    return remember(activity, onRequest) { activity?.let { NotificationPermissionRequest(it, onRequest) } }
+    val request = remember(activity, onRequest) { activity?.let { NotificationPermissionRequest(it, onRequest) } }
+    LifecycleResumeEffect(request) {
+        request?.refresh()
+        onPauseOrDispose {}
+    }
+    return request
 }
 
 internal const val NOTIFICATION_PERMISSION_RATIONALE =
     "Permite las notificaciones para recibir los avisos que actives en Pocket. Puedes cambiarlas en los ajustes de Android."
+
+internal const val OPEN_NOTIFICATION_SETTINGS = "Abrir ajustes de Android"

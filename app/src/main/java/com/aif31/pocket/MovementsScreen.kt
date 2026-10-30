@@ -105,6 +105,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.foundation.layout.fitInside
 import androidx.compose.ui.layout.WindowInsetsRulers
+import com.aif31.pocket.ui.exceptTop
 
 @Composable
 internal fun MovementsScreen(
@@ -172,9 +173,10 @@ internal fun MovementsScreen(
     }
 
     LazyColumn(
-        // While searching, the results end where the keyboard starts.
-        modifier = Modifier.fillMaxSize().padding(padding).fitInside(WindowInsetsRulers.Ime.current).testTag("movements_list"),
-        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
+        // Scrolls behind the status bar; while searching, the results end where the keyboard starts.
+        modifier = Modifier.fillMaxSize().padding(padding.exceptTop()).fitInside(WindowInsetsRulers.Ime.current)
+            .testTag("movements_list"),
+        contentPadding = PaddingValues(start = 16.dp, top = padding.calculateTopPadding() + 16.dp, end = 16.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (drill != null) {
