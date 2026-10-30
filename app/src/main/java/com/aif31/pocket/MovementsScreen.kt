@@ -103,6 +103,8 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import androidx.compose.foundation.layout.fitInside
+import androidx.compose.ui.layout.WindowInsetsRulers
 
 @Composable
 internal fun MovementsScreen(
@@ -170,7 +172,8 @@ internal fun MovementsScreen(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(padding),
+        // While searching, the results end where the keyboard starts.
+        modifier = Modifier.fillMaxSize().padding(padding).fitInside(WindowInsetsRulers.Ime.current).testTag("movements_list"),
         contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {

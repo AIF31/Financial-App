@@ -1,6 +1,8 @@
 package com.aif31.pocket
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.layout.WindowInsetsRulers
+import androidx.compose.foundation.layout.fitInside
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -225,7 +227,8 @@ private fun CurrencySettingsRoute(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+    // The keyboard covers this screen instead of resizing it; the fields being typed into stay above it.
+    Column(modifier = Modifier.fillMaxSize().padding(padding).fitInside(WindowInsetsRulers.Ime.current)) {
         PocketTopAppBar(SettingsSection.CURRENCY.title, onBack, windowInsets = WindowInsets(0))
         CurrencySettingsContent(
             state = CurrencySettingsUiState(
@@ -356,7 +359,8 @@ private fun SettingsDetailScreen(
     }
     var reminderPickerVisible by rememberSaveable { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxSize().padding(padding)) {
+    // The keyboard covers this screen instead of resizing it; the fields being typed into stay above it.
+    Column(Modifier.fillMaxSize().padding(padding).fitInside(WindowInsetsRulers.Ime.current)) {
         PocketTopAppBar(section.title, onBack, windowInsets = WindowInsets(0))
         LazyColumn(
             modifier = Modifier.fillMaxSize().testTag("settings_list"),

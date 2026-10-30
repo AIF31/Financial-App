@@ -115,12 +115,7 @@ internal fun ActionableDashboardContent(
         modifier = modifier
             .fillMaxSize()
             .testTag("dashboard_list"),
-        contentPadding = PaddingValues(
-            start = 16.dp,
-            top = contentPadding.calculateTopPadding() + 16.dp,
-            end = 16.dp,
-            bottom = contentPadding.calculateBottomPadding() + 96.dp,
-        ),
+        contentPadding = contentPadding.plusMargin(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

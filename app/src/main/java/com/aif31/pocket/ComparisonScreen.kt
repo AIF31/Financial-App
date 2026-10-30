@@ -58,6 +58,7 @@ import com.aif31.pocket.ui.merchantOrPocket
 import androidx.compose.foundation.layout.Spacer
 import com.aif31.pocket.ui.spendDeltaText
 import com.aif31.pocket.ui.spendDeltaWords
+import com.aif31.pocket.ui.plusMargin
 
 /**
  * Focused comparison task: two periods side by side, compared by average daily spending so a period in
@@ -79,8 +80,8 @@ internal fun ComparisonScreen(
         },
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding).testTag("comparison_list"),
-            contentPadding = PaddingValues(16.dp),
+            modifier = Modifier.fillMaxSize().testTag("comparison_list"),
+            contentPadding = padding.plusMargin(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {

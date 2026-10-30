@@ -101,6 +101,7 @@ import com.aif31.pocket.ui.widestTextWidth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
+import com.aif31.pocket.ui.plusMargin
 
 private const val TOP_MERCHANTS = 8
 
@@ -147,8 +148,8 @@ internal fun AnalysisScreen(
         },
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding).testTag("analysis_list"),
-            contentPadding = PaddingValues(16.dp),
+            modifier = Modifier.fillMaxSize().testTag("analysis_list"),
+            contentPadding = padding.plusMargin(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {

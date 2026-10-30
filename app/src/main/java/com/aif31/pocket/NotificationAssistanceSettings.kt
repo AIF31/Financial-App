@@ -7,6 +7,8 @@ import android.provider.Settings
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.layout.WindowInsetsRulers
+import androidx.compose.foundation.layout.fitInside
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -187,7 +189,8 @@ internal fun NotificationAssistanceSettings(
     // Items before the search field: introduction, setup, behaviour and, when shown, diagnostics.
     val searchIndex = if (diagnostics == null) 3 else 4
 
-    Column(Modifier.fillMaxSize().padding(padding)) {
+    // The keyboard covers this screen instead of resizing it; the fields being typed into stay above it.
+    Column(Modifier.fillMaxSize().padding(padding).fitInside(WindowInsetsRulers.Ime.current)) {
         PocketTopAppBar("Captura desde notificaciones", onBack, windowInsets = WindowInsets(0))
         LazyColumn(
             state = listState,

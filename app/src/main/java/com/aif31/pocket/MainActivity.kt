@@ -23,6 +23,7 @@ import com.aif31.pocket.data.PortableSettings
 import com.aif31.pocket.expense.EstimatedConversionReconciler
 import com.aif31.pocket.notifications.NotificationAutoRecorder
 import com.aif31.pocket.ui.PocketTheme
+import com.aif31.pocket.ui.StatusBarProtection
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
@@ -158,6 +159,8 @@ class MainActivity : ComponentActivity() {
                     notificationPermissionRevision = notificationPermissionRevision,
                     openMovementsRevision = openMovementsRevision,
                 )
+                // Lists scroll behind the transparent status bar.
+                StatusBarProtection()
             }
         }
     }
