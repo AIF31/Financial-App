@@ -1641,6 +1641,32 @@ class PocketAppHostFlowTest {
     }
 
     @Test
+    fun reminder_permission_offers_android_settings_after_a_refusal_android_will_not_explain() {
+        val zone = ZoneId.of("Asia/Riyadh")
+        val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
+        runBlocking { ledger.execute(LedgerCommand.Initialize(100_000)) }
+        val application = ApplicationProvider.getApplicationContext<android.app.Application>()
+        org.robolectric.Shadows.shadowOf(application).denyPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+        // A permanent denial: the last request was refused and Android offers no rationale.
+        application.getSharedPreferences("notification_permission", Context.MODE_PRIVATE).edit()
+            .putBoolean("unexplained_refusal", true).commit()
+        val preferences = FakePreferences()
+        val scheduler = FakeReminderScheduler().apply { nextStatus = ReminderStatus.PermissionRequired }
+        compose.setContent { PocketApp(ledger, preferences = preferences, reminderScheduler = scheduler) }
+
+        compose.waitUntilExactlyOneExists(hasText("Ajustes"), 5_000)
+        compose.onNodeWithText("Ajustes").performClick()
+        compose.onNodeWithText("Recordatorio diario").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithTag("settings_list").performScrollToNode(hasTestTag("reminder_switch"))
+        compose.onNodeWithTag("reminder_switch").performClick()
+        compose.waitUntilExactlyOneExists(hasText("Permiso necesario"), 5_000)
+        compose.onNodeWithTag("settings_list").performScrollToNode(hasText(OPEN_NOTIFICATION_SETTINGS))
+        compose.onNodeWithText(OPEN_NOTIFICATION_SETTINGS).performClick()
+        val intent = org.robolectric.Shadows.shadowOf(application).nextStartedActivity
+        assertEquals(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS, intent.action)
+    }
+
+    @Test
     fun reminder_settings_reports_permission_and_scheduler_failure_then_recovers() {
         val zone = ZoneId.of("Asia/Riyadh")
         val ledger = RoomPocketLedger(database, Clock.fixed(Instant.parse("2026-02-26T09:00:00Z"), zone), zone)
