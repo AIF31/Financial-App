@@ -7,7 +7,7 @@ This directory is the human-oriented operational knowledge base for Pocket. It s
 - [Changelog](CHANGELOG.md): repository changes, verification performed, and unresolved blockers.
 - [Install Pocket on an Android device](installing-pocket.md): official downloads, sideloading, source builds, updates, and data-safety notes.
 - [Implementation reference](implementation-reference.md): product boundaries, architecture, durable decisions, and repository history.
-- [Windows, Android Studio, and Pixel 10 Pro testing](windows-android-studio-device-testing.md): working environment, build commands, ADB workflow, and physical-device precautions.
+- [Windows, Android Studio, and physical-device testing](windows-android-studio-device-testing.md): working environment, build commands, ADB workflow, and physical-device precautions.
 - [Ubuntu development and verification](ubuntu-development.md): native Linux and WSL setup, host checks, and managed-device acceleration requirements.
 - [Release signing and recovery](release-signing-and-recovery.md): permanent key handling, signed builds, verification, backup, uninstall, and restore.
 - [Release verification](verification/release-verification.md): retained test evidence and known coverage gaps.
@@ -19,6 +19,8 @@ GitHub Issue [AIF31/Financial-App#1](https://github.com/AIF31/Financial-App/issu
 
 Update these documents when the package name, SDK, signing certificate, backup format, release process, or supported test-device workflow changes. Never commit keystores, passwords, DPAPI credential files, raw financial backups, device serials, or other personal identifiers.
 
+Copyright attribution in `NOTICE` and the bundled license is intentional. Public documentation must omit personal email addresses, residence details, local usernames, personal ledger values and record counts, backup fingerprints, and personal device settings. Use generic physical-device descriptions; retain API levels and layout measurements when needed to reproduce a result. Report preservation checks without publishing the protected data.
+
 ## Current handoff status
 
-The MVP is implemented on `main`. Automated host, lint, and managed-device checks are retained in the verification record; physical-device checks should be repeated on a Pixel 10 Pro before a release. Follow the personal-data preservation procedure before installing or testing on that phone. Maximum-font and TalkBack checks remain release evidence gaps until they are explicitly exercised.
+The MVP is implemented on `main`. Automated host, lint, and managed-device checks are retained in the verification record; physical-device checks should be repeated on a representative Android device before a release. Follow the personal-data preservation procedure before installing or testing on that device. Maximum-font and TalkBack checks remain release evidence gaps until they are explicitly exercised.
