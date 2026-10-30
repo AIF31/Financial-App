@@ -282,6 +282,7 @@ private fun FxRateAlertCard(
     onRequestNotificationPermission: () -> Unit,
 ) {
     val settings = state.settings
+    val permissionRequest = rememberNotificationPermissionRequest(onRequestNotificationPermission)
     var pickerVisible by rememberSaveable { mutableStateOf(false) }
     var minimum by rememberSaveable(settings.minimumRate) { mutableStateOf(settings.minimumRate?.toPlainString().orEmpty()) }
     var minimumError by rememberSaveable { mutableStateOf<String?>(null) }
@@ -322,7 +323,10 @@ private fun FxRateAlertCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (onlineFxEnabled && settings.enabled && state.status == ReminderStatus.PermissionRequired) {
-                Button(onClick = onRequestNotificationPermission) { Text("Permitir notificaciones") }
+                if (permissionRequest?.showRationale == true) Text(NOTIFICATION_PERMISSION_RATIONALE)
+                Button(onClick = { permissionRequest?.request() ?: onRequestNotificationPermission() }) {
+                    Text(if (permissionRequest?.showRationale == true) "Continuar" else "Permitir notificaciones")
+                }
             }
             if (onlineFxEnabled && settings.enabled && state.status == ReminderStatus.Failed) {
                 Text("Comprueba los ajustes de notificaciones y vuelve a intentarlo.")

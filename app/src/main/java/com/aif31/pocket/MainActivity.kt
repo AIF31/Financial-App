@@ -96,7 +96,8 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    private val requestNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+    private val requestNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        NotificationPermissionRequest(this) {}.onResult(granted)
         notificationPermissionRevision++
     }
 
@@ -154,7 +155,10 @@ class MainActivity : ComponentActivity() {
                     },
                     onRestoreCompleted = { showOperationMessage(it) },
                     onRequestNotificationPermission = {
-                        if (android.os.Build.VERSION.SDK_INT >= 33) requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        // Each settings card explains the permission before invoking this callback.
+                        NotificationPermissionRequest(this) {
+                            if (android.os.Build.VERSION.SDK_INT >= 33) requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        }.request(rationaleAccepted = true)
                     },
                     notificationPermissionRevision = notificationPermissionRevision,
                     openMovementsRevision = openMovementsRevision,

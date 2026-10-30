@@ -111,6 +111,7 @@ internal fun NotificationAssistanceSettings(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
+    val permissionRequest = rememberNotificationPermissionRequest(onRequestNotificationPermission)
     var accessGranted by remember { mutableStateOf(false) }
     var alertsAllowed by remember { mutableStateOf(false) }
     var selectedPackages by remember { mutableStateOf(preferences.notificationSourcePackages) }
@@ -237,18 +238,10 @@ internal fun NotificationAssistanceSettings(
                         SetupStep(
                             done = alertsAllowed || !preferences.notificationDetectionAlerts,
                             title = if (alertsAllowed) "Avisos de Pocket permitidos" else "Avisos de Pocket bloqueados",
-                            detail = "Necesarios para ver el aviso emergente cuando se detecta un gasto.",
-                            action = if (alertsAllowed) null else "Permitir avisos",
-                            onAction = {
-                                if (android.os.Build.VERSION.SDK_INT >= 33 && !NotificationManagerCompat.from(context).areNotificationsEnabled()) {
-                                    onRequestNotificationPermission()
-                                } else {
-                                    context.startActivity(
-                                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                                            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                    )
-                                }
-                            },
+                            detail = if (permissionRequest?.showRationale == true) NOTIFICATION_PERMISSION_RATIONALE
+                                else "Necesarios para ver el aviso emergente cuando se detecta un gasto.",
+                            action = if (alertsAllowed) null else if (permissionRequest?.showRationale == true) "Continuar" else "Permitir avisos",
+                            onAction = { permissionRequest?.request() ?: onRequestNotificationPermission() },
                         )
                     }
                 }
