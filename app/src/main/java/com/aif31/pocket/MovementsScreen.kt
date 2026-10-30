@@ -178,7 +178,7 @@ internal fun MovementsScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (drill != null) {
-            item {
+            item(key = "drill-summary", contentType = "drill-summary") {
                 val currency = state.periods.firstOrNull { it.id == drill.periodId }?.accountingCurrency ?: SupportedCurrency.SAR
                 val net = filtered.netSpendMinor()
                 // A weekday list comes from an average, so it shows how the total divides into it.
@@ -193,14 +193,14 @@ internal fun MovementsScreen(
                 )
             }
             if (filtered.isEmpty()) {
-                item { EmptyHistory(title = "Ya no hay movimientos aquí", body = "Se editaron o eliminaron desde que abriste el análisis.") }
+                item(key = "drill-empty", contentType = "empty-history") { EmptyHistory(title = "Ya no hay movimientos aquí", body = "Se editaron o eliminaron desde que abriste el análisis.") }
             }
         }
-        if (drill == null) item {
+        if (drill == null) item(key = "history-heading", contentType = "history-heading") {
             Text("Movimientos", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { heading() })
         }
         if (drill == null && state.movementSuggestions.isNotEmpty()) {
-            item(key = "suggestions-header") {
+            item(key = "suggestions-header", contentType = "suggestions-header") {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -222,7 +222,7 @@ internal fun MovementsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            items(state.movementSuggestions, key = { "suggestion-${it.id}" }) { suggestion ->
+            items(state.movementSuggestions, key = { "suggestion-${it.id}" }, contentType = { "suggestion" }) { suggestion ->
                 SuggestionCard(
                     suggestion = suggestion,
                     // The payment's own period decides whether it needs a conversion, not the current one.
@@ -243,7 +243,7 @@ internal fun MovementsScreen(
                 )
             }
         }
-        if (drill == null) item {
+        if (drill == null) item(key = "search", contentType = "search") {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -265,15 +265,15 @@ internal fun MovementsScreen(
                 modifier = Modifier.fillMaxWidth().testTag("history_search"),
             )
         }
-        if (drill == null) item {
+        if (drill == null) item(key = "filters", contentType = "filters") {
             LazyRow(
                 modifier = Modifier.testTag("history_filters"),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                item { HistoryFilter("filter_period", "Periodo", periodLabels, periodIndex) { periodIndex = it } }
-                item { HistoryFilter("filter_pocket", "Pocket", pocketLabels, pocketIndex) { selectedPocketId = pocketOptions[it] } }
-                item { HistoryFilter("filter_currency", "Moneda", currencyLabels, currencyIndex) { currencyIndex = it } }
-                item { HistoryFilter("filter_method", "Método", methodLabels, methodIndex) { methodIndex = it } }
+                item(key = "period", contentType = "history-filter") { HistoryFilter("filter_period", "Periodo", periodLabels, periodIndex) { periodIndex = it } }
+                item(key = "pocket", contentType = "history-filter") { HistoryFilter("filter_pocket", "Pocket", pocketLabels, pocketIndex) { selectedPocketId = pocketOptions[it] } }
+                item(key = "currency", contentType = "history-filter") { HistoryFilter("filter_currency", "Moneda", currencyLabels, currencyIndex) { currencyIndex = it } }
+                item(key = "method", contentType = "history-filter") { HistoryFilter("filter_method", "Método", methodLabels, methodIndex) { methodIndex = it } }
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -297,7 +297,7 @@ internal fun MovementsScreen(
             }
         }
         if (drill == null && state.movements.isEmpty()) {
-            item {
+            item(key = "history-empty", contentType = "empty-history") {
                 EmptyHistory(
                     title = "Aún no hay movimientos",
                     body = "Registra tu primer gasto para ver aquí tu historial.",
@@ -306,7 +306,7 @@ internal fun MovementsScreen(
                 )
             }
         } else if (drill == null && filtered.isEmpty()) {
-            item {
+            item(key = "filters-empty", contentType = "empty-history") {
                 EmptyHistory(
                     title = "No hay movimientos para estos filtros",
                     body = "Prueba otra búsqueda o limpia los filtros.",
@@ -314,7 +314,7 @@ internal fun MovementsScreen(
             }
         }
         groupedMovements.forEach { (date, movements) ->
-            item(key = "date-$date") {
+            item(key = "date-$date", contentType = "movement-date") {
                 val dayNet = movements.netSpendMinor()
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp).semantics(mergeDescendants = true) { heading() },
@@ -337,7 +337,7 @@ internal fun MovementsScreen(
                     }
                 }
             }
-            items(movements, key = { it.id }) { movement ->
+            items(movements, key = { it.id }, contentType = { "movement" }) { movement ->
                 SwipeToDeleteMovement(
                     onDelete = { deleteWithUndo(movement) },
                     modifier = Modifier.animateItem(),

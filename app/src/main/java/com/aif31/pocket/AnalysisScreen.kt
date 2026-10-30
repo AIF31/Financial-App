@@ -154,7 +154,7 @@ internal fun AnalysisScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             val bounded = Modifier.fillMaxWidth().widthIn(max = 760.dp)
-            item {
+            item(key = "period-picker", contentType = "period-picker") {
                 PeriodPicker(
                     label = "Periodo",
                     periods = state.periods,
@@ -167,31 +167,31 @@ internal fun AnalysisScreen(
             val currency = analysis.period.accountingCurrency
             sectionOrder.forEach { section ->
                 when (section) {
-                    AnalysisSection.TREND -> item(key = section) {
+                    AnalysisSection.TREND -> item(key = section.name, contentType = section.name) {
                         Section(section.title, bounded) { TrendSection(analysis, currency, onPeriodChange) }
                     }
                     AnalysisSection.POCKETS -> if (analysis.pocketTrends.isNotEmpty()) {
-                        item(key = section) { Section(section.title, bounded) { PocketSection(analysis, currency) } }
+                        item(key = section.name, contentType = section.name) { Section(section.title, bounded) { PocketSection(analysis, currency) } }
                     }
                     AnalysisSection.RECURRING -> if (recurring != null) {
-                        item(key = section) {
+                        item(key = section.name, contentType = section.name) {
                             Section(section.title, bounded) { RecurringSection(recurring, currency, periodId, onOpenMovements) }
                         }
                     }
-                    AnalysisSection.MERCHANTS -> item(key = section) {
+                    AnalysisSection.MERCHANTS -> item(key = section.name, contentType = section.name) {
                         Section(section.title, bounded) { MerchantSection(analysis, currency, onOpenMovements) }
                     }
-                    AnalysisSection.WHEN -> item(key = section) {
+                    AnalysisSection.WHEN -> item(key = section.name, contentType = section.name) {
                         Section(section.title, bounded) { WhenSection(analysis, currency, onOpenMovements) }
                     }
-                    AnalysisSection.PAYMENT_METHODS -> item(key = section) {
+                    AnalysisSection.PAYMENT_METHODS -> item(key = section.name, contentType = section.name) {
                         Section(section.title, bounded) { PaymentMethodSection(analysis, currency, onOpenMovements) }
                     }
-                    AnalysisSection.FOREIGN_CURRENCY -> item(key = section) {
+                    AnalysisSection.FOREIGN_CURRENCY -> item(key = section.name, contentType = section.name) {
                         Section(section.title, bounded) { ForeignCurrencySection(analysis, currency) }
                     }
                     AnalysisSection.ROLLOVER -> if (analysis.rollover.isNotEmpty()) {
-                        item(key = section) { Section(section.title, bounded) { RolloverSection(analysis, currency) } }
+                        item(key = section.name, contentType = section.name) { Section(section.title, bounded) { RolloverSection(analysis, currency) } }
                     }
                 }
             }

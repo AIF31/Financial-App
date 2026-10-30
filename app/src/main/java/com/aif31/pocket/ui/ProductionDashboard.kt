@@ -100,9 +100,11 @@ internal fun ActionableDashboardContent(
     val shownRecap = recap?.takeIf {
         state.elapsedDays <= RECAP_DAYS && it.insights.period.id != recapDismissedPeriodId && it.insights.period.id != recapClosedHere
     }
-    val activePockets = state.pockets
-        .filterNot { it.pocket.archived || it.retiredThisPeriod }
-        .sortedBy { summary -> summary.budgetStatusAt(insights).ordinal }
+    val activePockets = remember(state.pockets, insights) {
+        state.pockets
+            .filterNot { it.pocket.archived || it.retiredThisPeriod }
+            .sortedBy { summary -> summary.budgetStatusAt(insights).ordinal }
+    }
     val accountingCurrency = period?.accountingCurrency ?: SupportedCurrency.SAR
     fun money(minor: Long): String = MoneyText.format(minor, accountingCurrency)
     val comparison = remember(state) {
@@ -119,7 +121,7 @@ internal fun ActionableDashboardContent(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        item {
+        item(key = "period-header", contentType = "period-header") {
             Row(
                 modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -160,7 +162,7 @@ internal fun ActionableDashboardContent(
             }
         }
         if (period?.needsReview == true) {
-            item {
+            item(key = "period-review", contentType = "period-review") {
                 Card(
                     modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
@@ -173,7 +175,7 @@ internal fun ActionableDashboardContent(
                 }
             }
         }
-        item {
+        item(key = "availability", contentType = "availability") {
             AvailabilityHero(
                 state = state,
                 insights = insights,
@@ -184,7 +186,7 @@ internal fun ActionableDashboardContent(
                 modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
             )
         }
-        item {
+        item(key = "metrics", contentType = "metrics") {
             CompactMetrics(
                 metrics = listOf("Sin asignar" to money(state.unallocatedMinor), "Gastado" to money(state.netSpendMinor)),
                 modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
@@ -192,7 +194,7 @@ internal fun ActionableDashboardContent(
         }
         // Below the hero, so the available amount stays the first figure on screen.
         shownRecap?.let { recap ->
-            item(key = "recap") {
+            item(key = "recap", contentType = "recap") {
                 PeriodRecapCard(
                     recap = recap,
                     onOpenAnalysis = { onOpenAnalysis(recap.insights.period.id) },
@@ -205,11 +207,11 @@ internal fun ActionableDashboardContent(
             }
         }
         if (insights != null) {
-            item {
+            item(key = "analysis-entry", contentType = "analysis-entry") {
                 AnalysisEntry(onClick = { onOpenAnalysis(insights.period.id) }, modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp))
             }
         }
-        item {
+        item(key = "pockets-header", contentType = "pockets-header") {
             // The whole header opens Pockets. A separate "Ver todos" button at the row's end would sit in the
             // floating action button's column, where it can scroll into place almost entirely covered.
             Row(
@@ -236,7 +238,7 @@ internal fun ActionableDashboardContent(
             }
         }
         if (activePockets.isEmpty()) {
-            item {
+            item(key = "empty-pockets", contentType = "empty-pockets") {
                 Surface(
                     modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp),
                     shape = MaterialTheme.shapes.large,
@@ -250,7 +252,7 @@ internal fun ActionableDashboardContent(
                 }
             }
         } else {
-            items(activePockets, key = { it.pocket.id }) { summary ->
+            items(activePockets, key = { it.pocket.id }, contentType = { "pocket-row" }) { summary ->
                 PocketProgressRow(
                     summary = summary,
                     accountingCurrency = accountingCurrency,
