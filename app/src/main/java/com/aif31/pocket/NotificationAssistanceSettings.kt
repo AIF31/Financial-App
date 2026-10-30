@@ -39,7 +39,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -239,12 +238,10 @@ internal fun NotificationAssistanceSettings(
                         SetupStep(
                             done = alertsAllowed || !preferences.notificationDetectionAlerts,
                             title = if (alertsAllowed) "Avisos de Pocket permitidos" else "Avisos de Pocket bloqueados",
-                            detail = if (permissionRequest?.showRationale == true) NOTIFICATION_PERMISSION_RATIONALE
-                                else "Necesarios para ver el aviso emergente cuando se detecta un gasto.",
-                            action = if (alertsAllowed) null else if (permissionRequest?.showRationale == true) "Continuar" else "Permitir avisos",
+                            detail = permissionRequest.explanation("Necesarios para ver el aviso emergente cuando se detecta un gasto."),
+                            action = if (alertsAllowed) null else permissionRequest.requestLabel("Permitir avisos"),
                             onAction = { permissionRequest?.request() ?: onRequestNotificationPermission() },
-                            secondaryAction = OPEN_NOTIFICATION_SETTINGS.takeIf { !alertsAllowed && permissionRequest?.offerSettings == true },
-                            onSecondaryAction = { permissionRequest?.openSettings() },
+                            moreActions = { if (!alertsAllowed) NotificationSettingsOffer(permissionRequest) },
                         )
                     }
                 }
@@ -361,8 +358,7 @@ private fun SetupStep(
     detail: String,
     action: String? = null,
     onAction: () -> Unit = {},
-    secondaryAction: String? = null,
-    onSecondaryAction: () -> Unit = {},
+    moreActions: @Composable () -> Unit = {},
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
         Icon(
@@ -376,7 +372,7 @@ private fun SetupStep(
             if (action != null) {
                 if (done) OutlinedButton(onClick = onAction) { Text(action) } else Button(onClick = onAction) { Text(action) }
             }
-            if (secondaryAction != null) TextButton(onClick = onSecondaryAction) { Text(secondaryAction) }
+            moreActions()
         }
     }
 }

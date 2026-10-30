@@ -8,6 +8,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -100,3 +102,17 @@ internal const val NOTIFICATION_PERMISSION_RATIONALE =
     "Permite las notificaciones para recibir los avisos que actives en Pocket. Puedes cambiarlas en los ajustes de Android."
 
 internal const val OPEN_NOTIFICATION_SETTINGS = "Abrir ajustes de Android"
+
+/** A card's permission explanation: the shared rationale while Android asks for one, otherwise [default]. */
+internal fun NotificationPermissionRequest?.explanation(default: String) =
+    if (this?.showRationale == true) NOTIFICATION_PERMISSION_RATIONALE else default
+
+/** A card's request button: "Continuar" once the rationale is showing, otherwise [default]. */
+internal fun NotificationPermissionRequest?.requestLabel(default: String) =
+    if (this?.showRationale == true) "Continuar" else default
+
+/** Android's notification settings for Pocket, offered after a refusal that may have stopped the prompt appearing. */
+@Composable
+internal fun NotificationSettingsOffer(request: NotificationPermissionRequest?) {
+    if (request?.offerSettings == true) TextButton(onClick = request::openSettings) { Text(OPEN_NOTIFICATION_SETTINGS) }
+}

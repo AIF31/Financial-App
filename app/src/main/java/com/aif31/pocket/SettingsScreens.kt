@@ -552,9 +552,7 @@ private fun SettingsDetailScreen(
                         if (reminderStatus == ReminderStatus.PermissionRequired) {
                             Text("Permite las notificaciones para recibir el recordatorio.")
                             TextButton(onClick = { reminderPermissionRationaleVisible = true }) { Text("Revisar permiso") }
-                            if (reminderPermission?.offerSettings == true) {
-                                TextButton(onClick = reminderPermission::openSettings) { Text(OPEN_NOTIFICATION_SETTINGS) }
-                            }
+                            NotificationSettingsOffer(reminderPermission)
                         }
                         Text("La entrega es aproximada y puede retrasarse según el dispositivo.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text("El recordatorio no muestra importes en la pantalla bloqueada.", color = MaterialTheme.colorScheme.onSurfaceVariant)
