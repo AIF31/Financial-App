@@ -61,6 +61,16 @@ class NotificationPermissionRequestTest {
         assertFalse(NotificationPermissionRequest(activity) {}.offerSettings)
     }
 
+    @Test fun a_grant_made_in_android_settings_clears_a_showing_rationale() {
+        shadowOf(activity.packageManager).setShouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS, true)
+        permission.request()
+        assertTrue(permission.showRationale)
+        shadowOf(ApplicationProvider.getApplicationContext<android.app.Application>())
+            .grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        permission.refresh() // Back from Android's settings.
+        assertFalse(permission.showRationale)
+    }
+
     @Test fun first_request_launches_without_a_rationale() {
         permission.request()
         assertEquals(1, requests)

@@ -42,8 +42,12 @@ internal class NotificationPermissionRequest(
         refresh()
     }
 
-    /** Re-reads the last result, which arrives through the activity before it resumes. */
+    /**
+     * Re-reads the permission and the last result, which arrives through the activity before it resumes. A grant made
+     * in Android's settings meanwhile withdraws both the rationale and the settings offer.
+     */
     fun refresh() {
+        if (!rationale()) showRationale = false
         offerSettings = runtimeDenied() && history.getBoolean(KEY_UNEXPLAINED_REFUSAL, false)
     }
 
