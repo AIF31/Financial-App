@@ -49,7 +49,7 @@ Notable repository changes are recorded here for future maintainers.
 - Consolidating the stacked features into one PR retains `1.0.11` (`versionCode` 12), exactly one increment above `main`, as required by the version policy. The intermediate `1.0.12` / 13 declaration caused Android CI's version check to fail before any Gradle tasks ran. The version gate and its self-check pass with the corrected metadata.
 - The independent Standards review found an unnamed rate-alert switch and budget calculations in the suggestions dialog; the Spec review found that a concurrent auto-recorded expense could make merchant reassignment report success without changing memory. The switch now has an accessible name, final replacement totals and affordability live in `BudgetSuggestions`, and merchant reassignment checks the latest expense inside the transaction. All three regressions failed before the fixes and passed afterward (29 targeted tests). The merchant-memory host flow also waits for the updated row after the dialog closes, matching the ledger's asynchronous UI delivery. Details are in [the review record](../docs/audits/2026-10-23-pr46-review.md).
 - The requested Claude Opus 5.5 high-effort adversarial review found that median-day projection could move a first-of-month subscription into the wrong budget period. Consistent monthly histories now retain their calendar date across shorter months; rolling day-interval schedules keep their prior behavior. The regression failed with November 30 instead of November 1, then passed with February, month-end and period-boundary cases (20 recurring-charge tests).
-- Final verification: the gradle-run wrapper passed all 421 host tests, lint (zero errors, 26 existing warnings) and all APK builds. Two physical-layout test interactions were corrected and passed five focused host tests, then all 16 audited feature tests passed on a Samsung Galaxy S23 Ultra (API 36) under an isolated package. Its protected financial-file set stayed unchanged and device animation settings were restored. The signed production `1.0.11` / 12 APK matched the installed certificate, updated `1.0.9` in place, and launched into the existing ledger. Temporary test apps were removed. A second Opus review confirmed the fixes; shifted monthly histories retain their documented median-day estimate. Manual TalkBack and live FX notification delivery remain unchecked.
+- Final verification: the gradle-run wrapper passed all 421 host tests, lint (zero errors, 26 existing warnings) and all APK builds. Two physical-layout test interactions were corrected and passed five focused host tests, then all 16 audited feature tests passed on a physical Android API 36 device under an isolated package. Its protected financial-file set stayed unchanged and device animation settings were restored. The signed production `1.0.11` / 12 APK matched the installed certificate, updated `1.0.9` in place, and launched into the existing ledger. Temporary test apps were removed. A second Opus review confirmed the fixes; shifted monthly histories retain their documented median-day estimate. Manual TalkBack and live FX notification delivery remain unchecked.
 
 ## 2026-10-21
 
@@ -199,7 +199,7 @@ Fixes for the five findings in `Info/verification/2026-09-29-1.0.6-hardware-test
 
 ### 1.0.6 physical-device test
 
-- Recorded in `Info/verification/2026-09-29-1.0.6-hardware-test.md`. The release-signed `1.0.3` upgraded in place to `1.0.6` with a byte-identical backup before and after. All 31 device tests passed, and the manual journeys passed, including the launcher shortcut over an unsaved edit and the dark-theme onboarding heading. Five non-blocking UI findings are listed there. The phone was left on a release-signed `1.0.6` with the user's backup restored.
+- Recorded in `Info/verification/2026-09-29-1.0.6-hardware-test.md`. The release-signed `1.0.3` upgraded in place to `1.0.6` with a byte-identical backup before and after. All 31 device tests passed, and the manual journeys passed, including the launcher shortcut over an unsaved edit and the dark-theme onboarding heading. Five non-blocking UI findings are listed there. Release installation and backup restoration completed successfully.
 
 ### Notification replay after backup restore
 
@@ -232,7 +232,7 @@ Fixes for the five findings of the review at `74a214b`, which were still open wh
 
 ### PR #34 physical-device test
 
-- Recorded the PR #34 hardware run in `Info/verification/2026-09-28-pr34-hardware-test.md`: 29 of 31 device tests passed. Found: the launcher shortcut does not preserve an unsaved edit, the onboarding heading is unreadable in dark theme, and clipped Pocket cards lose their accessibility label. The phone was left on a release-signed `1.0.3` with the user's backup restored.
+- Recorded the PR #34 hardware run in `Info/verification/2026-09-28-pr34-hardware-test.md`: 29 of 31 device tests passed. Found: the launcher shortcut does not preserve an unsaved edit, the onboarding heading is unreadable in dark theme, and clipped Pocket cards lose their accessibility label. Release installation and backup restoration completed successfully.
 - The "Nuevo gasto" static shortcut now targets `NewExpenseShortcutActivity`, an invisible, non-exported activity in its own task. Launchers always start static shortcuts with `NEW_TASK | CLEAR_TASK`, which destroyed the running `MainActivity` and any unsaved form. The trampoline forwards only the fixed action, with `CLEAR_TOP | SINGLE_TOP`, so a running `MainActivity` receives `onNewIntent` and keeps the edit underneath.
 - `PocketTheme` provides the palette's `onBackground` as the default content color. Screens drawn directly on the window, such as onboarding, were using Compose's black default, which was unreadable on the dark window background added in this PR.
 - The dashboard and Pockets-list Pocket cards each carry a single accessibility label (name, availability, budget, status). The visible texts it repeats are hidden from accessibility services but stay available to tests. A card clipped at the list edge still announces its Pocket, and screen readers do not read each card twice. The Pockets list "Gestionar" button remains reachable.
@@ -379,13 +379,13 @@ Fixes from `docs/audits/2026-09-28-pr34-review.md`. Behavior that was new rather
 
 ### Changed
 
-- Updated the operational README to link the changelog and name Pixel 10 Pro as the physical release-test device while retaining the managed-device automation workflow.
+- Updated the operational README to link the changelog and describe physical release testing while retaining the managed-device automation workflow.
 - Replaced the non-canonical phrase “Movement transfer between periods” with “moving/editing a Movement between budget periods” in the open-issues implementation plan.
 - Added a README workflow rule requiring future contributors and agents to keep this changelog accurate, including verification limits and unresolved blockers.
 
 ### Verification
 
-- Documentation links and the Pixel 10 Pro testing guidance were reviewed against the repository's physical-device preservation procedure; no device test was run for this documentation-only change.
+- Documentation links and the physical-device testing guidance were reviewed against the repository's data-preservation procedure; no device test was run for this documentation-only change.
 - Static diff checks and independent standards/spec reviews passed.
 - Gradle host tests and the managed-device pass/failure exercise were not run because the required `python3` compact-wrapper prerequisite was unavailable.
 

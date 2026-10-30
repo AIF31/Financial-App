@@ -1,16 +1,16 @@
 # Hardware test record — 2026-09-28 (PR #34)
 
-Checkout: `9819740` (`claude/app-qol-improvements-72075b`, PR #34 head, `1.0.3` / code 4). This record contains no phone serial, personal values, or backup contents.
+Checkout: `9819740` (`claude/app-qol-improvements-72075b`, PR #34 head, `1.0.3` / code 4). Personal device details, settings, backup fingerprints, and ledger contents are omitted; layout measurements needed to reproduce findings are retained.
 
 ## Starting state
 
-The phone was the Samsung SM-S918B from the 2026-09-25 record, on Android API 36 at 1080×2316, density 450, font scale 1.0, dark theme. It was not on a release build. An earlier session had already installed a debug `1.0.3` and the test APK at about 17:11. The app's database folder held migration-test databases, and `pocket.db` had been recreated at 17:15, so the destructive suite had already run on the phone. A backup written at 17:03 was in phone Downloads. The debug app had received writes after that backup, so the user was asked for a fresh one before anything else.
+The physical device ran Android API 36 with a debug `1.0.3` build and the test APK already installed. The tested layout was 1080×2316 at density 450. Migration-test databases showed that destructive instrumentation had already run. Because app writes occurred after the previous backup, a fresh backup was required before proceeding.
 
-The user authorized a full destructive run and chose to end on a release-signed `1.0.3`.
+A full destructive run was authorized, with a release-signed `1.0.3` installation required afterward.
 
 ## Backup
 
-The user exported a fresh in-app backup. It is format version 5 and contains 2 periods, 11 Pockets, and 72 movements, one more movement than the 17:03 backup. SHA-256: `33a394d3c7dcfefd8c951a5d28c301d8d3113d96ee1801be674f07d4eb312a9a`. A copy is protected locally with Windows DPAPI under the user's `PocketKeys` folder. The copy decrypts to the same hash, and the plaintext working copies were deleted. The phone copy still had this hash immediately before the final install.
+A fresh format-version-5 in-app backup was verified privately by SHA-256. A protected local copy was checked against the same digest, and plaintext working copies were deleted. Backup integrity was checked again immediately before the final install. Contents, record counts, storage locations, and fingerprints are omitted.
 
 ## Installation
 
@@ -37,7 +37,7 @@ A layout dump from the app shows the same issue in real use. When a clickable Po
 
 ## Manual checks
 
-Mutating checks ran on the debug build with throwaway data. Read-only checks ran on the signed release with the user's restored ledger.
+Mutating checks ran on the debug build with throwaway data. Read-only checks ran on the signed release after restore; financial values are omitted.
 
 | Check | Result |
 | --- | --- |
@@ -46,11 +46,11 @@ Mutating checks ran on the debug build with throwaway data. Read-only checks ran
 | The launcher "Nuevo gasto" shortcut over an unsaved Movement edit | **Fail**, see below |
 | Movements swipe-to-delete, then "Deshacer" | Pass within the 5 s undo window. The fixed window ignores the accessibility "time to take action" setting. |
 | Date picker (Spanish, year shown, dates before the period disabled) and 24-hour time picker | Pass |
-| Reminder notification `ic_stat_pocket` | Pass. Posted on schedule on channel `daily-review` with `VISIBILITY_PRIVATE`. It renders as a monochrome silhouette in the status bar and the lock-screen icon row. The lock screen shows icons only, so the redacted-content view was not observed. |
+| Reminder notification `ic_stat_pocket` | Pass. Posted on schedule on channel `daily-review` with `VISIBILITY_PRIVATE`. It renders as a monochrome silhouette in the status bar and the lock-screen icon row. The redacted-content view was not observed. |
 | Inicio "Ver detalles" pace metrics | Pass |
 | "Comparar periodos" chart, legend, "Hasta hoy" note, and summary table | Pass. The chart has a spoken text summary, and each table row reads as one label. The x-axis runs to "Día 31" (the longer comparison period) while the note says "de 30". |
 | Dark theme | **Fail** on onboarding, see below. The other screens rendered correctly. |
-| Font scale 1.5 | Usable, with issues: comparison-table amounts wrap mid-number (for example "7,500.0" and "0" on separate lines), and the "Movimientos" navigation label truncates. |
+| Font scale 1.5 | Usable, with issues: comparison-table amounts wrap mid-number, and the "Movimientos" navigation label truncates. |
 | TalkBack spoken pass | Not exercised. The accessibility tree was inspected instead. |
 
 ### Shortcut over an unsaved edit
@@ -68,7 +68,7 @@ The PR's `onNewIntent` path is therefore not reached on a device. The guide's re
 
 ## Final state
 
-The signed release `1.0.3` / code 4 was installed from a clean state. The backup was restored through the app's restore flow; the preview and the result both reported 2 periods, 11 Pockets, and 72 movements. After a force-stop and cold start, Pocket opened past onboarding with all four tabs and 72 movements. `run-as` is rejected because the package is non-debuggable. Font scale is back to 1.0, and no accessibility services are enabled. Notification-listener access, which Pocket had before the reinstall, must be re-granted by the user. The debug reminder schedule was removed with the debug package.
+The signed release `1.0.3` / code 4 was installed from a clean state. The backup was restored through the app's restore flow; preview and result counts agreed in private checks. After a force-stop and cold start, Pocket opened past onboarding with all four tabs. `run-as` is rejected because the package is non-debuggable. Temporary device-setting changes were restored. Reinstall requires notification-listener access to be granted again; the debug reminder schedule was removed with the debug package.
 
 ## Decision on `9819740`
 
@@ -83,7 +83,7 @@ The findings were fixed test-first. Each fix has a Robolectric host test that fa
 - `PocketQualityOfLifeHostTest`:
   - both Pocket cards carry their own label;
   - screen readers hear each card once, and the Pockets-list "Gestionar" button stays reachable;
-  - comparison amounts are not split at font scale 2.0 at the S23 width, with native graphics. The legacy mode fakes glyph widths;
+  - comparison amounts are not split at font scale 2.0 at the tested width, with native graphics. The legacy mode fakes glyph widths;
   - screen readers hear each comparison summary row once.
 
 The full host suite passed (261 tests, 0 failures, 0 errors, 0 skips), and lint, the debug build, and the instrumentation APK build passed.
@@ -100,4 +100,4 @@ A release-signed build with the fixes (final SHA-256 `8615eca4b308756f254b71cd19
 
 The two `PocketAppFlowTest` instrumentation tests were not rerun on the phone, because that needs a debug install and therefore another uninstall. The layout dumps above check the same condition that `SpeakableTextPresentCheck` reported.
 
-Final state: signed `1.0.3` / code 4 containing the fixes, with the user's ledger (72 movements), font scale 1.0, and no accessibility services enabled. Notification-listener access still needs to be re-granted by the user.
+Final verification: signed `1.0.3` / code 4 contained the fixes, restored data was preserved, and temporary device-setting changes were restored. Notification-listener access requires a new grant after reinstall.
