@@ -41,7 +41,7 @@ To install a debug build on a disposable test device:
 ./gradlew :app:installDebug
 ```
 
-Online exchange-rate lookup needs a Banxico SIE API token. Put it in your user-level `~/.gradle/gradle.properties` as `POCKET_BANXICO_TOKEN=<token>`, or set an environment variable with that name. Never put it in the repository's `gradle.properties`. The token is compiled into `BuildConfig` and can be extracted from the APK. Without it, the app builds normally and online conversion reports that the provider is not configured.
+Online exchange-rate lookup needs a Banxico SIE API token. Put it in your user-level `~/.gradle/gradle.properties` as `POCKET_BANXICO_TOKEN=<token>`, or set an environment variable with that name. Never put it in the repository's `gradle.properties`. The token is compiled into `BuildConfig` and can be extracted from the APK. Without it, unsigned builds still succeed and online conversion reports that the provider is not configured. A signed release refuses to build without it.
 
 Launch `Pocket` from the connected emulator or Android device. To run all host tests:
 

@@ -34,6 +34,11 @@ check(releaseSigningValues.none { it.isPresent } || releaseSigningConfigured) {
     "Release signing is partially configured. Set all POCKET_RELEASE_* environment variables."
 }
 
+// Without a token the app still builds, but every MXN conversion fails at runtime, as Pocket 1.0.15 shipped.
+check(!releaseSigningConfigured || banxicoToken.get().isNotBlank()) {
+    "A signed release needs POCKET_BANXICO_TOKEN. Set it in the user-level ~/.gradle/gradle.properties or the environment."
+}
+
 android {
     namespace = "com.aif31.pocket"
     compileSdk = 36
@@ -42,8 +47,8 @@ android {
         applicationId = "com.aif31.pocket"
         minSdk = 26
         targetSdk = 36
-        versionCode = 16
-        versionName = "1.0.15"
+        versionCode = 17
+        versionName = "1.0.16"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "POCKET_BANXICO_TOKEN", banxicoToken.get().asBuildConfigString())
     }
