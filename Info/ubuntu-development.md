@@ -83,8 +83,8 @@ Run this before finishing an active workflow, or create a new workflow and updat
 
 If KVM is unavailable or inaccessible, continue host validation and use the Ubuntu CI managed-device job for device evidence. Containers and WSL may need host virtualization configuration; their lack of acceleration is an infrastructure limitation, not an Ubuntu app-build incompatibility. Record that device tests were not locally executed.
 
-## Windows release tooling and personal devices
+## Signed releases and personal devices
 
-The protected signing-password workflow in `scripts/build-signed-release.ps1` uses Windows DPAPI. Continue to use the [Windows release procedure](release-signing-and-recovery.md) for that protected credential. Ubuntu can assemble a release APK without it; release assembly alone does not produce a verified, permanently signed release.
+`scripts/build-signed-release.sh` builds a verified, permanently signed release on Ubuntu, using a keystore and login-keyring password set up as described in [Release signing and recovery](release-signing-and-recovery.md). Without them, Ubuntu still assembles a release APK, but it is unsigned.
 
 Before installing or testing on a physical Android device from either host, follow [the personal-data preservation procedure](../docs/agents/physical-device-testing.md).

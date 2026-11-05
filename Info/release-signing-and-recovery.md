@@ -12,7 +12,25 @@ The release build uses a dedicated 4096-bit RSA key and APK Signature Scheme v2.
 
 The keystore and credential must remain outside the repository. `.gitignore` blocks common `*.jks` and `*.keystore` files, but operators must still inspect staged files before every commit.
 
-## Build a signed release
+## Build a signed release on Ubuntu
+
+Store the key once. Run this in your own terminal, because it asks for the password. It refuses a keystore whose certificate isn't Pocket's, then keeps the keystore at `~/PocketKeys/pocket-release.jks` with mode 600 and the password in the login keyring. It needs `secret-tool` from `libsecret-tools`:
+
+```bash
+scripts/build-signed-release.sh --setup <path-to-keystore>
+```
+
+Then build:
+
+```bash
+scripts/build-signed-release.sh
+```
+
+The script reads the password from the keyring and passes it only to `keytool` and Gradle. It builds without the Gradle daemon or configuration cache, so neither keeps the signing values. It fails unless the APK is signed by Pocket's certificate and contains the Banxico token. Output is `app/build/outputs/apk/release/app-release.apk`.
+
+Anything running under your account while you're logged in can read the unlocked keyring. A copy on this machine doesn't replace the backups described in [Password and migration recovery](#password-and-migration-recovery).
+
+## Build a signed release on Windows
 
 The preferred Windows command loads the DPAPI-protected password only for the Gradle process and restores the previous environment afterward:
 
@@ -35,6 +53,8 @@ The Gradle build accepts these variables when manual configuration is necessary:
 
 All four must be present. A partial configuration intentionally fails. With none present, `assembleRelease` creates an unsigned APK for non-distribution checks.
 
+A signed release also needs `POCKET_BANXICO_TOKEN`, from the user-level `gradle.properties` or the environment, and fails without it. Pocket 1.0.15 shipped without a token, so every conversion involving MXN failed with **Proveedor de tipo de cambio no configurado**.
+
 ## Verify the APK
 
 Use the newest installed Android SDK Build Tools directory:
@@ -47,6 +67,8 @@ $buildTools = Get-ChildItem "$env:LOCALAPPDATA\Android\Sdk\build-tools" -Directo
 ```
 
 Confirm that v2 verification succeeds and the certificate SHA-256 matches the independently stored release fingerprint. A release install should reject `run-as com.aif31.pocket` because it is non-debuggable.
+
+Also confirm online conversion in the built APK. Turn on **Conversión en línea**, then enter an MXN expense in a SAR period. It must show a converted amount with `BANXICO_FIX_SF43718` as its source. USD to SAR uses the fixed SAMA peg and proves nothing here, because it never calls Banxico.
 
 ## Publish the APK
 

@@ -2,6 +2,30 @@
 
 Notable repository changes are recorded here for future maintainers.
 
+## 2026-11-03
+
+### Signed releases must include the Banxico token (1.0.16)
+
+- **Problem.** The published `Pocket-v1.0.15.apk` has no Banxico token. With **Conversión en línea** on, every conversion involving MXN failed with **Proveedor de tipo de cambio no configurado** and Save stayed disabled, so no wrong amounts were recorded. The Settings switch only records consent; the token is compiled in. USD to SAR kept working because it uses the fixed SAMA peg. The published 1.0.14 APK contains the token, and 1.0.0 and 1.0.5 carry a token-shaped string that 1.0.15 lacks.
+- **Fix.** `app/build.gradle.kts` now fails a signed build when `POCKET_BANXICO_TOKEN` is blank. Unsigned builds, including CI, still succeed without it. The release procedure gains a conversion check on the built APK.
+- **Ubuntu releases.** `scripts/build-signed-release.sh` builds a signed release on Ubuntu from a local keystore and a password in the login keyring. It refuses any certificate other than Pocket's, and checks the signature and the token in the finished APK.
+- **Tests.** `BankAndExchangeConversionTest` covers all six currency pairs, MXN and USD bank alerts through the parser, a missing token, and conversion turned off. It uses a fake transport and makes no live call.
+- Verification:
+  - A signed configuration with a blank token failed at configuration with the new message.
+  - On a disposable API 35 emulator, published 1.0.15 reproduced the error for MXN 20.00. A release build of this change, minified and signed with a throwaway key, used the live Banxico FIX of 18.7592 for 2026-11-03:
+
+    | Source | Input | Accounting amount |
+    | --- | --- | --- |
+    | Typed | MXN 20.00 | SAR 4.00 |
+    | Typed | USD 20.00 | SAR 75.00 |
+    | Typed | SAR 100.00 | MXN 500.25 |
+    | Typed | USD 100.00 | MXN 1,875.92 |
+    | Bank alert | MXN 20.00 | SAR 4.00 |
+    | Bank alert | USD 12.50 | SAR 46.88 |
+
+  - Bank alerts were real notifications posted by the shell, marked as a selected source by editing preferences on that emulator.
+  - Not verified on a device: the daily rate alert, which uses the same token, and SAR or MXN to USD, which only host tests cover. Nothing was run on a physical device or with the permanent signing key.
+
 ## 2026-10-30
 
 ### Keyboard insets, notification permission recovery, Navigation 3 display and list performance (1.0.15)
